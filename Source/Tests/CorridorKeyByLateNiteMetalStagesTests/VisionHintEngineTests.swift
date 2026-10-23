@@ -20,6 +20,21 @@ import CorridorKeyToolboxLogic
 @Suite(.serialized)
 struct VisionHintEngineTests {
 
+    @Test("A cached Vision engine does not retain its owning Metal entry")
+    func cachedEngineReleasesItsOwner() throws {
+        weak var observedEntry: MetalDeviceCacheEntry?
+        weak var observedEngine: VisionHintEngine?
+        try autoreleasepool {
+            let entry = try TestHarness.makeEntryOrSkip()
+            let engine = try #require(entry.visionHintEngine() as? VisionHintEngine)
+            observedEntry = entry
+            observedEngine = engine
+            #expect(observedEntry != nil && observedEngine != nil)
+        }
+        #expect(observedEntry == nil)
+        #expect(observedEngine == nil)
+    }
+
     /// Smoke test: engine builds, processes a synthetic "subject" texture,
     /// and either returns a mask with the right format or returns nil
     /// (Vision sometimes finds no salient subject in synthetic scenes).

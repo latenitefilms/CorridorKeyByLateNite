@@ -203,7 +203,7 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
         _ = Self.configureMemoryCache
         self.cacheEntry = cacheEntry
         self.backendDisplayName = "CorridorKey v2 · MLX on \(cacheEntry.device.name)"
-        self.guideSourceDescription = "Auto rough fallback"
+        self.guideSourceDescription = "Foreground hint"
     }
 
     /// Releases MLX's internal buffer cache. Called by the analyser at the

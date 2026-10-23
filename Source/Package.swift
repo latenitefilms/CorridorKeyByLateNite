@@ -206,14 +206,59 @@ let package = Package(
                 "CorridorKeyToolboxLogic",
                 .product(name: "MLX", package: "mlx-swift")
             ],
-            path: "Tests/CorridorKeyByLateNiteInferenceTests",
+            // Include the real host adapters in the serial inference suite.
+            // This tests cached playback without launching a sandboxed app.
+            path: ".",
+            exclude: [
+                "BenchmarkRunner", "Benchmarks", "Configuration",
+                "CorridorKeyByLateNite.xcodeproj", "default.metallib",
+                "Tests/BenchmarkRunnerTests", "Tests/WrapperAppTests",
+                "Tests/CorridorKeyByLateNiteLogicTests", "Tests/CorridorKeyByLateNiteMetalStagesTests",
+                "CorridorKeyByLateNite/Plugin/Inference", "CorridorKeyByLateNite/Plugin/Inspector",
+                "CorridorKeyByLateNite/Plugin/Metal", "CorridorKeyByLateNite/Plugin/Parameters",
+                "CorridorKeyByLateNite/Plugin/PostProcess", "CorridorKeyByLateNite/Plugin/Resources",
+                "CorridorKeyByLateNite/Plugin/Shared", "CorridorKeyByLateNite/Plugin/Render/RenderStages.swift",
+                "CorridorKeyByLateNite/Plugin/Info.plist", "CorridorKeyByLateNite/Plugin/main.swift",
+                "CorridorKeyByLateNite/Plugin/PluginLog.swift", "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNite.entitlements",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn.swift",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+Properties.swift",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+Render.swift",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+RenderRects.swift",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+PluginState.swift",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+FxAnalyzer.swift",
+                "CorridorKeyByLateNite/WrapperApp/Resources", "CorridorKeyByLateNite/WrapperApp/CorridorKey.icon",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Views", "CorridorKeyByLateNite/WrapperApp/Standalone/Model",
+                "CorridorKeyByLateNite/WrapperApp/en.lproj", "CorridorKeyByLateNite/WrapperApp/Info.plist",
+                "CorridorKeyByLateNite/WrapperApp/WrapperApp.entitlements", "CorridorKeyByLateNite/WrapperApp/WrapperApp-Bridging-Header.h",
+                "CorridorKeyByLateNite/WrapperApp/WelcomeView.swift", "CorridorKeyByLateNite/WrapperApp/Credits.rtf",
+                "CorridorKeyByLateNite/WrapperApp/CorridorKeyByLateNiteApp.swift", "CorridorKeyByLateNite/WrapperApp/MotionTemplateInstaller.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/ProResExporter.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/ScreenColorAutoDetector.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/BackdropImageLoader.swift"
+            ],
+            sources: [
+                "Tests/CorridorKeyByLateNiteInferenceTests/InferenceTestHarness.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/MLXBridgeRungTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/MLXParityTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/MLXMemoryTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/MatteOrientationTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/V2ModelContractTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/SharedMLXBridgeRegistryWaitTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/StandalonePipelineTests.swift",
+                "CorridorKeyByLateNite/Plugin/Render/RenderPipeline.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StandaloneRenderEngine.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/AnalysisRunner.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/VideoSource.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/PixelBufferTextureBridge.swift"
+            ],
             // Read the validated v2 artifact from production resources rather
             // than copying its shared weights into every test build product.
             resources: [
-                .copy("Resources/README.md")
+                .copy("Tests/CorridorKeyByLateNiteInferenceTests/Resources/README.md")
             ],
             swiftSettings: [
-                .swiftLanguageMode(.v6)
+                .swiftLanguageMode(.v6),
+                .define("CORRIDOR_KEY_HEADLESS_TESTS")
             ]
         )
     ]

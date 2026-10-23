@@ -20,6 +20,10 @@ import Foundation
 import CoreMedia
 import CoreVideo
 
+#if CORRIDOR_KEY_HEADLESS_TESTS
+@testable import CorridorKeyToolboxLogic
+#endif
+
 /// Per-frame storage built up during the analysis pass. Exposed via
 /// `EditorProject.matteCache` so previews can reach in for a cached
 /// matte by frame index instead of triggering MLX on every scrub.
@@ -66,6 +70,7 @@ actor AnalysisRunner {
         state: PluginStateData,
         eventHandler: @Sendable (AnalysisRunnerEvent) -> Void
     ) async {
+        defer { renderEngine.releaseAnalysisCache() }
         let startedAt = Date()
         let info = videoSource.info
         let frameCount = videoSource.totalFrameCount()
@@ -85,6 +90,11 @@ actor AnalysisRunner {
         defer { frameReader.cancel() }
 
         var frameIndex = 0
+        var temporalHistory = TemporalBlender.History()
+        let temporalConfiguration = TemporalBlender.Configuration(
+            strength: state.temporalStabilityEnabled ? Float(state.temporalStabilityStrength) : 0,
+            motionThreshold: 0.05
+        )
         while !Task.isCancelled {
             let frame: ReaderFrame?
             do {
@@ -117,8 +127,21 @@ actor AnalysisRunner {
                 return
             }
 
+            var alpha = output.alphaFloats
+            let didBlend = temporalHistory.apply(
+                alpha: &alpha, source: output.sourceFloats,
+                width: output.width, height: output.height, frameIndex: frameIndex,
+                configuration: temporalConfiguration
+            )
+            let blob: Data
+            do {
+                blob = didBlend ? try MatteCodec.encode(alpha: alpha, width: output.width, height: output.height) : output.blob
+            } catch {
+                eventHandler(.failed(String(describing: error)))
+                return
+            }
             let entry = MatteCacheEntry(
-                blob: output.blob,
+                blob: blob,
                 width: output.width,
                 height: output.height,
                 inferenceResolution: output.inferenceResolution

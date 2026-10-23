@@ -44,9 +44,7 @@ final class AnalysisSessionState: @unchecked Sendable {
     /// Reset when the session resets or when the inference resolution
     /// changes (which drops previous-frame sizing and forces the blender
     /// to restart from the next "current" frame).
-    var previousTemporalAlpha: [Float]?
-    var previousTemporalSource: [Float]?
-    var previousTemporalFrameIndex: Int?
+    var temporalHistory = TemporalBlender.History()
 
     /// Cached temporal-blend configuration captured at setup time. Reading
     /// parameter values per frame would require a retrieval API round-trip
@@ -94,9 +92,7 @@ final class AnalysisSessionState: @unchecked Sendable {
         matteWidth = 0
         matteHeight = 0
         mattes.removeAll(keepingCapacity: false)
-        previousTemporalAlpha = nil
-        previousTemporalSource = nil
-        previousTemporalFrameIndex = nil
+        temporalHistory = TemporalBlender.History()
         temporalStabilityEnabled = false
         temporalStabilityStrength = 0.5
         hintModeRaw = HintMode.appleVision.rawValue
@@ -330,9 +326,7 @@ extension CorridorKeyToolboxPlugIn {
         let temporalStrength = session.temporalStabilityStrength
         let hintModeRaw = session.hintModeRaw
         let hintPointSet = session.hintPointSet
-        let cachedPreviousAlpha = session.previousTemporalAlpha
-        let cachedPreviousSource = session.previousTemporalSource
-        let cachedPreviousFrameIndex = session.previousTemporalFrameIndex
+        var temporalHistory = session.temporalHistory
         session.lock.unlock()
 
         guard frameCount > 0 else {
@@ -432,27 +426,14 @@ extension CorridorKeyToolboxPlugIn {
         // Quality mid-pass) invalidates the prior state — drop it silently
         // and let the next frame seed the EMA afresh.
         var currentAlpha = extracted.alpha
-        if needsTemporalReadback,
-           let previousAlpha = cachedPreviousAlpha,
-           let previousSource = cachedPreviousSource,
-           let previousFrameIndex = cachedPreviousFrameIndex,
-           let currentSource = extracted.source,
-           previousAlpha.count == currentAlpha.count,
-           previousSource.count == currentSource.count,
-           previousFrameIndex + 1 == frameIndex {
-            TemporalBlender.applyInPlace(
-                currentAlpha: &currentAlpha,
-                previousAlpha: previousAlpha,
-                currentSource: currentSource,
-                previousSource: previousSource,
-                width: extracted.width,
-                height: extracted.height,
-                configuration: TemporalBlender.Configuration(
-                    strength: Float(temporalStrength),
-                    motionThreshold: 0.05
-                )
+        temporalHistory.apply(
+            alpha: &currentAlpha, source: extracted.source,
+            width: extracted.width, height: extracted.height, frameIndex: frameIndex,
+            configuration: TemporalBlender.Configuration(
+                strength: temporalEnabled ? Float(temporalStrength) : 0,
+                motionThreshold: 0.05
             )
-        }
+        )
 
         let encoded = try MatteCodec.encode(
             alpha: currentAlpha,
@@ -466,15 +447,7 @@ extension CorridorKeyToolboxPlugIn {
         session.matteHeight = extracted.height
         session.mattes[frameIndex] = encoded
         session.analyzedCount = session.mattes.count
-        if needsTemporalReadback {
-            session.previousTemporalAlpha = currentAlpha
-            session.previousTemporalSource = extracted.source
-            session.previousTemporalFrameIndex = frameIndex
-        } else {
-            session.previousTemporalAlpha = nil
-            session.previousTemporalSource = nil
-            session.previousTemporalFrameIndex = nil
-        }
+        session.temporalHistory = temporalHistory
         let shouldFlush = (session.analyzedCount % 10) == 0 || session.analyzedCount == session.frameCount
         let snapshot = shouldFlush ? session.snapshotLocked() : nil
         let analyzedCountSnapshot = session.analyzedCount

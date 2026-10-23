@@ -20,6 +20,50 @@ import simd
 
 public enum TemporalBlender {
 
+    /// Per-analysis history shared by both hosts. A new value starts a new
+    /// clip/pass; missing source, disabled blending, gaps or dimension changes
+    /// cannot reuse stale pixels. Owners serialize mutations on their worker.
+    public struct History: Sendable {
+        private var previousAlpha: [Float]?
+        private var previousSource: [Float]?
+        private var previousFrameIndex: Int?
+        private var previousWidth = 0
+        private var previousHeight = 0
+
+        /// Creates an empty history for one sequential analysis pass.
+        public init() {}
+
+        /// Stabilizes alpha in source row order and retains the blended result
+        /// for the next frame. Returns whether a previous frame was blended.
+        @discardableResult
+        public mutating func apply(
+            alpha: inout [Float], source: [Float]?, width: Int, height: Int,
+            frameIndex: Int, configuration: Configuration
+        ) -> Bool {
+            guard !configuration.isNoOp, let source else {
+                self = History()
+                return false
+            }
+            var didBlend = false
+            if let previousAlpha, let previousSource, let previousFrameIndex,
+               previousFrameIndex + 1 == frameIndex,
+               previousWidth == width, previousHeight == height {
+                TemporalBlender.applyInPlace(
+                    currentAlpha: &alpha, previousAlpha: previousAlpha,
+                    currentSource: source, previousSource: previousSource,
+                    width: width, height: height, configuration: configuration
+                )
+                didBlend = true
+            }
+            previousAlpha = alpha
+            previousSource = source
+            previousFrameIndex = frameIndex
+            previousWidth = width
+            previousHeight = height
+            return didBlend
+        }
+    }
+
     /// Parameters for a single blend call.
     public struct Configuration: Sendable, Equatable {
         /// Weight assigned to the previous frame's alpha when the pixel is

@@ -34,6 +34,11 @@ import Metal
 import CoreMedia
 import simd
 
+#if CORRIDOR_KEY_HEADLESS_TESTS
+@testable import CorridorKeyToolboxLogic
+@testable import CorridorKeyToolboxMetalStages
+#endif
+
 #if FXPLUG_HOST
 /// Input bundle for an FxPlug render. Value-type keeps the orchestrator
 /// easy to reason about; `FxImageTile` is passed along because we only
@@ -246,6 +251,8 @@ final class RenderPipeline: @unchecked Sendable {
         commandQueue: any MTLCommandQueue,
         readbackSource: Bool = false
     ) throws -> AnalysisExtraction {
+        entry.beginAnalysisFrame()
+        defer { entry.endAnalysisFrame() }
         // Manual hint mode requires at least one user-placed hint —
         // an empty hint channel would feed MLX a degenerate prior and
         // the analyser would fill the cache with garbage. Fail fast
@@ -276,13 +283,11 @@ final class RenderPipeline: @unchecked Sendable {
             gamutTransform: gamutTransform,
             inferenceResolution: inferenceResolution
         )
+        defer {
+            pre.rotatedSource?.returnManually()
+            pre.rawSourceAtInferenceResolution.returnManually()
+        }
 
-        let cacheKey = InferenceCacheKey(
-            frameTime: renderTime,
-            screenColorRaw: state.screenColor.rawValue,
-            inferenceResolution: inferenceResolution,
-            cacheEntry: entry
-        )
         let inferenceResult = try inferenceCoordinator.runInference(
             request: KeyingInferenceRequest(
                 normalisedInputBuffer: pre.normalisedInputBuffer,
@@ -290,8 +295,7 @@ final class RenderPipeline: @unchecked Sendable {
                 inferenceResolution: inferenceResolution
             ),
             screenColor: state.screenColor,
-            cacheEntry: entry,
-            cacheKey: cacheKey
+            cacheEntry: entry
         )
         let inferenceOutput = inferenceResult.output
 
@@ -323,9 +327,6 @@ final class RenderPipeline: @unchecked Sendable {
         // alpha. The inference output textures live outside the pool, and
         // the normalised input buffer is cached per-rung on the entry so
         // it is not returned here.
-        pre.rotatedSource?.returnManually()
-        pre.rawSourceAtInferenceResolution.returnManually()
-
         return AnalysisExtraction(
             alpha: alpha,
             source: sourceReadback,
@@ -759,35 +760,23 @@ final class RenderPipeline: @unchecked Sendable {
         cachedWidth: Int,
         cachedHeight: Int
     ) throws -> RenderReport {
-        guard let preCommandBuffer = context.commandQueue.makeCommandBuffer() else {
-            throw MetalDeviceCacheError.commandBufferCreationFailed
+        // Cached analysis currently stores alpha only. Keep the source RGB at
+        // its native resolution: shrinking it to the model grid and expanding
+        // it again discarded fine detail and added two GPU passes per frame.
+        var rotatedSourcePooled: PooledTexture?
+        if !screenTransform.isIdentity {
+            guard let preCommandBuffer = context.commandQueue.makeCommandBuffer() else {
+                throw MetalDeviceCacheError.commandBufferCreationFailed
+            }
+            preCommandBuffer.label = "CorridorKey by LateNite Cached Screen Transform"
+            rotatedSourcePooled = try RenderStages.applyScreenMatrix(
+                source: context.sourceTexture, matrix: screenTransform.forwardMatrix,
+                isIdentity: false, entry: context.entry, commandBuffer: preCommandBuffer
+            )
+            try commitAndWait(commandBuffer: preCommandBuffer)
         }
-        preCommandBuffer.label = "CorridorKey by LateNite Cached Pre-Inference"
-
-        let rotatedSourcePooled = try RenderStages.applyScreenMatrix(
-            source: context.sourceTexture,
-            matrix: screenTransform.forwardMatrix,
-            isIdentity: screenTransform.isIdentity,
-            entry: context.entry,
-            commandBuffer: preCommandBuffer
-        )
+        defer { rotatedSourcePooled?.returnManually() }
         let rotatedSource = rotatedSourcePooled?.texture ?? context.sourceTexture
-
-        let rawSourcePooled = try RenderStages.resample(
-            source: rotatedSource,
-            targetWidth: inferenceResolution,
-            targetHeight: inferenceResolution,
-            pixelFormat: .rgba16Float,
-            method: inputs.state.upscaleMethod,
-            entry: context.entry,
-            commandBuffer: preCommandBuffer
-        )
-        let rawSourceAtInferenceResolution = rawSourcePooled?.texture ?? rotatedSource
-
-        try commitAndWait(commandBuffer: preCommandBuffer)
-
-        rotatedSourcePooled?.returnManually()
-        // rawSourcePooled stays alive — we need it as the foreground stand-in.
 
         let alphaPooled = try uploadCachedAlpha(
             blob: cachedBlob,
@@ -795,6 +784,7 @@ final class RenderPipeline: @unchecked Sendable {
             height: cachedHeight,
             entry: context.entry
         )
+        defer { alphaPooled.returnManually() }
 
         try runPostInference(
             inputs: inputs,
@@ -802,11 +792,8 @@ final class RenderPipeline: @unchecked Sendable {
             screenTransform: screenTransform,
             rotatedSource: rotatedSource,
             alphaAtInferenceResolution: alphaPooled.texture,
-            foregroundAtInferenceResolution: rawSourceAtInferenceResolution
+            foregroundAtInferenceResolution: rotatedSource
         )
-
-        rawSourcePooled?.returnManually()
-        alphaPooled.returnManually()
 
         return RenderReport(
             backendDescription: "Analysed Cache (\(inferenceResolution)px)",
@@ -1070,6 +1057,19 @@ final class RenderPipeline: @unchecked Sendable {
         )
         let refinedMatte = attenuatedMattePooled?.texture ?? refinedMatteRaw
 
+        let passthroughMattePooled: PooledTexture?
+        if inputs.state.sourcePassthroughEnabled {
+            passthroughMattePooled = try RenderStages.makePassthroughMatte(
+                matte: refinedMatte,
+                erodeRadius: inputs.state.destinationPixelRadius(fromNormalized: inputs.state.passthroughErodeNormalized),
+                blurRadius: inputs.state.destinationPixelRadius(fromNormalized: inputs.state.passthroughBlurNormalized),
+                entry: context.entry, commandBuffer: postCommandBuffer
+            )
+        } else {
+            passthroughMattePooled = nil
+        }
+        defer { passthroughMattePooled?.returnManually() }
+
         // 4. Pre-blur the source once when light-wrap is on so the fused
         // post-process pass has a blurred RGB input to sample.
         var blurredSourcePooled: PooledTexture?
@@ -1142,6 +1142,7 @@ final class RenderPipeline: @unchecked Sendable {
             sourceRGB: rotatedSource,
             matte: refinedMatte,
             blurredSource: blurredSourceTexture,
+            passthroughMatte: passthroughMattePooled?.texture,
             config: fusedForegroundConfig,
             entry: context.entry,
             commandBuffer: postCommandBuffer

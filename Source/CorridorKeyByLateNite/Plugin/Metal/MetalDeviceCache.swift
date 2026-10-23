@@ -188,6 +188,18 @@ final class CorridorKeyRenderPipelines: Sendable {
 /// by an `NSLock` (`queueLock`, `renderPipelinesLock`, `weightsLock`,
 /// `normalizedInputLock`, `mpsLock`, `sharedEventValueLock`).
 final class MetalDeviceCacheEntry: @unchecked Sendable {
+    /// The normalized input and analysis readback buffers are reused across
+    /// plug-in instances. Their complete producer/consumer interval must be
+    /// exclusive, including GPU preprocessing before the MLX engine's lock.
+    private let analysisFrameLock = NSLock()
+
+    /// Acquires the per-device analysis scratch buffers for one frame.
+    /// Pair with `endAnalysisFrame()` in a defer on the same worker thread.
+    func beginAnalysisFrame() { analysisFrameLock.lock() }
+
+    /// Releases analysis scratch buffers after inference and readback finish.
+    func endAnalysisFrame() { analysisFrameLock.unlock() }
+
     let device: any MTLDevice
     let library: any MTLLibrary
     let computePipelines: CorridorKeyComputePipelines
@@ -256,9 +268,23 @@ final class MetalDeviceCacheEntry: @unchecked Sendable {
     let sharedEventListener: MTLSharedEventListener
 
     convenience init(device: any MTLDevice) throws {
+#if CORRIDOR_KEY_SPM_MIRROR
+        let bundle = MetalStagesResourceBundleAccessor.bundle()
+        guard let shaderURL = bundle.url(forResource: "CorridorKeyShaders", withExtension: "metal"),
+              let headerURL = bundle.url(forResource: "CorridorKeyShaderTypes", withExtension: "h") else {
+            throw MetalDeviceCacheError.missingDefaultLibrary
+        }
+        let header = try String(contentsOf: headerURL, encoding: .utf8)
+        let shader = try String(contentsOf: shaderURL, encoding: .utf8)
+        let library = try device.makeLibrary(
+            source: header + "\n" + shader.replacing(#"#include "CorridorKeyShaderTypes.h""#, with: ""),
+            options: nil
+        )
+#else
         guard let library = device.makeDefaultLibrary() else {
             throw MetalDeviceCacheError.missingDefaultLibrary
         }
+#endif
         try self.init(device: device, library: library)
     }
 
@@ -950,14 +976,13 @@ final class MetalDeviceCache: @unchecked Sendable {
 
     func entry(for device: any MTLDevice) throws -> MetalDeviceCacheEntry {
         entriesLock.lock()
+        defer { entriesLock.unlock() }
         let existing = entries[device.registryID]
         if let existing {
-            entriesLock.unlock()
             return existing
         }
         let newEntry = try MetalDeviceCacheEntry(device: device)
         entries[device.registryID] = newEntry
-        entriesLock.unlock()
         // First-touch MPS pre-warm runs off-thread so the calling
         // render path doesn't pay the ~50–100 ms MPS pipeline-compile
         // stall on its first frame. Best-effort; if the dispatched

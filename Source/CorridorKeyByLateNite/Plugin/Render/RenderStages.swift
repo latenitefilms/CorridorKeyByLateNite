@@ -577,6 +577,55 @@ enum RenderStages {
 
     // MARK: - Source passthrough
 
+    /// Builds the interior-only source mixing mask. Erosion keeps original
+    /// screen-contaminated edge pixels out; blur softens that transition.
+    /// The visible output alpha is not modified by these interior controls.
+    static func makePassthroughMatte(
+        matte: any MTLTexture, erodeRadius: Float, blurRadius: Float,
+        entry: MetalDeviceCacheEntry, commandBuffer: any MTLCommandBuffer
+    ) throws -> PooledTexture? {
+        let erodePixels = max(0, Int(erodeRadius.rounded()))
+        let shouldBlur = blurRadius > 0.5
+        guard erodePixels > 0 || shouldBlur else { return nil }
+        var allocated: [PooledTexture] = []
+        func allocate() throws -> PooledTexture {
+            guard let texture = entry.texturePool.acquire(
+                width: matte.width, height: matte.height, pixelFormat: .r16Float
+            ) else { throw MetalDeviceCacheError.textureAllocationFailed }
+            allocated.append(texture)
+            return texture
+        }
+        do {
+            let scratch = try allocate()
+            var current: any MTLTexture = matte
+            var result: PooledTexture?
+            if erodePixels > 0 {
+                let eroded = try allocate()
+                try MatteRefiner.applyMorphology(
+                    source: current, intermediate: scratch.texture, destination: eroded.texture,
+                    radius: -erodePixels, entry: entry, commandBuffer: commandBuffer
+                )
+                current = eroded.texture
+                result = eroded
+            }
+            if shouldBlur {
+                let blurred = try allocate()
+                try MatteRefiner.applyGaussianBlur(
+                    source: current, intermediate: scratch.texture, destination: blurred.texture,
+                    radiusPixels: blurRadius, entry: entry, commandBuffer: commandBuffer
+                )
+                result = blurred
+            }
+            for texture in allocated where texture !== result {
+                texture.returnOnCompletion(of: commandBuffer)
+            }
+            return result
+        } catch {
+            for texture in allocated { texture.returnManually() }
+            throw error
+        }
+    }
+
     static func sourcePassthrough(
         foreground: any MTLTexture,
         source: any MTLTexture,
@@ -727,6 +776,7 @@ enum RenderStages {
         sourceRGB: any MTLTexture,
         matte: any MTLTexture,
         blurredSource: any MTLTexture,
+        passthroughMatte: (any MTLTexture)? = nil,
         config: FusedForegroundConfig,
         entry: MetalDeviceCacheEntry,
         commandBuffer: any MTLCommandBuffer
@@ -749,6 +799,7 @@ enum RenderStages {
         encoder.setTexture(sourceRGB, index: Int(CKTextureIndexSource.rawValue))
         encoder.setTexture(matte, index: Int(CKTextureIndexMatte.rawValue))
         encoder.setTexture(blurredSource, index: Int(CKTextureIndexHint.rawValue))
+        encoder.setTexture(passthroughMatte ?? matte, index: Int(CKTextureIndexCoarse.rawValue))
         encoder.setTexture(output.texture, index: Int(CKTextureIndexOutput.rawValue))
 
         var params = CKForegroundPostProcessParams(

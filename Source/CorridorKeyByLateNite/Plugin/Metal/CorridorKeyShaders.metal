@@ -1078,6 +1078,7 @@ kernel void corridorKeyForegroundPostProcessKernel(
     texture2d<float, access::read> sourceRGB [[texture(CKTextureIndexSource)]],
     texture2d<float, access::read> matte [[texture(CKTextureIndexMatte)]],
     texture2d<float, access::read> blurredSource [[texture(CKTextureIndexHint)]],
+    texture2d<float, access::read> passthroughMatte [[texture(CKTextureIndexCoarse)]],
     texture2d<float, access::write> destination [[texture(CKTextureIndexOutput)]],
     constant CKForegroundPostProcessParams &params [[buffer(0)]],
     uint2 gid [[thread_position_in_grid]]
@@ -1092,9 +1093,10 @@ kernel void corridorKeyForegroundPostProcessKernel(
     // `corridorKeySourcePassthroughKernel` — when the matte says
     // "full foreground" the user's original source pixels show through
     // instead of the network-reconstructed foreground.
-    if (params.sourcePassthroughEnabled != 0 && m > 0.0) {
+    if (params.sourcePassthroughEnabled != 0) {
+        float interior = saturate(passthroughMatte.read(gid).r);
         float3 src = sourceRGB.read(gid).rgb;
-        rgb = m * src + (1.0 - m) * rgb;
+        rgb = interior * src + (1.0 - interior) * rgb;
     }
 
     // Stage 2: light wrap. Blurred-source ambient additively blends

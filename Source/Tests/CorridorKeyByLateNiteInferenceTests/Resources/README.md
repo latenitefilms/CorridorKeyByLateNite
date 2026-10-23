@@ -24,3 +24,24 @@ shared model ownership and warm-up failures. V2 weights occupy about 2.3 GiB;
 cached GPU temporaries are additional and are released after analysis.
 Python conversion tests independently compare model output with the official
 PyTorch reference. See `Tools/CorridorKeyV2/README.md` for conversion instructions.
+
+The serial suite also compiles the actual standalone analysis/renderer adapters
+with `CORRIDOR_KEY_HEADLESS_TESTS`. This tests the cache boundary and composition,
+where model-only orientation tests cannot catch host-specific extra row flips.
+The SPM Metal cache compiles the shipped shaders from source; the app and FxPlug
+continue to use Xcode's compiled library.
+
+`StandalonePipelineTests` requires these local benchmark clips:
+
+- `LLM Resources/Benchmark/NikoDruid/Niko - 4 frames.mov`
+- `LLM Resources/Benchmark/JallenClownWater/Input/HardestShotEver - 1sec.mov`
+
+Run only the host integration tests with:
+
+```sh
+swift test --package-path Source --filter StandalonePipelineTests
+```
+
+HardestShotEver writes `CorridorKey-v2-HardestShotEver.png` to the process's
+temporary directory and prints the absolute path. Panels are source, matte, and
+processed foreground over white. It uses Maximum quality and Apple Vision.

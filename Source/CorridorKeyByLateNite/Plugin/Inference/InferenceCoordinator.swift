@@ -15,11 +15,9 @@
 //  (`extractHint` / `combineAndNormaliseIntoBuffer`). It is never used
 //  as a final output matte.
 //
-//  A single-frame MLX output cache is layered on top: if the user
-//  changes a post-process parameter (output mode, despill, matte
-//  sliders) without moving the playhead or swapping screen colour, the
-//  coordinator returns the previous MLX result instead of paying for
-//  another ~500 ms inference.
+//  Analysis always evaluates the current inputs. Playback and post-process
+//  edits use the persisted matte cache and never call this coordinator.
+//  A timestamp alone cannot identify model input across clips or hint edits.
 //
 
 import Foundation
@@ -28,30 +26,6 @@ import CoreMedia
 #if CORRIDOR_KEY_SPM_MIRROR
 import CorridorKeyToolboxLogic
 #endif
-
-/// Cache key for the single-frame MLX output cache. Anything that changes the
-/// neural model's input must participate in the hash; anything purely
-/// post-process (output mode, despill strength, etc.) must not.
-struct InferenceCacheKey: Hashable, Sendable {
-    let frameTimeValue: Int64
-    let frameTimeTimescale: Int32
-    let screenColorRaw: Int
-    let inferenceResolution: Int
-    let cacheEntryID: ObjectIdentifier
-
-    init(
-        frameTime: CMTime,
-        screenColorRaw: Int,
-        inferenceResolution: Int,
-        cacheEntry: MetalDeviceCacheEntry
-    ) {
-        self.frameTimeValue = frameTime.value
-        self.frameTimeTimescale = frameTime.timescale
-        self.screenColorRaw = screenColorRaw
-        self.inferenceResolution = inferenceResolution
-        self.cacheEntryID = ObjectIdentifier(cacheEntry)
-    }
-}
 
 /// Result bundle from `runInference`. The `engineDescription` records
 /// **which engine actually processed this frame** (MLX or the rough-matte
@@ -80,12 +54,6 @@ final class InferenceCoordinator: @unchecked Sendable {
     private var trackedDeviceRegistryID: UInt64 = 0
     private var trackedRung: Int = 0
     private var trackedScreenColor: ScreenColor = .green
-
-    /// Single-frame cache of the latest MLX inference output. Used so a
-    /// post-process slider tweak at the same play-head doesn't re-run
-    /// the model — see `cachedOutput(for:)`.
-    private var cachedMLXKey: InferenceCacheKey?
-    private var cachedMLXOutput: KeyingInferenceOutput?
 
     /// Human-readable backend summary for diagnostics.
     var backendDescription: String {
@@ -136,24 +104,14 @@ final class InferenceCoordinator: @unchecked Sendable {
         )
     }
 
-    /// Runs inference for a single frame. Uses MLX when the shared
-    /// registry has a warm engine for the requested `(device, rung)`;
-    /// otherwise synchronously produces a rough matte. Warm-up is
-    /// requested in the background so subsequent frames can use MLX.
-    ///
-    /// Passes `cacheKey` so we can short-circuit repeated inferences at
-    /// the same play-head when only post-process parameters have
-    /// changed.
+    /// Evaluates the current frame and hint with the shared v2 model,
+    /// waiting for warm-up if necessary. Analysis never substitutes a
+    /// chroma matte or reuses another input's prediction.
     func runInference(
         request: KeyingInferenceRequest,
         screenColor: ScreenColor,
-        cacheEntry: MetalDeviceCacheEntry,
-        cacheKey: InferenceCacheKey
+        cacheEntry: MetalDeviceCacheEntry
     ) throws -> InferenceRunResult {
-        if let cached = cachedOutput(for: cacheKey) {
-            return InferenceRunResult(output: cached, engineDescription: "MLX cache hit")
-        }
-
         guard Self.mlxEnabled else {
             throw KeyingInferenceError.modelUnavailable("MLX is disabled in this build.")
         }
@@ -187,7 +145,6 @@ final class InferenceCoordinator: @unchecked Sendable {
 
         let output = try makeOutputTextures(request: request, cacheEntry: cacheEntry)
         try engine.run(request: request, output: output)
-        storeCachedOutput(output, for: cacheKey)
         return InferenceRunResult(output: output, engineDescription: engine.backendDisplayName)
     }
 
@@ -207,17 +164,11 @@ final class InferenceCoordinator: @unchecked Sendable {
         )
     }
 
-    /// Releases the cached MLX output and asks MLX to drain its internal
-    /// Metal buffer cache. Called by the analyser at the end of an
-    /// Analyse Clip pass so memory doesn't ramp across long editing
-    /// sessions. The MLX cache is documented to grow unboundedly across
-    /// successive inferences with different shapes — clearing it once
-    /// per session strikes the right balance: zero per-frame thrashing,
-    /// memory back to baseline once the user is done analysing.
+    /// Drains reusable MLX allocations at the end of analysis. Keeping the
+    /// bounded allocator cache warm during a pass avoids per-frame churn;
+    /// clearing it afterwards returns that memory without unloading weights.
     func releaseCacheBetweenSessions() {
         stateLock.lock()
-        cachedMLXKey = nil
-        cachedMLXOutput = nil
         let deviceRegistryID = trackedDeviceRegistryID
         let rung = trackedRung
         let color = trackedScreenColor
@@ -233,34 +184,10 @@ final class InferenceCoordinator: @unchecked Sendable {
         }
     }
 
-    // MARK: - MLX frame cache
-
-    private func cachedOutput(for key: InferenceCacheKey) -> KeyingInferenceOutput? {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        guard cachedMLXKey == key, let cached = cachedMLXOutput else {
-            return nil
-        }
-        return cached
-    }
-
-    private func storeCachedOutput(_ output: KeyingInferenceOutput, for key: InferenceCacheKey) {
-        stateLock.lock()
-        cachedMLXKey = key
-        cachedMLXOutput = output
-        stateLock.unlock()
-    }
-
     // MARK: - Tracked bridge target
 
     private func trackRequestedBridge(deviceRegistryID: UInt64, rung: Int, screenColor: ScreenColor) {
         stateLock.lock()
-        if trackedDeviceRegistryID != deviceRegistryID
-            || trackedRung != rung
-            || trackedScreenColor != screenColor {
-            cachedMLXKey = nil
-            cachedMLXOutput = nil
-        }
         trackedDeviceRegistryID = deviceRegistryID
         trackedRung = rung
         trackedScreenColor = screenColor

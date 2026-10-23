@@ -81,7 +81,9 @@ enum VisionHintError: Error, CustomStringConvertible {
 @available(macOS 14.0, *)
 final class VisionHintEngine: @unchecked Sendable {
 
-    private let cacheEntry: MetalDeviceCacheEntry
+    // The entry owns this engine. A strong back-reference retained its
+    // texture pool, queues and every pipeline after the entry was released.
+    private weak var cacheEntry: MetalDeviceCacheEntry?
     private let textureCache: CVMetalTextureCache
 
     /// Vision's request objects are cheap to recreate, but holding one
@@ -110,9 +112,8 @@ final class VisionHintEngine: @unchecked Sendable {
 
     /// Reusable request that Vision can reuse across frames. Recreated
     /// lazily in case Vision invalidates it after a permanent failure.
+    /// Caller holds `requestLock` through request execution and mask extraction.
     private func borrowRequest() -> VNGenerateForegroundInstanceMaskRequest {
-        requestLock.lock()
-        defer { requestLock.unlock() }
         if let cached = cachedRequest {
             return cached
         }
@@ -155,6 +156,8 @@ final class VisionHintEngine: @unchecked Sendable {
     /// device cache and is committed before this function returns —
     /// the returned texture is fully valid the moment it lands.
     func generateMask(source: any MTLTexture) throws -> VisionMask? {
+        requestLock.lock()
+        defer { requestLock.unlock() }
         // Tag the CIImage with a known colour space — without this
         // option Core Image picks a host-specific default and Vision
         // interprets the same `Float16` bytes differently depending
@@ -238,6 +241,9 @@ final class VisionHintEngine: @unchecked Sendable {
     /// `vImageConvert_PlanarFtoPlanar8` lands in ~0.5–1 ms, freeing
     /// most of the analyse loop's CPU budget for Vision itself.
     private func wrapAsMetalTexture(pixelBuffer: CVPixelBuffer) throws -> VisionMask {
+        guard let cacheEntry else {
+            throw VisionHintError.textureWrappingFailed(kCVReturnInvalidArgument)
+        }
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         let pixelFormat = CVPixelBufferGetPixelFormatType(pixelBuffer)
