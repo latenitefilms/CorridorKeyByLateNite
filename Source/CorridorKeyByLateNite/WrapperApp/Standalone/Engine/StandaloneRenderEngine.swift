@@ -179,8 +179,9 @@ final class StandaloneRenderEngine: @unchecked Sendable {
             commandQueue: commandQueue,
             readbackSource: state.temporalStabilityEnabled && state.temporalStabilityStrength > 0
         )
-        let blob = try MatteCodec.encode(
+        let blob = try AnalysisFrameCodec.encode(
             alpha: extracted.alpha,
+            foregroundHalfRGBA: extracted.foregroundHalfRGBA,
             width: extracted.width,
             height: extracted.height
         )
@@ -191,7 +192,8 @@ final class StandaloneRenderEngine: @unchecked Sendable {
             inferenceResolution: extracted.inferenceResolution,
             engineDescription: extracted.engineDescription,
             sourceFloats: extracted.source,
-            alphaFloats: extracted.alpha
+            alphaFloats: extracted.alpha,
+            foregroundHalfRGBA: extracted.foregroundHalfRGBA
         )
     }
 
@@ -249,4 +251,6 @@ struct AnalysisFrameOutput: @unchecked Sendable {
     /// encodes; included separately so the temporal blender can mutate
     /// it without re-decoding.
     let alphaFloats: [Float]
+    /// Straight model RGB retained while temporal stability modifies alpha.
+    let foregroundHalfRGBA: Data
 }

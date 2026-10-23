@@ -49,8 +49,11 @@ independent; learned weights and fixed buffers share storage across all traces.
 
 After successful conversion, copy `artifacts/corridorkey_v2.mlxfn` into
 `Source/CorridorKeyByLateNite/Plugin/Resources/MLX Models/` and retain the generated
-JSON report. The model is tracked with Git LFS. `validation.json` records the
-shipped artifact's checksum and numerical results.
+JSON report. The 2,440,281,517-byte model is deliberately ignored by Git because
+it exceeds this repository's GitHub LFS file limit. Keep the local artifact for
+Xcode builds; a fresh checkout must reproduce it using the commands above.
+`validation.json` records its checksum and numerical results. Do not force-add
+the model or put copies in the test resources.
 
 ## Host contract
 
@@ -72,7 +75,10 @@ shipped artifact's checksum and numerical results.
 This migration preserves the existing square Quality ladder and inspector/Motion
 defaults. It does not implement upstream temporal-window/Hann accumulation,
 native-resolution aspect-preserving inference, or a new end-to-end HDR workflow.
-Saved v1 mattes are invalidated by analysis schema 4 and need analysis again.
+Analysis schema 5 invalidates older alpha-only caches. Both hosts now store
+alpha and reconstructed foreground in a complete `CKF1` frame. Run Analyse Clip
+again after upgrading. Foreground stays straight, signed, video-gamma RGBA16F;
+only alpha is clamped. Temporal Stability adjusts alpha without replacing RGB.
 
 ## Validation and performance
 

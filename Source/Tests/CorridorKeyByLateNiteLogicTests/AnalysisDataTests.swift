@@ -67,7 +67,9 @@ struct AnalysisDataTests {
         let dictionary = NSMutableDictionary()
         dictionary[AnalysisDataKey.schemaVersion] = NSNumber(value: 3)
         dictionary[AnalysisDataKey.frameCount] = NSNumber(value: 1)
-        #expect(AnalysisData.currentSchemaVersion == 4)
+        #expect(AnalysisData.currentSchemaVersion == 5)
+        dictionary[AnalysisDataKey.schemaVersion] = NSNumber(value: 4)
+        #expect(AnalysisData.fromParameterDictionary(dictionary) == nil)
         #expect(AnalysisData.fromParameterDictionary(dictionary) == nil)
     }
 

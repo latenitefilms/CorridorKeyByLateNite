@@ -170,10 +170,10 @@ final class RenderPipeline: @unchecked Sendable {
 
         // Fast path: FxAnalyzer already ran for this clip and the inference
         // resolution matches the quality the user is asking for. Skip MLX
-        // entirely — the cache already holds a network-quality matte.
-        if let header = cachedMatteHeader(from: inputs.state, expectedResolution: inferenceResolution),
+        // entirely — the cache holds both network predictions.
+        if let header = cachedFrameHeader(from: inputs.state, expectedResolution: inferenceResolution),
            let blob = inputs.state.cachedMatteBlob {
-            return try renderUsingCachedAlpha(
+            return try renderUsingCachedFrame(
                 inputs: inputs,
                 context: context,
                 screenTransform: screenTransform,
@@ -213,6 +213,8 @@ final class RenderPipeline: @unchecked Sendable {
     /// per frame instead of guessing from the registry's current state.
     struct AnalysisExtraction {
         let alpha: [Float]
+        /// Straight model foreground, RGBA16F in the same row order as alpha.
+        let foregroundHalfRGBA: Data
         let source: [Float]?
         let width: Int
         let height: Int
@@ -220,9 +222,9 @@ final class RenderPipeline: @unchecked Sendable {
         let engineDescription: String
     }
 
-    /// Runs pre-inference + MLX (no post-processing) and returns the raw alpha
-    /// matte on the CPU. Called by `FxAnalyzer.analyzeFrame` so the matte can
-    /// be compressed and stored in the custom parameter. This path never reads
+    /// Runs pre-inference + MLX (no post-processing) and returns raw alpha and
+    /// half-float reconstructed foreground. Called by both hosts so the complete
+    /// frame can be compressed and stored. This path never reads
     /// from or writes to the per-frame cache — the custom parameter is the
     /// persistent cache.
     ///
@@ -295,7 +297,8 @@ final class RenderPipeline: @unchecked Sendable {
                 inferenceResolution: inferenceResolution
             ),
             screenColor: state.screenColor,
-            cacheEntry: entry
+            cacheEntry: entry,
+            foregroundPixelFormat: .rgba16Float
         )
         let inferenceOutput = inferenceResult.output
 
@@ -314,6 +317,18 @@ final class RenderPipeline: @unchecked Sendable {
             }
         }
 
+        // Metal writes foreground directly as half floats. Read it once into
+        // the cache payload, avoiding a 64 MiB float array + CPU conversion at
+        // 2048. Both textures are shared and MLX writeback has completed.
+        var foregroundHalfRGBA = Data(count: width * height * 8)
+        foregroundHalfRGBA.withUnsafeMutableBytes { bytes in
+            if let base = bytes.baseAddress {
+                inferenceOutput.foregroundTexture.getBytes(
+                    base, bytesPerRow: width * 8,
+                    from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0
+                )
+            }
+        }
         var sourceReadback: [Float]? = nil
         if readbackSource {
             sourceReadback = try readbackRGBATexture(
@@ -329,6 +344,7 @@ final class RenderPipeline: @unchecked Sendable {
         // it is not returned here.
         return AnalysisExtraction(
             alpha: alpha,
+            foregroundHalfRGBA: foregroundHalfRGBA,
             source: sourceReadback,
             width: width,
             height: height,
@@ -750,7 +766,7 @@ final class RenderPipeline: @unchecked Sendable {
         )
     }
 
-    private func renderUsingCachedAlpha(
+    private func renderUsingCachedFrame(
         inputs: ResolvedRenderInputs,
         context: DeviceContext,
         screenTransform: ScreenColorTransform,
@@ -760,9 +776,8 @@ final class RenderPipeline: @unchecked Sendable {
         cachedWidth: Int,
         cachedHeight: Int
     ) throws -> RenderReport {
-        // Cached analysis currently stores alpha only. Keep the source RGB at
-        // its native resolution: shrinking it to the model grid and expanding
-        // it again discarded fine detail and added two GPU passes per frame.
+        // Keep native source RGB for Interior and light wrap. The separate
+        // cached model foreground supplies reconstructed edge colors.
         var rotatedSourcePooled: PooledTexture?
         if !screenTransform.isIdentity {
             guard let preCommandBuffer = context.commandQueue.makeCommandBuffer() else {
@@ -778,21 +793,26 @@ final class RenderPipeline: @unchecked Sendable {
         defer { rotatedSourcePooled?.returnManually() }
         let rotatedSource = rotatedSourcePooled?.texture ?? context.sourceTexture
 
-        let alphaPooled = try uploadCachedAlpha(
+        guard let cachedFrame = try uploadCachedFrame(
             blob: cachedBlob,
             width: cachedWidth,
             height: cachedHeight,
             entry: context.entry
-        )
-        defer { alphaPooled.returnManually() }
+        ) else {
+            return try renderSourcePassThrough(inputs: inputs, context: context)
+        }
+        defer {
+            cachedFrame.alpha.returnManually()
+            cachedFrame.foreground.returnManually()
+        }
 
         try runPostInference(
             inputs: inputs,
             context: context,
             screenTransform: screenTransform,
             rotatedSource: rotatedSource,
-            alphaAtInferenceResolution: alphaPooled.texture,
-            foregroundAtInferenceResolution: rotatedSource
+            alphaAtInferenceResolution: cachedFrame.alpha.texture,
+            foregroundAtInferenceResolution: cachedFrame.foreground.texture
         )
 
         return RenderReport(
@@ -815,8 +835,8 @@ final class RenderPipeline: @unchecked Sendable {
         gamutTransform: WorkingSpaceTransform,
         inferenceResolution: Int
     ) throws -> PreInferenceArtifacts {
-        // Vision runs on Neural Engine in parallel with the GPU pre-pass,
-        // so kick it off BEFORE we encode the screen matrix. Vision reads
+        // Vision chooses its supported compute devices. Start the request
+        // before encoding GPU preprocessing. Vision reads
         // the original (un-rotated) source — the hint is single-channel
         // alpha, colour-space-independent, so the screen matrix is
         // irrelevant. Fall back to the green-bias hint when Vision finds
@@ -986,6 +1006,19 @@ final class RenderPipeline: @unchecked Sendable {
         }
         postCommandBuffer.label = "CorridorKey by LateNite Post-Inference"
 
+        // Inference normalizes working-space RGB into Rec.709. The complete
+        // cache retains that canonical RGB, so reverse the same transform before
+        // mixing it with the native source or applying working-space cleanup.
+        let workingForegroundPooled = try RenderStages.applyScreenMatrix(
+            source: foregroundAtInferenceResolution,
+            matrix: ColorGamutMatrix.transform(for: inputs.workingGamut).rec709ToWorking,
+            isIdentity: inputs.workingGamut == .rec709,
+            entry: context.entry,
+            commandBuffer: postCommandBuffer
+        )
+        defer { workingForegroundPooled?.returnManually() }
+        let workingForeground = workingForegroundPooled?.texture ?? foregroundAtInferenceResolution
+
         // 1. Upscale alpha + foreground to destination resolution using the
         // user's chosen method.
         let upscaledAlphaPooled = try RenderStages.resample(
@@ -1000,7 +1033,7 @@ final class RenderPipeline: @unchecked Sendable {
         let upscaledAlpha = upscaledAlphaPooled?.texture ?? alphaAtInferenceResolution
 
         let upscaledForegroundPooled = try RenderStages.resample(
-            source: foregroundAtInferenceResolution,
+            source: workingForeground,
             targetWidth: context.sourceWidth,
             targetHeight: context.sourceHeight,
             pixelFormat: .rgba16Float,
@@ -1008,12 +1041,12 @@ final class RenderPipeline: @unchecked Sendable {
             entry: context.entry,
             commandBuffer: postCommandBuffer
         )
-        let upscaledForeground = upscaledForegroundPooled?.texture ?? foregroundAtInferenceResolution
+        let upscaledForeground = upscaledForegroundPooled?.texture ?? workingForeground
 
         // 2. Despill. The kernel takes `screenColor` and parameterises
         // its math on the dominant channel — green for green keys,
         // blue for blue keys — so the same dispatch handles both
-        // colour packs without a per-colour code path. The blue MLX
+        // screen colors without a per-color code path. The unified v2
         // model's `fg_final` head already does most of the spill
         // suppression on its own; this stage stays in the pipeline as
         // a user-controllable knob for footage that benefits from a
@@ -1122,9 +1155,8 @@ final class RenderPipeline: @unchecked Sendable {
         // blue for Blue) — both the green and blue MLX bridges return
         // foreground in their native screen domain, so the decontam
         // axis tracks the chosen colour rather than always being green.
-        // The inverse-rotation slot stays wired but is now identity for
-        // every supported screen colour because each colour ships its
-        // own bridge.
+        // The inverse-rotation slot stays wired but is identity for both
+        // screen colors because v2 receives their original RGB.
         let fusedForegroundConfig = RenderStages.FusedForegroundConfig(
             sourcePassthrough: inputs.state.sourcePassthroughEnabled,
             lightWrapEnabled: lightWrapActive,
@@ -1282,80 +1314,48 @@ final class RenderPipeline: @unchecked Sendable {
 
     // MARK: - Cached matte helpers
 
-    /// Lightweight peek at the cache that returns just the dimensions
-    /// without doing the (relatively expensive) decompress + half→float
-    /// pass. Used by `renderUsingCachedAlpha` so it can size the GPU
-    /// upload buffer before we commit to decoding.
-    private func cachedMatteHeader(
+    /// Accepts only complete v2 frames at the requested inference resolution.
+    private func cachedFrameHeader(
         from state: PluginStateData,
         expectedResolution: Int
-    ) -> (width: Int, height: Int)? {
+    ) -> AnalysisFrameCodec.Header? {
         guard let blob = state.cachedMatteBlob,
               state.cachedMatteInferenceResolution == expectedResolution,
-              let header = MatteCodec.parseHeader(blob)
+              let header = AnalysisFrameCodec.parseHeader(blob),
+              header.width == expectedResolution, header.height == expectedResolution
         else { return nil }
         return header
     }
 
-    /// Decodes the cached alpha matte into a pooled `r32Float` texture
-    /// without an intermediate `[Float]` allocation. Saves ~5–10 ms
-    /// per render-from-cache frame on a 4K matte versus the prior
-    /// `MatteCodec.decode → texture.replace` path. vImage handles the
-    /// half→float conversion via the ARM FP16 hardware instead of
-    /// the old scalar loop.
-    private func uploadCachedAlpha(
+    /// Decompresses into shared Metal scratch memory, then uploads both half
+    /// planes without float expansion. The lease covers decode AND texture
+    /// upload so concurrent FxPlug renders cannot overwrite one another's data.
+    /// Malformed caches behave like missing analysis rather than failing a render.
+    private func uploadCachedFrame(
         blob: Data,
         width: Int,
         height: Int,
         entry: MetalDeviceCacheEntry
-    ) throws -> PooledTexture {
-        guard let pooled = entry.texturePool.acquire(
-            width: width,
-            height: height,
-            pixelFormat: .r32Float,
-            storageMode: .shared
+    ) throws -> (alpha: PooledTexture, foreground: PooledTexture)? {
+        guard let alpha = entry.texturePool.acquire(
+            width: width, height: height, pixelFormat: .r16Float, storageMode: .shared
+        ), let foreground = entry.texturePool.acquire(
+            width: width, height: height, pixelFormat: .rgba16Float, storageMode: .shared
         ) else {
             throw MetalDeviceCacheError.textureAllocationFailed
         }
-
-        // Decode straight into a per-rung-cached MTLBuffer; vImage
-        // converts half-floats with the ARM FP16 hardware so a 2048²
-        // matte costs ~4 ms instead of ~40 ms on the scalar loop.
-        guard let buffer = entry.cachedAlphaBuffer(width: width, height: height) else {
-            pooled.returnManually()
-            throw MetalDeviceCacheError.textureAllocationFailed
+        let success = try entry.withCachedFrameBuffer(width: width, height: height) { buffer in
+            let bytes = UnsafeMutableRawBufferPointer(start: buffer.contents(), count: width * height * 10)
+            guard AnalysisFrameCodec.decode(blob, into: bytes) else { return false }
+            let region = MTLRegionMake2D(0, 0, width, height)
+            alpha.texture.replace(region: region, mipmapLevel: 0,
+                                  withBytes: buffer.contents(), bytesPerRow: width * 2)
+            foreground.texture.replace(region: region, mipmapLevel: 0,
+                                       withBytes: buffer.contents().advanced(by: width * height * 2), bytesPerRow: width * 8)
+            return true
         }
-        let pixelCount = width * height
-        let bufferPointer = buffer.contents().bindMemory(to: Float.self, capacity: pixelCount)
-        let success = MatteCodec.decode(
-            blob,
-            into: bufferPointer,
-            capacity: pixelCount,
-            expectedWidth: width,
-            expectedHeight: height
-        )
-        guard success else {
-            pooled.returnManually()
-            throw MetalDeviceCacheError.textureAllocationFailed
-        }
-
-        // Copy the decoded floats into the pooled texture. On Apple
-        // Silicon's unified memory, both the buffer and the .shared
-        // texture's backing live in the same physical memory, so this
-        // is effectively a memcpy through the Metal driver. The y
-        // orientation of the cached bytes already matches the texture
-        // convention (the analyse pass wrote them via
-        // `corridorKeyMLXWritebackFusedKernel` which performs the
-        // y-flip; we read those flipped bytes back and store them, so
-        // the cache is byte-for-byte y-down).
-        let bytesPerRow = width * MemoryLayout<Float>.size
-        pooled.texture.replace(
-            region: MTLRegionMake2D(0, 0, width, height),
-            mipmapLevel: 0,
-            withBytes: bufferPointer,
-            bytesPerRow: bytesPerRow
-        )
-        return pooled
+        guard success else { return nil }
+        return (alpha, foreground)
     }
 
     // MARK: - Compose (FxPlug-specific)

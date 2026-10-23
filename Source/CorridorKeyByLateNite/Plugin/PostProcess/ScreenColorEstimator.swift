@@ -4,11 +4,9 @@
 //
 //  Historically produced a 3x3 matrix that rotated blue-screen footage into
 //  the green domain so a single green-trained MLX model could process it,
-//  with an inverse matrix to rotate the foreground back at the end. With
-//  Corridor Digital's v1.0 dedicated blue model now bundled, both screen
-//  colours have a native bridge — we ship `corridorkey_mlx_bridge_*.mlxfn`
-//  for green and `corridorkeyblue_mlx_bridge_*.mlxfn` for blue, picked by
-//  `MLXBridgeArtifact.filename(forResolution:screenColor:)`.
+//  with an inverse matrix to rotate the foreground back at the end. The
+//  unified v2 model handles green and blue directly, so neither screen
+//  needs a color rotation. The selection still controls hints and cleanup.
 //
 //  Consequence: this file now always returns `.identity`. Pre-inference no
 //  longer has to rotate, the model receives footage in its native screen
@@ -43,8 +41,8 @@ struct ScreenColorTransform: Sendable {
 
 enum ScreenColorEstimator {
     /// Returns the transform appropriate for a screen colour without
-    /// touching the GPU. Always identity now that both green and blue
-    /// ship dedicated MLX bridges — the per-colour reference goes to
+    /// touching the GPU. Always identity because v2 handles both colors;
+    /// the per-colour reference goes to
     /// despill / edge decontamination via
     /// `ScreenColor.canonicalScreenReference` instead.
     ///

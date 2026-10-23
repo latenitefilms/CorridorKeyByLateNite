@@ -177,10 +177,16 @@ struct FourFrameUserFlowTests {
         let mattes = collector.snapshot()
         try #require(mattes.count == 4)
         let firstMatte = try #require(mattes[0])
-        let decoded = try #require(MatteCodec.decode(firstMatte.blob))
-        let alphaArray = decoded.alpha
-        let width = decoded.width
-        let height = decoded.height
+        let header = try #require(AnalysisFrameCodec.parseHeader(firstMatte.blob))
+        var decoded = Data(count: header.decodedByteCount)
+        try #require(decoded.withUnsafeMutableBytes { AnalysisFrameCodec.decode(firstMatte.blob, into: $0) })
+        let alphaArray = decoded.withUnsafeBytes { bytes in
+            (0..<(header.width * header.height)).map {
+                Float(Float16(bitPattern: bytes.loadUnaligned(fromByteOffset: $0 * 2, as: UInt16.self)))
+            }
+        }
+        let width = header.width
+        let height = header.height
 
         // Probe the source frame at the same resolution and compare
         // the visual "is this background-green" mask to the matte's

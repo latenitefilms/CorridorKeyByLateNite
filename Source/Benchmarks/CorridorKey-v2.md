@@ -153,13 +153,12 @@ in `Tools/CorridorKeyV2/benchmark-followup.json`. These are slower than the earl
 measurement despite identical model computation, demonstrating system/load
 variability. They must not be presented as a before/after inference comparison.
 
-The main remaining quality limitation is the **alpha-only persisted cache**.
-V2 computes foreground RGB, but analysis discards it and cached playback derives
-foreground from the source plus despill. Full v2 foreground reconstruction needs
-a versioned foreground cache, a storage budget (preferably sequential disk-backed
-video rather than huge FxPlug custom-parameter blobs), colour-space validation
-and matching preview/export behaviour. This deserves a dedicated cache change;
-the current Foreground output must not be described as v2's predicted RGB.
+At the time of this follow-up, the main quality limitation was the **alpha-only
+persisted cache** (addressed by the complete-frame update below).
+V2 computed foreground RGB, but analysis discarded it and cached playback derived
+foreground from source plus despill. The complete-frame update below addresses
+RGB persistence, color-space restoration and matching preview/export behavior.
+The storage budget and disk-backed persistence architecture remain open.
 
 The current hardware allocation is intentional but not proof of optimality:
 
@@ -226,3 +225,112 @@ utilization or a sustained Final Cut Pro throughput result. Capture:
   application coverage, accessibility and validation on smaller-memory or newer
   Apple Silicon Macs remain release checks. Headless render parity is not a live
   Final Cut Pro host test.
+
+## Complete-frame cache — 24 October 2026
+
+Both hosts now persist model alpha **and reconstructed foreground**, then run
+the same refinement and composition pipeline during preview/export. Analysis
+schema 5 rejects the earlier alpha-only caches: **run Analyse Clip again**.
+`CKF1` stores an R16F alpha plane and straight RGBA16F foreground in source row
+order. Only alpha clamps to [0, 1]; negative/above-white RGB remains representable.
+Temporal Stability blends alpha while retaining the current frame's predicted
+RGB. Interior continues to use the native source as its optional detail input.
+The cache keeps canonical Rec.709 RGB; Rec.2020 renders reverse the existing
+input gamut matrix before mixing it with working-space source RGB. A synthetic
+color regression covers both gamuts. This restores the existing transform
+contract; it does not establish a new end-to-end HDR transfer-function workflow.
+All inspector names and defaults, including the Motion template, remain unchanged.
+
+Metal now writes the foreground directly to a shared RGBA16F texture for analysis,
+eliminating a 64 MiB CPU float array and float-to-half conversion at 2048. The
+model reference tests can still request RGBA32F. Playback decompresses directly
+into one reusable shared Metal buffer and uploads half textures without float
+expansion. A lease covers decode **and** upload so simultaneous FxPlug renders
+cannot overwrite each other's pixels. Malformed and legacy payloads behave as
+missing analysis rather than failing the render or substituting source RGB for
+a supposedly complete model result.
+
+### Optimized-build cache measurements
+
+Apple M1 Max, 64 GB; first NikoDruid benchmark frame; native 1920×1080 output.
+SwiftPM **Release**, one warm render then seven measured renders per quality.
+Automatic chroma hint; bilinear resampling; optional despill/despeckle/light-wrap,
+edge decontamination and temporal stability disabled. Times exclude inference,
+video decoding and export encoding. These measure cached renderer cost, not
+Final Cut Pro playback throughput, sustained thermals, or all hardware.
+
+| Inference side | Complete payload/frame | Decode median | Cached render median |
+|---|---:|---:|---:|
+| 512 | 2,333,895 bytes | 0.81 ms | 6.14 ms |
+| 1024 | 9,412,807 bytes | 2.89 ms | 9.24 ms |
+| 1536 | 21,166,752 bytes | 6.08 ms | 14.67 ms |
+| 2048 | 37,588,369 bytes | 11.13 ms | 23.35 ms |
+
+The four explicit UI quality settings are measured here; 768 remains supported
+by the model and its contract tests but is not an explicit Quality menu choice.
+The follow-up after the gamut correction measured 6.23/9.59/19.55/22.82 ms;
+this variability is why these samples are not a fixed playback guarantee.
+The synthetic flat-color cache test is substantially faster and must not be
+used as a proxy for realistic image payloads.
+
+LZ4 was chosen after measuring the same 40 MiB decoded frame with Apple's
+Compression framework. In an optimized standalone codec probe, native-layout
+LZ4 produced 37.59 MB and decoded in 9.25 ms; LZFSE produced 28.84 MB but took
+55.13 ms; zlib produced 29.31 MB and took 143.79 ms. LZFSE encoding was also
+about 500 ms versus 53 ms for LZ4. Byte-plane shuffling reduced size further
+but added 18.43 ms encoding preparation and 13.83 ms decode restoration in
+the tested implementation. These are small, local samples, not general codec
+benchmarks. Incompressible frames fall back to raw storage with a bounded size.
+
+**Storage remains a material limitation:** complete RGB caches are much larger
+than alpha-only mattes. This sample at 2048 extrapolates to about 50 GiB per
+minute at 24 fps; content-dependent compression varies. The existing in-memory
+standalone cache and FxPlug Library custom-parameter persistence remain in use.
+The shared decode scratch buffer is bounded by the largest requested frame,
+but the whole clip cache is not bounded. A disk-backed cache with eviction and
+an explicit project portability policy is still needed before claiming scalable
+long-clip analysis on low-memory Macs. This change does not solve that storage
+architecture or change the model's inference speed.
+
+### Verification and reproduction
+
+The full headless suite passed **151 tests** again after the Metal half-writeback
+and test-harness changes. The final optimized codec/analysis/playback/temporal/
+benchmark-logic run passed **28 tests**, including the subsequent Rec.2020 fix,
+simultaneous cached renders with different foregrounds, legacy/corrupt cache
+fallback, signed RGB persistence, green/blue orientation and HardestShotEver.
+The new codec measured **97.85% line coverage** in the initial full coverage run;
+the latest full headless package run was **72.75%**, below the requested 80% and excluding
+Xcode-only app/FxPlug sources. No full-app coverage claim is made.
+The signed sandboxed standalone app, FxPlug service and integration-test bundle
+build successfully. Live Final Cut Pro, smaller-memory Macs and full-application
+coverage remain unverified. SwiftLint is not installed on this validation Mac.
+
+A 30-second Instruments Leaks capture listed no leak findings, but reached its
+time limit before the complete test sequence ended. The attached Metal System
+Trace recorded **16,225 compute and 7 fragment intervals** for the test worker,
+with **zero command-buffer error rows**. These are bounded headless samples,
+not proof of optimal utilization, sustained throughput or zero leaks in the
+complete app. The initial launch-mode Metal recording exported no GPU tables;
+only the subsequent attached recording supplies those counts. Raw summaries:
+`Tools/CorridorKeyV2/cache-playback.json` and `cache-profiling.json`. Captures:
+`/tmp/ckv2-complete-cache-leaks.trace` and
+`/tmp/ckv2-complete-cache-metal-attached.trace` on the validation Mac.
+
+Release testing exposed an existing executable-entry collision: importing
+`BenchmarkRunner` into the test bundle started the CLI instead of Swift Testing.
+The command now calls a separate `BenchmarkRunnerSupport` module, and tests link
+that module. The CLI help and its existing report/temporal tests pass.
+
+```sh
+swift test --package-path Source --enable-code-coverage
+swift test --package-path Source -c release --filter StandalonePipelineTests
+```
+
+The model remains unchanged and available locally, but is Git-ignored. Its LFS
+pointer was removed from both unpublished commits, with authors/messages/dates
+preserved and an original-branch recovery bundle saved locally. Fresh checkouts
+must follow `Tools/CorridorKeyV2/README.md` to recreate the model before building.
+
+See [the community MLX assessment](CorridorKey-v2-community-MLX.md) for mixed-FP16,
+Q8, temporal/native-resolution differences and the reason to retain Screen Color.

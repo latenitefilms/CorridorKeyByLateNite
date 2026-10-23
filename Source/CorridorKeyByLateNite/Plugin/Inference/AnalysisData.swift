@@ -43,8 +43,9 @@ struct AnalysisData: Sendable {
     /// cache" so Analyse Clip has to rebuild. Bumped to `3` after adding
     /// `qualityModeRaw` so the inspector can tell the user when a saved
     /// cache no longer matches the Quality setting they've selected. Version 4
-    /// invalidates v1 model mattes so saved clips are analysed with v2.
-    static let currentSchemaVersion: Int = 4
+    /// invalidates v1 model mattes so saved clips are analysed with v2. Version 5
+    /// requires complete alpha + reconstructed foreground frames (CKF1).
+    static let currentSchemaVersion: Int = 5
 
     let schemaVersion: Int
     let frameDuration: CMTime

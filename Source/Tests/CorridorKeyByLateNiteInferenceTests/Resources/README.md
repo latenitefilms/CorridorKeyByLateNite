@@ -2,7 +2,8 @@
 
 Tests read the production v2 artifact at
 `Source/CorridorKeyByLateNite/Plugin/Resources/MLX Models/corridorkey_v2.mlxfn`.
-Fetch Git LFS assets first. Do not copy the model into the test bundle.
+This generated artifact is Git-ignored. Reproduce it with
+`Tools/CorridorKeyV2/README.md`; do not copy it into the test bundle.
 Missing model files fail the tests. All inference suites serialize under
 `MLXInferenceTests` to avoid exhausting unified memory with multiple models.
 

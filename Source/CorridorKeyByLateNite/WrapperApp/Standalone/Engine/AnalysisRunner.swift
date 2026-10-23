@@ -135,7 +135,10 @@ actor AnalysisRunner {
             )
             let blob: Data
             do {
-                blob = didBlend ? try MatteCodec.encode(alpha: alpha, width: output.width, height: output.height) : output.blob
+                blob = didBlend ? try AnalysisFrameCodec.encode(
+                    alpha: alpha, foregroundHalfRGBA: output.foregroundHalfRGBA,
+                    width: output.width, height: output.height
+                ) : output.blob
             } catch {
                 eventHandler(.failed(String(describing: error)))
                 return

@@ -48,6 +48,7 @@
 		CK0100000000000000000050 /* CorridorKeyByLateNitePlugIn+FxAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000050 /* CorridorKeyByLateNitePlugIn+FxAnalyzer.swift */; };
 		CK0100000000000000000051 /* AnalysisData.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000051 /* AnalysisData.swift */; };
 		CK0100000000000000000052 /* MatteCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000052 /* MatteCodec.swift */; };
+		AF0100000000000000000001 /* AnalysisFrameCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0200000000000000000001 /* AnalysisFrameCodec.swift */; };
 		CK0100000000000000000060 /* CorridorKeyByLateNitePlugIn+CustomViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000060 /* CorridorKeyByLateNitePlugIn+CustomViews.swift */; };
 		CK0100000000000000000061 /* CorridorKeyInspectorBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000061 /* CorridorKeyInspectorBridge.swift */; };
 		CK0100000000000000000062 /* CorridorKeyHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000062 /* CorridorKeyHeaderView.swift */; };
@@ -93,6 +94,7 @@
 		SB0000000000000000000013 /* AnalysisData.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000051 /* AnalysisData.swift */; };
 		SB0000000000000000000014 /* SharedMLXBridgeRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000076 /* SharedMLXBridgeRegistry.swift */; };
 		SB0000000000000000000015 /* MatteCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000052 /* MatteCodec.swift */; };
+		AF0100000000000000000002 /* AnalysisFrameCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0200000000000000000001 /* AnalysisFrameCodec.swift */; };
 		SB0000000000000000000016 /* KeyingInferenceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK020000000000000000000F /* KeyingInferenceEngine.swift */; };
 		SB0000000000000000000017 /* MLXKeyingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = MX0100000000000000000003 /* MLXKeyingEngine.swift */; };
 		SB0000000000000000000018 /* VisionHintEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = VH0200000000000000000001 /* VisionHintEngine.swift */; };
@@ -213,6 +215,7 @@
 		CK0200000000000000000050 /* CorridorKeyByLateNitePlugIn+FxAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "CorridorKeyByLateNitePlugIn+FxAnalyzer.swift"; path = "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+FxAnalyzer.swift"; sourceTree = "<group>"; };
 		CK0200000000000000000051 /* AnalysisData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisData.swift; path = CorridorKeyByLateNite/Plugin/Inference/AnalysisData.swift; sourceTree = "<group>"; };
 		CK0200000000000000000052 /* MatteCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MatteCodec.swift; path = CorridorKeyByLateNite/Plugin/Inference/MatteCodec.swift; sourceTree = "<group>"; };
+		AF0200000000000000000001 /* AnalysisFrameCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisFrameCodec.swift; path = CorridorKeyByLateNite/Plugin/Inference/AnalysisFrameCodec.swift; sourceTree = "<group>"; };
 		CK0200000000000000000060 /* CorridorKeyByLateNitePlugIn+CustomViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "CorridorKeyByLateNitePlugIn+CustomViews.swift"; path = "CorridorKeyByLateNite/Plugin/Inspector/CorridorKeyByLateNitePlugIn+CustomViews.swift"; sourceTree = "<group>"; };
 		CK0200000000000000000061 /* CorridorKeyInspectorBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CorridorKeyInspectorBridge.swift; path = CorridorKeyByLateNite/Plugin/Inspector/CorridorKeyInspectorBridge.swift; sourceTree = "<group>"; };
 		CK0200000000000000000062 /* CorridorKeyHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CorridorKeyHeaderView.swift; path = CorridorKeyByLateNite/Plugin/Inspector/CorridorKeyHeaderView.swift; sourceTree = "<group>"; };
@@ -454,6 +457,7 @@
 				CK0200000000000000000012 /* InferenceCoordinator.swift */,
 				CK020000000000000000000F /* KeyingInferenceEngine.swift */,
 				CK0200000000000000000052 /* MatteCodec.swift */,
+				AF0200000000000000000001 /* AnalysisFrameCodec.swift */,
 				MX0100000000000000000003 /* MLXKeyingEngine.swift */,
 				CK0200000000000000000076 /* SharedMLXBridgeRegistry.swift */,
 				VH0200000000000000000001 /* VisionHintEngine.swift */,
@@ -766,6 +770,7 @@
 				SB0000000000000000000013 /* AnalysisData.swift in Sources */,
 				SB0000000000000000000014 /* SharedMLXBridgeRegistry.swift in Sources */,
 				SB0000000000000000000015 /* MatteCodec.swift in Sources */,
+				AF0100000000000000000002 /* AnalysisFrameCodec.swift in Sources */,
 				SB0000000000000000000016 /* KeyingInferenceEngine.swift in Sources */,
 				SB0000000000000000000017 /* MLXKeyingEngine.swift in Sources */,
 				SB0000000000000000000018 /* VisionHintEngine.swift in Sources */,
@@ -813,6 +818,7 @@
 				CK0100000000000000000050 /* CorridorKeyByLateNitePlugIn+FxAnalyzer.swift in Sources */,
 				CK0100000000000000000051 /* AnalysisData.swift in Sources */,
 				CK0100000000000000000052 /* MatteCodec.swift in Sources */,
+				AF0100000000000000000001 /* AnalysisFrameCodec.swift in Sources */,
 				CK0100000000000000000060 /* CorridorKeyByLateNitePlugIn+CustomViews.swift in Sources */,
 				CK0100000000000000000061 /* CorridorKeyInspectorBridge.swift in Sources */,
 				CK0100000000000000000062 /* CorridorKeyHeaderView.swift in Sources */,

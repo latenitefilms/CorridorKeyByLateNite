@@ -435,8 +435,9 @@ extension CorridorKeyToolboxPlugIn {
             )
         )
 
-        let encoded = try MatteCodec.encode(
+        let encoded = try AnalysisFrameCodec.encode(
             alpha: currentAlpha,
+            foregroundHalfRGBA: extracted.foregroundHalfRGBA,
             width: extracted.width,
             height: extracted.height
         )

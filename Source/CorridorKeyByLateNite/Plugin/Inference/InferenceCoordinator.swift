@@ -107,10 +107,13 @@ final class InferenceCoordinator: @unchecked Sendable {
     /// Evaluates the current frame and hint with the shared v2 model,
     /// waiting for warm-up if necessary. Analysis never substitutes a
     /// chroma matte or reuses another input's prediction.
+    /// Analysis requests RGBA16F for its cache; numerical model tests retain
+    /// RGBA32F. Metal writes the requested precision without a CPU conversion.
     func runInference(
         request: KeyingInferenceRequest,
         screenColor: ScreenColor,
-        cacheEntry: MetalDeviceCacheEntry
+        cacheEntry: MetalDeviceCacheEntry,
+        foregroundPixelFormat: MTLPixelFormat = .rgba32Float
     ) throws -> InferenceRunResult {
         guard Self.mlxEnabled else {
             throw KeyingInferenceError.modelUnavailable("MLX is disabled in this build.")
@@ -143,7 +146,9 @@ final class InferenceCoordinator: @unchecked Sendable {
             throw error
         }
 
-        let output = try makeOutputTextures(request: request, cacheEntry: cacheEntry)
+        let output = try makeOutputTextures(
+            request: request, cacheEntry: cacheEntry, foregroundPixelFormat: foregroundPixelFormat
+        )
         try engine.run(request: request, output: output)
         return InferenceRunResult(output: output, engineDescription: engine.backendDisplayName)
     }
@@ -198,7 +203,8 @@ final class InferenceCoordinator: @unchecked Sendable {
 
     private func makeOutputTextures(
         request: KeyingInferenceRequest,
-        cacheEntry: MetalDeviceCacheEntry
+        cacheEntry: MetalDeviceCacheEntry,
+        foregroundPixelFormat: MTLPixelFormat
     ) throws -> KeyingInferenceOutput {
         guard let alpha = cacheEntry.makeIntermediateTexture(
             width: request.inferenceResolution,
@@ -211,7 +217,7 @@ final class InferenceCoordinator: @unchecked Sendable {
         guard let foreground = cacheEntry.makeIntermediateTexture(
             width: request.inferenceResolution,
             height: request.inferenceResolution,
-            pixelFormat: .rgba32Float,
+            pixelFormat: foregroundPixelFormat,
             storageMode: .shared
         ) else {
             throw KeyingInferenceError.deviceUnavailable

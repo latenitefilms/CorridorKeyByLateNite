@@ -787,43 +787,28 @@ final class MetalDeviceCacheEntry: @unchecked Sendable {
         analysisReadbackLock.unlock()
     }
 
-    // MARK: - Cached-alpha decode buffer
+    // MARK: - Cached-frame decode buffer
 
-    /// Per-(width, height) host-coherent MTLBuffer that the cached
-    /// matte's vImage decode writes into. Cached because the user
-    /// rotates through at most a handful of inference resolutions in a
-    /// session; allocating fresh per render-from-cache frame would
-    /// cost ~4 MB / allocation at 1024 and 67 MB at 2048, which the
-    /// autorelease pool can't reclaim fast enough during scrubbing.
-    private struct CachedAlphaBufferKey: Hashable {
-        let width: Int
-        let height: Int
-    }
-    private let cachedAlphaLock = NSLock()
-    private var cachedAlphaBuffers: [CachedAlphaBufferKey: any MTLBuffer] = [:]
+    private let cachedFrameLock = NSLock()
+    private var cachedFrameBuffer: (any MTLBuffer)?
 
-    func cachedAlphaBuffer(width: Int, height: Int) -> (any MTLBuffer)? {
-        let key = CachedAlphaBufferKey(width: width, height: height)
-        cachedAlphaLock.lock()
-        if let existing = cachedAlphaBuffers[key] {
-            cachedAlphaLock.unlock()
-            return existing
+    /// Leases a grow-only shared buffer through decompression and texture upload.
+    /// One buffer serves all quality rungs; concurrent renderers serialize only
+    /// CPU decode/upload, then independently submit pooled textures to Metal.
+    func withCachedFrameBuffer<Result>(
+        width: Int, height: Int, _ body: (any MTLBuffer) throws -> Result
+    ) throws -> Result {
+        cachedFrameLock.lock()
+        defer { cachedFrameLock.unlock() }
+        let byteCount = width * height * 10
+        if cachedFrameBuffer == nil || (cachedFrameBuffer?.length ?? 0) < byteCount {
+            cachedFrameBuffer = device.makeBuffer(length: byteCount, options: .storageModeShared)
+            cachedFrameBuffer?.label = "CK Cached Frame Decode"
         }
-        cachedAlphaLock.unlock()
-
-        let byteCount = width * height * MemoryLayout<Float>.size
-        guard let buffer = device.makeBuffer(length: byteCount, options: .storageModeShared) else {
-            return nil
+        guard let buffer = cachedFrameBuffer else {
+            throw MetalDeviceCacheError.textureAllocationFailed
         }
-        buffer.label = "CK Cached Alpha \(width)x\(height)"
-        cachedAlphaLock.lock()
-        if let existing = cachedAlphaBuffers[key] {
-            cachedAlphaLock.unlock()
-            return existing
-        }
-        cachedAlphaBuffers[key] = buffer
-        cachedAlphaLock.unlock()
-        return buffer
+        return try body(buffer)
     }
 
     // MARK: - Connected-components label-counts buffer

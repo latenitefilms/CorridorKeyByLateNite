@@ -97,6 +97,7 @@ let package = Package(
                 "Inference/AnalysisData.swift",
                 "Inference/DeviceCapabilityCache.swift",
                 "Inference/MatteCodec.swift",
+                "Inference/AnalysisFrameCodec.swift",
                 "Inspector/CorridorKeyAnalysisSnapshot.swift",
                 "Inspector/HintPointSet.swift",
                 "Inspector/WarmupStatus.swift"
@@ -139,7 +140,8 @@ let package = Package(
                 "Shared/CorridorKeyByLateNite-Bridging-Header.h",
                 "Inference/AnalysisData.swift",
                 "Inference/DeviceCapabilityCache.swift",
-                "Inference/MatteCodec.swift"
+                "Inference/MatteCodec.swift",
+                "Inference/AnalysisFrameCodec.swift"
             ],
             sources: [
                 "PluginLog.swift",
@@ -166,15 +168,28 @@ let package = Package(
         ),
         .executableTarget(
             name: "BenchmarkRunner",
-            dependencies: ["CorridorKeyToolboxLogic"],
+            dependencies: ["BenchmarkRunnerSupport"],
             path: "BenchmarkRunner",
+            exclude: ["BenchmarkCommand.swift", "BenchmarkReportWriter.swift", "MatteImageLoader.swift",
+                      "MatteSequence.swift", "TemporalMetricsCalculator.swift"],
+            sources: ["main.swift"],
             swiftSettings: [
                 .swiftLanguageMode(.v6)
             ]
         ),
+        // Keep benchmark logic separate from its executable entry point. Linking
+        // that entry point into optimized Swift Testing bundles starts the CLI
+        // instead of the test runner on this toolchain.
+        .target(
+            name: "BenchmarkRunnerSupport",
+            dependencies: ["CorridorKeyToolboxLogic"],
+            path: "BenchmarkRunner",
+            exclude: ["main.swift"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .testTarget(
             name: "BenchmarkRunnerTests",
-            dependencies: ["BenchmarkRunner"],
+            dependencies: ["BenchmarkRunnerSupport"],
             path: "Tests/BenchmarkRunnerTests",
             swiftSettings: [
                 .swiftLanguageMode(.v6)

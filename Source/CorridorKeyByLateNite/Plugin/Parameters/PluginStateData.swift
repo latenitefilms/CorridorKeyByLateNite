@@ -80,7 +80,8 @@ struct PluginStateData: Codable, Sendable {
     /// translate normalised radii into destination pixels.
     var destinationLongEdgePixels: Int
 
-    /// When the FxAnalyzer pass has cached this frame's matte, we embed the
+    /// Complete cached alpha + reconstructed foreground frame. The historical
+    /// property/key name stays stable for serialized render states. We embed the
     /// compressed blob directly in the state so the render callback doesn't
     /// need to touch the custom parameter again (which would mean re-loading
     /// the whole clip-wide cache for every render on every thread).

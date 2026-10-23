@@ -1,0 +1,68 @@
+{
+  "date": "2026-10-24",
+  "hardware": "Apple M1 Max",
+  "physical_memory_gib": 64,
+  "build": "SwiftPM Release",
+  "fixture": "LLM Resources/Benchmark/NikoDruid/Niko - 4 frames.mov",
+  "frame_index": 0,
+  "output_pixels": [
+    1920,
+    1080
+  ],
+  "warmups": 1,
+  "samples": 7,
+  "scope": "Cache decode and shared renderer only; excludes inference, video decode, and export encode",
+  "rows": [
+    {
+      "inference_side": 512,
+      "payload_bytes": 2333895,
+      "decode_median_ms": 0.810125,
+      "cached_render_median_ms": 6.138042
+    },
+    {
+      "inference_side": 1024,
+      "payload_bytes": 9412807,
+      "decode_median_ms": 2.892166,
+      "cached_render_median_ms": 9.237542
+    },
+    {
+      "inference_side": 1536,
+      "payload_bytes": 21166752,
+      "decode_median_ms": 6.079708,
+      "cached_render_median_ms": 14.669125
+    },
+    {
+      "inference_side": 2048,
+      "payload_bytes": 37588369,
+      "decode_median_ms": 11.130834,
+      "cached_render_median_ms": 23.351042
+    }
+  ],
+  "followup_after_gamut_correction": [
+    {
+      "inference_side": 512,
+      "payload_bytes": 2333895,
+      "decode_median_ms": 0.795875,
+      "cached_render_median_ms": 6.231959
+    },
+    {
+      "inference_side": 1024,
+      "payload_bytes": 9412807,
+      "decode_median_ms": 2.925625,
+      "cached_render_median_ms": 9.59425
+    },
+    {
+      "inference_side": 1536,
+      "payload_bytes": 21166752,
+      "decode_median_ms": 8.49825,
+      "cached_render_median_ms": 19.554333
+    },
+    {
+      "inference_side": 2048,
+      "payload_bytes": 37588369,
+      "decode_median_ms": 11.007333,
+      "cached_render_median_ms": 22.821333
+    }
+  ],
+  "timing_note": "Small local samples; run-to-run load variation, not an inference speedup or live-FxPlug throughput claim."
+}

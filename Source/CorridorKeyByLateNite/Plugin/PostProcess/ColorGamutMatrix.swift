@@ -27,6 +27,10 @@ struct WorkingSpaceTransform: Sendable, Equatable {
     /// transforms a working-space RGB vector into Rec.709 linear RGB.
     let workingToRec709: simd_float3x3
 
+    /// Restores predicted Rec.709 foreground to the host's working gamut before
+    /// mixing with source RGB. Alpha is coverage and never receives this matrix.
+    var rec709ToWorking: simd_float3x3 { workingToRec709.inverse }
+
     /// Identity — used for projects already working in Rec.709 / sRGB linear
     /// (which covers nearly all SDR FCP timelines).
     static let identity = WorkingSpaceTransform(
