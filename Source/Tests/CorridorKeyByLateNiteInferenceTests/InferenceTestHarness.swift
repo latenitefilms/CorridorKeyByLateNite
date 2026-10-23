@@ -10,8 +10,14 @@
 
 import Foundation
 import Metal
+import Testing
 @testable import CorridorKeyToolboxLogic
 @testable import CorridorKeyToolboxMetalStages
+
+/// The v2 model is large. Serialize suites so ordinary `swift test` also fits
+/// smaller Apple Silicon machines instead of loading many copies concurrently.
+@Suite("MLX inference", .serialized)
+struct MLXInferenceTests {}
 
 enum InferenceTestHarness {
 
@@ -42,11 +48,8 @@ enum InferenceTestHarness {
         MLXBridgeArtifact.ladder
     }
 
-    /// Locates an MLX bridge by resolution and screen colour. The green
-    /// 512px bridge is copied into the inference test bundle for fast
-    /// CI runs; every other bridge (other rungs, blue at any rung) is
-    /// pulled from the app resources directory so we do not duplicate
-    /// another ~3 GB into SwiftPM build products.
+    /// Locates the unified production artifact without duplicating its
+    /// shared weights into SwiftPM build products.
     static func bridgeURL(forRung rung: Int, screenColor: ScreenColor = .green) throws -> URL {
         let filename = MLXBridgeArtifact.filename(forResolution: rung, screenColor: screenColor)
         let filenameURL = URL(fileURLWithPath: filename)
@@ -73,11 +76,7 @@ enum InferenceTestHarness {
         throw MetalUnavailable(reason: "\(filename) missing from the test bundle and production resources.")
     }
 
-    /// Locates the bundled green 512px MLX bridge inside the test
-    /// target's resources bundle. `MLXBridgeResourceLocator` walks
-    /// `Bundle.main` / `Bundle.allBundles`, neither of which reliably
-    /// picks up SPM test resource bundles, so tests pass the URL
-    /// explicitly.
+    /// Returns the production artifact for tests that run the 512px graph.
     static func bridgeURL512() throws -> URL {
         try bridgeURL(forRung: 512, screenColor: .green)
     }
@@ -128,15 +127,15 @@ enum InferenceTestHarness {
                     let isSubject = radius < 0.4
                     let baseIndex = (row * rung + column) * 4
                     if isSubject {
-                        pointer[baseIndex + 0] = 0.85
-                        pointer[baseIndex + 1] = 0.30
-                        pointer[baseIndex + 2] = 0.50
-                        pointer[baseIndex + 3] = 0.0
-                    } else {
-                        pointer[baseIndex + 0] = 0.10
-                        pointer[baseIndex + 1] = 0.85
-                        pointer[baseIndex + 2] = 0.10
+                        pointer[baseIndex + 0] = (0.85 - 0.485) / 0.229
+                        pointer[baseIndex + 1] = (0.30 - 0.456) / 0.224
+                        pointer[baseIndex + 2] = (0.50 - 0.406) / 0.225
                         pointer[baseIndex + 3] = 1.0
+                    } else {
+                        pointer[baseIndex + 0] = (0.10 - 0.485) / 0.229
+                        pointer[baseIndex + 1] = (0.85 - 0.456) / 0.224
+                        pointer[baseIndex + 2] = (0.10 - 0.406) / 0.225
+                        pointer[baseIndex + 3] = 0.0
                     }
                 }
             }

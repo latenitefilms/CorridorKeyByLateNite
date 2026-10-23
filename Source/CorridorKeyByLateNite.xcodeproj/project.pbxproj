@@ -7,16 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		221345E22F98BC6800CF734C /* corridorkey_mlx_bridge_512.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345DC2F98BC6800CF734C /* corridorkey_mlx_bridge_512.mlxfn */; };
-		221345E32F98BC6800CF734C /* corridorkey_mlx_bridge_1536.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345DF2F98BC6800CF734C /* corridorkey_mlx_bridge_1536.mlxfn */; };
-		221345E42F98BC6800CF734C /* corridorkey_mlx_bridge_768.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345DD2F98BC6800CF734C /* corridorkey_mlx_bridge_768.mlxfn */; };
-		221345E52F98BC6800CF734C /* corridorkey_mlx_bridge_1024.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345DE2F98BC6800CF734C /* corridorkey_mlx_bridge_1024.mlxfn */; };
-		221345E62F98BC6800CF734C /* corridorkey_mlx_bridge_2048.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345E02F98BC6800CF734C /* corridorkey_mlx_bridge_2048.mlxfn */; };
-		221345F52F98BC6800CF734C /* corridorkeyblue_mlx_bridge_512.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345F02F98BC6800CF734C /* corridorkeyblue_mlx_bridge_512.mlxfn */; };
-		221345F62F98BC6800CF734C /* corridorkeyblue_mlx_bridge_768.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345F12F98BC6800CF734C /* corridorkeyblue_mlx_bridge_768.mlxfn */; };
-		221345F72F98BC6800CF734C /* corridorkeyblue_mlx_bridge_1024.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345F22F98BC6800CF734C /* corridorkeyblue_mlx_bridge_1024.mlxfn */; };
-		221345F82F98BC6800CF734C /* corridorkeyblue_mlx_bridge_1536.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345F32F98BC6800CF734C /* corridorkeyblue_mlx_bridge_1536.mlxfn */; };
-		221345F92F98BC6800CF734C /* corridorkeyblue_mlx_bridge_2048.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345F42F98BC6800CF734C /* corridorkeyblue_mlx_bridge_2048.mlxfn */; };
+		C20000000000000000000001 /* Model Licenses in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* Model Licenses */; };
+		C20000000000000000000002 /* Model Licenses in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* Model Licenses */; };
+		221345E22F98BC6800CF734C /* corridorkey_v2.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345DC2F98BC6800CF734C /* corridorkey_v2.mlxfn */; };
 		22D097FF2F9887BD0096E749 /* Credits.rtf in Resources */ = {isa = PBXBuildFile; fileRef = 22D097FE2F9887BD0096E749 /* Credits.rtf */; };
 		22D0980E2F988FB70096E749 /* Motion Template in Resources */ = {isa = PBXBuildFile; fileRef = 22D0980D2F988FB70096E749 /* Motion Template */; };
 		22D7DAEC2FA7403600D828FB /* Background.png in Resources */ = {isa = PBXBuildFile; fileRef = 22D7DAEB2FA7403600D828FB /* Background.png */; };
@@ -182,16 +175,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		221345DC2F98BC6800CF734C /* corridorkey_mlx_bridge_512.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkey_mlx_bridge_512.mlxfn; sourceTree = "<group>"; };
-		221345DD2F98BC6800CF734C /* corridorkey_mlx_bridge_768.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkey_mlx_bridge_768.mlxfn; sourceTree = "<group>"; };
-		221345DE2F98BC6800CF734C /* corridorkey_mlx_bridge_1024.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkey_mlx_bridge_1024.mlxfn; sourceTree = "<group>"; };
-		221345DF2F98BC6800CF734C /* corridorkey_mlx_bridge_1536.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkey_mlx_bridge_1536.mlxfn; sourceTree = "<group>"; };
-		221345E02F98BC6800CF734C /* corridorkey_mlx_bridge_2048.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkey_mlx_bridge_2048.mlxfn; sourceTree = "<group>"; };
-		221345F02F98BC6800CF734C /* corridorkeyblue_mlx_bridge_512.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkeyblue_mlx_bridge_512.mlxfn; sourceTree = "<group>"; };
-		221345F12F98BC6800CF734C /* corridorkeyblue_mlx_bridge_768.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkeyblue_mlx_bridge_768.mlxfn; sourceTree = "<group>"; };
-		221345F22F98BC6800CF734C /* corridorkeyblue_mlx_bridge_1024.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkeyblue_mlx_bridge_1024.mlxfn; sourceTree = "<group>"; };
-		221345F32F98BC6800CF734C /* corridorkeyblue_mlx_bridge_1536.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkeyblue_mlx_bridge_1536.mlxfn; sourceTree = "<group>"; };
-		221345F42F98BC6800CF734C /* corridorkeyblue_mlx_bridge_2048.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkeyblue_mlx_bridge_2048.mlxfn; sourceTree = "<group>"; };
+		C20000000000000000000003 /* Model Licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "Model Licenses"; path = "../Model Licenses"; sourceTree = "<group>"; };
+		221345DC2F98BC6800CF734C /* corridorkey_v2.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkey_v2.mlxfn; sourceTree = "<group>"; };
 		22D097FE2F9887BD0096E749 /* Credits.rtf */ = {isa = PBXFileReference; lastKnownFileType = text.rtf; name = Credits.rtf; path = CorridorKeyByLateNite/WrapperApp/Credits.rtf; sourceTree = "<group>"; };
 		22D0980D2F988FB70096E749 /* Motion Template */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "Motion Template"; path = "CorridorKeyByLateNite/WrapperApp/Resources/Motion Template"; sourceTree = "<group>"; };
 		22D7DAEB2FA7403600D828FB /* Background.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Background.png; path = CorridorKeyByLateNite/WrapperApp/Resources/Background.png; sourceTree = "<group>"; };
@@ -340,16 +325,8 @@
 		221345E12F98BC6800CF734C /* MLX Models */ = {
 			isa = PBXGroup;
 			children = (
-				221345DC2F98BC6800CF734C /* corridorkey_mlx_bridge_512.mlxfn */,
-				221345DD2F98BC6800CF734C /* corridorkey_mlx_bridge_768.mlxfn */,
-				221345DE2F98BC6800CF734C /* corridorkey_mlx_bridge_1024.mlxfn */,
-				221345DF2F98BC6800CF734C /* corridorkey_mlx_bridge_1536.mlxfn */,
-				221345E02F98BC6800CF734C /* corridorkey_mlx_bridge_2048.mlxfn */,
-				221345F02F98BC6800CF734C /* corridorkeyblue_mlx_bridge_512.mlxfn */,
-				221345F12F98BC6800CF734C /* corridorkeyblue_mlx_bridge_768.mlxfn */,
-				221345F22F98BC6800CF734C /* corridorkeyblue_mlx_bridge_1024.mlxfn */,
-				221345F32F98BC6800CF734C /* corridorkeyblue_mlx_bridge_1536.mlxfn */,
-				221345F42F98BC6800CF734C /* corridorkeyblue_mlx_bridge_2048.mlxfn */,
+				C20000000000000000000003 /* Model Licenses */,
+				221345DC2F98BC6800CF734C /* corridorkey_v2.mlxfn */,
 			);
 			name = "MLX Models";
 			path = "CorridorKeyByLateNite/Plugin/Resources/MLX Models";
@@ -716,6 +693,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C20000000000000000000001 /* Model Licenses in Resources */,
 				22D7DAEE2FA82ECD00D828FB /* CorridorKey.icon in Resources */,
 				22D7DAEC2FA7403600D828FB /* Background.png in Resources */,
 				22D097FF2F9887BD0096E749 /* Credits.rtf in Resources */,
@@ -728,16 +706,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				221345E22F98BC6800CF734C /* corridorkey_mlx_bridge_512.mlxfn in Resources */,
-				221345E32F98BC6800CF734C /* corridorkey_mlx_bridge_1536.mlxfn in Resources */,
-				221345E42F98BC6800CF734C /* corridorkey_mlx_bridge_768.mlxfn in Resources */,
-				221345E52F98BC6800CF734C /* corridorkey_mlx_bridge_1024.mlxfn in Resources */,
-				221345E62F98BC6800CF734C /* corridorkey_mlx_bridge_2048.mlxfn in Resources */,
-				221345F52F98BC6800CF734C /* corridorkeyblue_mlx_bridge_512.mlxfn in Resources */,
-				221345F62F98BC6800CF734C /* corridorkeyblue_mlx_bridge_768.mlxfn in Resources */,
-				221345F72F98BC6800CF734C /* corridorkeyblue_mlx_bridge_1024.mlxfn in Resources */,
-				221345F82F98BC6800CF734C /* corridorkeyblue_mlx_bridge_1536.mlxfn in Resources */,
-				221345F92F98BC6800CF734C /* corridorkeyblue_mlx_bridge_2048.mlxfn in Resources */,
+				C20000000000000000000002 /* Model Licenses in Resources */,
+				221345E22F98BC6800CF734C /* corridorkey_v2.mlxfn in Resources */,
 				CK0100000000000000000014 /* InfoPlist.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1051,7 +1021,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "CorridorKey by LateNite";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_HEADER_SEARCH_PATHS = "$(SRCROOT)/CorridorKeyByLateNite/Plugin/Shared";
 				PRODUCT_BUNDLE_IDENTIFIER = com.latenitefilms.CorridorKeyToolbox;
 				PRODUCT_MODULE_NAME = CorridorKeyByLateNiteApp;
@@ -1089,7 +1059,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "CorridorKey by LateNite";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_HEADER_SEARCH_PATHS = "$(SRCROOT)/CorridorKeyByLateNite/Plugin/Shared";
 				PRODUCT_BUNDLE_IDENTIFIER = com.latenitefilms.CorridorKeyToolbox;
 				PRODUCT_MODULE_NAME = CorridorKeyByLateNiteApp;
@@ -1114,7 +1084,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "CorridorKey by LateNite Renderer";
 				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
 				MACH_O_TYPE = mh_execute;
-				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_HEADER_SEARCH_PATHS = "$(SRCROOT)/CorridorKeyByLateNite/Plugin/Shared";
 				PRODUCT_BUNDLE_IDENTIFIER = com.latenitefilms.CorridorKeyToolbox.Renderer;
 				PRODUCT_MODULE_NAME = CorridorKeyByLateNiteRenderer;
@@ -1141,7 +1111,7 @@
 				INFOPLIST_KEY_CFBundleDisplayName = "CorridorKey by LateNite Renderer";
 				LD_RUNPATH_SEARCH_PATHS = "@loader_path/../Frameworks";
 				MACH_O_TYPE = mh_execute;
-				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_HEADER_SEARCH_PATHS = "$(SRCROOT)/CorridorKeyByLateNite/Plugin/Shared";
 				PRODUCT_BUNDLE_IDENTIFIER = com.latenitefilms.CorridorKeyToolbox.Renderer;
 				PRODUCT_MODULE_NAME = CorridorKeyByLateNiteRenderer;
@@ -1163,7 +1133,7 @@
 				DEVELOPMENT_TEAM = A5HDJTY9X5;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.latenitefilms.CorridorKeyToolbox.WrapperAppTests;
 				PRODUCT_NAME = WrapperAppTests;
 				SWIFT_VERSION = 6.0;
@@ -1181,7 +1151,7 @@
 				DEVELOPMENT_TEAM = A5HDJTY9X5;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.6;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.latenitefilms.CorridorKeyToolbox.WrapperAppTests;
 				PRODUCT_NAME = WrapperAppTests;
 				SWIFT_VERSION = 6.0;

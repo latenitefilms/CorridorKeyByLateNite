@@ -62,6 +62,15 @@ struct AnalysisDataTests {
         #expect(AnalysisData.fromParameterDictionary(nil) == nil)
     }
 
+    @Test("V1 analysis cannot supply cached mattes to the v2 model")
+    func previousModelCacheIsRejected() {
+        let dictionary = NSMutableDictionary()
+        dictionary[AnalysisDataKey.schemaVersion] = NSNumber(value: 3)
+        dictionary[AnalysisDataKey.frameCount] = NSNumber(value: 1)
+        #expect(AnalysisData.currentSchemaVersion == 4)
+        #expect(AnalysisData.fromParameterDictionary(dictionary) == nil)
+    }
+
     @Test("Frame index maps render time to the right slot")
     func frameIndexMapping() {
         let data = AnalysisData(

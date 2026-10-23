@@ -24,6 +24,7 @@ import Testing
 @testable import CorridorKeyToolboxLogic
 @testable import CorridorKeyToolboxMetalStages
 
+extension MLXInferenceTests {
 @Suite("MLXMemory")
 struct MLXMemoryTests {
 
@@ -212,5 +213,7 @@ struct MLXMemoryTests {
               "after 30 more inferences: \(endActive / (1024 * 1024)) MB " +
               "(delta: \(delta / 1024) KB).")
     }
+
+}
 
 }

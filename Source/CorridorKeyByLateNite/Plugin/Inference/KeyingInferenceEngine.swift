@@ -16,7 +16,7 @@ import CorridorKeyToolboxLogic
 
 /// Input bundle handed to an inference engine. The normalised tensor is
 /// provided as a raw `MTLBuffer` rather than a texture so MLX can read it
-/// via `MLXArray(rawPointer:)` without a CPU copy — this eliminates the
+/// via MLX's managed array API without a CPU copy — this eliminates the
 /// ~67 MB of per-frame CPU↔GPU round-tripping the pre-v1.0 texture-based
 /// path paid at 2048² inference resolution.
 ///
@@ -26,8 +26,11 @@ import CorridorKeyToolboxLogic
 struct KeyingInferenceRequest {
     /// NHWC-packed float32 tensor (`[1, rung, rung, 4]`) — the first three
     /// channels are ImageNet-normalised RGB, the fourth is the alpha hint.
-    /// Storage mode is `.shared` so MLX can alias the bytes via
-    /// `init(rawPointer:)`.
+    /// The v2 adapter reverses normalization, decodes the host's video-gamma
+    /// RGB, then applies signed asinh encoding. Foreground is returned in the
+    /// same display encoding as the host; alpha remains linear coverage.
+    /// Storage mode is `.shared` so MLX can alias the bytes while retaining
+    /// the Metal buffer for the array's lifetime.
     let normalisedInputBuffer: any MTLBuffer
     /// Raw RGB source at inference resolution, in 0..1 linear/sRGB space.
     /// Any GPU engine that doesn't need the neural network should read
@@ -66,9 +69,8 @@ enum KeyingInferenceError: Error, CustomStringConvertible {
 /// session lifetime (model load, warm-up) but must be thread-safe because
 /// Final Cut Pro may render multiple frames simultaneously.
 ///
-/// `screenColor` is part of `supports` / `prepare` because each colour
-/// ships its own MLX bridge file — Green and Blue are not interchangeable
-/// at the engine level, even when the rung matches.
+/// `screenColor` identifies the renderer's hint/despill settings. Both colours
+/// share the same v2 model and never share frame-specific inference state.
 protocol KeyingInferenceEngine: AnyObject, Sendable {
     var backendDisplayName: String { get }
     var guideSourceDescription: String { get set }

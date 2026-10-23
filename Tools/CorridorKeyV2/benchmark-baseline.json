@@ -1,0 +1,143 @@
+{
+  "device": {
+    "resource_limit": 499000,
+    "max_buffer_length": 41747087360,
+    "architecture": "applegpu_g13s",
+    "memory_size": 68719476736,
+    "max_recommended_working_set_size": 55662788608,
+    "device_name": "Apple M1 Max"
+  },
+  "scope": "MLX inference plus contiguous outputs",
+  "measurements": [
+    {
+      "resolution": 512,
+      "screen": "green",
+      "seconds": [
+        0.30992812500335276,
+        0.2840487500070594,
+        0.29520499997306615
+      ],
+      "median_seconds": 0.29520499997306615,
+      "active_bytes": 2437924124,
+      "cache_bytes": 4332985140,
+      "peak_bytes": 3787725856
+    },
+    {
+      "resolution": 512,
+      "screen": "blue",
+      "seconds": [
+        0.304925333999563,
+        0.3602516669780016,
+        0.29280412499792874
+      ],
+      "median_seconds": 0.304925333999563,
+      "active_bytes": 2437924124,
+      "cache_bytes": 4333039580,
+      "peak_bytes": 3787725856
+    },
+    {
+      "resolution": 768,
+      "screen": "green",
+      "seconds": [
+        0.5586283330339938,
+        0.623801417008508,
+        0.5387461670325138
+      ],
+      "median_seconds": 0.5586283330339938,
+      "active_bytes": 2443237136,
+      "cache_bytes": 5648120244,
+      "peak_bytes": 4307849628
+    },
+    {
+      "resolution": 768,
+      "screen": "blue",
+      "seconds": [
+        0.5930076250224374,
+        0.5897827080334537,
+        0.626867167011369
+      ],
+      "median_seconds": 0.5930076250224374,
+      "active_bytes": 2443237136,
+      "cache_bytes": 5648120244,
+      "peak_bytes": 4307849628
+    },
+    {
+      "resolution": 1024,
+      "screen": "green",
+      "seconds": [
+        1.0887314170249738,
+        1.1211884589865804,
+        1.1660319999791682
+      ],
+      "median_seconds": 1.1211884589865804,
+      "active_bytes": 2450657876,
+      "cache_bytes": 7343921180,
+      "peak_bytes": 4405590484
+    },
+    {
+      "resolution": 1024,
+      "screen": "blue",
+      "seconds": [
+        1.0939371249987744,
+        1.1608455840032548,
+        1.1240413329796866
+      ],
+      "median_seconds": 1.1240413329796866,
+      "active_bytes": 2450657876,
+      "cache_bytes": 7343921180,
+      "peak_bytes": 4405590484
+    },
+    {
+      "resolution": 1536,
+      "screen": "green",
+      "seconds": [
+        2.544056124985218,
+        2.658249625004828,
+        2.4488465419854037
+      ],
+      "median_seconds": 2.544056124985218,
+      "active_bytes": 2471768856,
+      "cache_bytes": 10648320636,
+      "peak_bytes": 4467480560
+    },
+    {
+      "resolution": 1536,
+      "screen": "blue",
+      "seconds": [
+        2.423843541997485,
+        2.618554332992062,
+        2.524999334011227
+      ],
+      "median_seconds": 2.524999334011227,
+      "active_bytes": 2471768856,
+      "cache_bytes": 10648320636,
+      "peak_bytes": 4467480560
+    },
+    {
+      "resolution": 2048,
+      "screen": "green",
+      "seconds": [
+        4.56204837502446,
+        4.3772889579995535,
+        4.3486618750030175
+      ],
+      "median_seconds": 4.3772889579995535,
+      "active_bytes": 2501276000,
+      "cache_bytes": 14185974208,
+      "peak_bytes": 5123264352
+    },
+    {
+      "resolution": 2048,
+      "screen": "blue",
+      "seconds": [
+        4.3716196669847704,
+        4.572665374958888,
+        4.598733792023268
+      ],
+      "median_seconds": 4.572665374958888,
+      "active_bytes": 2501276000,
+      "cache_bytes": 14185974208,
+      "peak_bytes": 5123264352
+    }
+  ]
+}

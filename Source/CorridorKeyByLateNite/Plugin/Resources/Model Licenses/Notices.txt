@@ -1,0 +1,37 @@
+CorridorKey by LateNite — CorridorKey v2 model notices
+
+The application includes a converted MLX inference graph, with float16 weight
+storage and float32 computation. No Python reference runtime is distributed.
+The conversion changes the inference backend and stored precision, not the
+trained architecture. Both keying stages and all three foundations are included.
+
+CorridorKey v2
+Copyright (c) Corridor Digital LLC. Model designed and trained by Zachary Harris
+in collaboration with Niko Pueringer and Corridor Digital.
+Source: https://github.com/nikopueringer/CorridorKey2.0
+Weights: https://huggingface.co/nikopueringer/CorridorKey2.0
+License: Corridor Key Licence 2.0 (CorridorKey-v2.txt).
+
+C-RADIOv4-SO400M
+Publisher: NVIDIA Corporation.
+Source: https://huggingface.co/nvidia/C-RADIOv4-SO400M
+Revision: c0457f5dc26ca145f954cd4fc5bb6114e5705ad8
+Licensed by NVIDIA Corporation under the NVIDIA Open Model License
+(NVIDIA-Open-Model-License.pdf).
+
+MoGe-2 ViT-B
+Publisher: Microsoft Corporation.
+Source: https://github.com/microsoft/MoGe
+Weights: https://huggingface.co/Ruicheng/moge-2-vitb-normal
+Revision: ca5f0e07ff01d3e5a364c1d954ed12ee1814b368
+MIT license; DINOv2 components are Copyright Meta Platforms, Inc. and licensed
+under Apache 2.0 (MoGe-and-DINOv2.txt).
+
+RVM-small (Recurrent Video MAE)
+Publisher: Google DeepMind.
+Source: https://github.com/google-deepmind/representations4d
+Checkpoint: pretrain_rvm_small16_256_204031069.npz
+Weights licensed under Creative Commons Attribution 4.0 International
+(RVM-CC-BY-4.0.txt). The reference implementation uses Apache 2.0.
+
+MLX and the wrapper application's own source retain their respective licenses.

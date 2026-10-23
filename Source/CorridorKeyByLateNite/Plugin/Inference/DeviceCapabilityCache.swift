@@ -62,7 +62,8 @@ public final class DeviceCapabilityCache: @unchecked Sendable {
         let rung: Int
     }
 
-    private static let userDefaultsKey = "com.corridor.keytoolbox.deviceCapabilityCache"
+    /// Model-specific namespace: v1 timings cannot recommend v2 quality levels.
+    private static let userDefaultsKey = "com.corridor.keytoolbox.deviceCapabilityCache.v2"
 
     private init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults

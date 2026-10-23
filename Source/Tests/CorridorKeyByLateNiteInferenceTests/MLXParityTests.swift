@@ -23,6 +23,7 @@ import Testing
 @testable import CorridorKeyToolboxLogic
 @testable import CorridorKeyToolboxMetalStages
 
+extension MLXInferenceTests {
 @Suite("MLXParity")
 struct MLXParityTests {
 
@@ -176,4 +177,6 @@ struct MLXParityTests {
 
         return InferenceTestHarness.readAlpha(output: output)
     }
+}
+
 }

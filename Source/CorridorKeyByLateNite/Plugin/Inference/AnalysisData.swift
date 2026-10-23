@@ -42,8 +42,9 @@ struct AnalysisData: Sendable {
     /// older plug-in versions. Readers treat mismatched versions as "no
     /// cache" so Analyse Clip has to rebuild. Bumped to `3` after adding
     /// `qualityModeRaw` so the inspector can tell the user when a saved
-    /// cache no longer matches the Quality setting they've selected.
-    static let currentSchemaVersion: Int = 3
+    /// cache no longer matches the Quality setting they've selected. Version 4
+    /// invalidates v1 model mattes so saved clips are analysed with v2.
+    static let currentSchemaVersion: Int = 4
 
     let schemaVersion: Int
     let frameDuration: CMTime

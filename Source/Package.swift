@@ -32,7 +32,7 @@ let package = Package(
     name: "CorridorKeyToolboxLogic",
     defaultLocalization: "en",
     platforms: [
-        .macOS(.v15)
+        .macOS("26.0")
     ],
     products: [
         .library(
@@ -207,12 +207,10 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift")
             ],
             path: "Tests/CorridorKeyByLateNiteInferenceTests",
-            // The 512px bridge is ~30 MB and exercises the same MLX code
-            // path as the Maximum rung. Bundling just the smallest one
-            // keeps the test target compact while still catching real
-            // memory regressions.
+            // Read the validated v2 artifact from production resources rather
+            // than copying its shared weights into every test build product.
             resources: [
-                .copy("Resources/corridorkey_mlx_bridge_512.mlxfn")
+                .copy("Resources/README.md")
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6)

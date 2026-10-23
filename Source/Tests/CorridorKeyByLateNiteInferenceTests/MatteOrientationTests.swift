@@ -24,6 +24,7 @@ import Testing
 @testable import CorridorKeyToolboxLogic
 @testable import CorridorKeyToolboxMetalStages
 
+extension MLXInferenceTests {
 @Suite("MatteOrientation")
 struct MatteOrientationTests {
 
@@ -117,8 +118,8 @@ struct MatteOrientationTests {
             throw InferenceTestHarness.MetalUnavailable(reason: "Could not allocate normalised input buffer.")
         }
         let pointer = buffer.contents().assumingMemoryBound(to: Float.self)
-        // Two horizontal bands: green (background hint=1) on one half,
-        // magenta-ish "subject" (hint=0) on the other half. The buffer
+        // Two horizontal bands: green (background hint=0) on one half,
+        // magenta-ish "subject" (hint=1) on the other half. The buffer
         // is laid out [1, H, W, 4] in **y-down** order — row 0 = visual
         // top. The model's output should mirror that orientation.
         for row in 0..<rung {
@@ -131,15 +132,15 @@ struct MatteOrientationTests {
             for column in 0..<rung {
                 let baseIndex = (row * rung + column) * 4
                 if isSubjectRow {
-                    pointer[baseIndex + 0] = 0.85
-                    pointer[baseIndex + 1] = 0.30
-                    pointer[baseIndex + 2] = 0.50
-                    pointer[baseIndex + 3] = 0.0
-                } else {
-                    pointer[baseIndex + 0] = 0.10
-                    pointer[baseIndex + 1] = 0.85
-                    pointer[baseIndex + 2] = 0.10
+                    pointer[baseIndex + 0] = (0.85 - 0.485) / 0.229
+                    pointer[baseIndex + 1] = (0.30 - 0.456) / 0.224
+                    pointer[baseIndex + 2] = (0.50 - 0.406) / 0.225
                     pointer[baseIndex + 3] = 1.0
+                } else {
+                    pointer[baseIndex + 0] = (0.10 - 0.485) / 0.229
+                    pointer[baseIndex + 1] = (0.85 - 0.456) / 0.224
+                    pointer[baseIndex + 2] = (0.10 - 0.406) / 0.225
+                    pointer[baseIndex + 3] = 0.0
                 }
             }
         }
@@ -174,4 +175,6 @@ struct MatteOrientationTests {
         }
         return KeyingInferenceOutput(alphaTexture: alpha, foregroundTexture: foreground)
     }
+}
+
 }
