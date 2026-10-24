@@ -65,7 +65,8 @@ public enum HintMode: Int, Sendable, CaseIterable, Codable {
     }
 
     /// Whether this mode requires at least one user-placed hint
-    /// point in the render request. The render path checks this at
+    /// point somewhere in the clip. Unannotated frames use the chroma prior.
+    /// The render path checks this at
     /// the start of the pre-inference stage and returns a
     /// pass-through frame plus a status message rather than feeding
     /// MLX an empty hint.

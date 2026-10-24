@@ -113,7 +113,7 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
         at time: CMTime
     ) {
         let showSubjectMarker = subjectMarkerVisible(at: time)
-        let hints = currentHintSet(at: time)
+        let hints = currentHintSet().points(at: time)
         let subjectAnchor = subjectPosition(at: time)
         let screen = currentScreenColor(at: time)
 
@@ -157,7 +157,7 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
             Self.markerVisualRadiusPixels,
             showSubjectMarker ? Int32(HintPointKind.foreground.rawValue) : -1
         )
-        for hint in hints.points {
+        for hint in hints {
             appendPacked(
                 hint.x,
                 hint.y,
@@ -243,10 +243,10 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
             }
         }
 
-        let hints = currentHintSet(at: time)
+        let hints = currentHintSet().points(at: time)
         var nearest: Int = 0
         var nearestDistanceSquared = Self.eraseTolerance * Self.eraseTolerance
-        for (index, point) in hints.points.enumerated() {
+        for (index, point) in hints.enumerated() {
             let dx = point.x - object.x
             let dy = point.y - object.y
             let distanceSquared = dx * dx + dy * dy
@@ -296,20 +296,24 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
         // Empty canvas (or over a hint with the option modifier) —
         // place / erase a hint point.
         let object = objectPosition(forCanvasX: x, canvasY: y)
-        var hints = currentHintSet(at: time)
+        guard let timing = apiManager.api(for: (any FxTimingAPI_v4).self) as? any FxTimingAPI_v4 else { return }
+        var duration = CMTime.invalid
+        timing.frameDuration(&duration)
+        guard let hintFrame = HintFrame(time: time, duration: duration) else { return }
+        var hints = currentHintSet()
         switch hintAction(for: modifiers) {
         case .addForeground:
-            hints.add(HintPoint(x: object.x, y: object.y, kind: .foreground))
+            hints.add(HintPoint(x: object.x, y: object.y, kind: .foreground, frame: hintFrame))
         case .addBackground:
-            hints.add(HintPoint(x: object.x, y: object.y, kind: .background))
+            hints.add(HintPoint(x: object.x, y: object.y, kind: .background, frame: hintFrame))
         case .eraseNearest:
-            let removed = hints.removeNearest(toX: object.x, y: object.y, tolerance: Self.eraseTolerance)
+            let removed = hints.removeNearest(toX: object.x, y: object.y, tolerance: Self.eraseTolerance, at: time)
             if !removed {
                 forceUpdate.pointee = ObjCBool(false)
                 return
             }
         }
-        writeHintSet(hints, at: time)
+        writeHintSet(hints)
         forceUpdate.pointee = ObjCBool(true)
     }
 
@@ -505,7 +509,7 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
         setter.setXValue(x, yValue: y, toParameter: ParameterIdentifier.subjectPosition, at: time)
     }
 
-    private func currentHintSet(at _: CMTime) -> HintPointSet {
+    private func currentHintSet() -> HintPointSet {
         guard let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6 else {
             return HintPointSet()
         }
@@ -520,7 +524,7 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
     /// parameter. Same caveat as `writeSubjectPosition` —
     /// always invoked from a host mouse callback, so we must not
     /// re-open an action scope.
-    private func writeHintSet(_ hints: HintPointSet, at _: CMTime) {
+    private func writeHintSet(_ hints: HintPointSet) {
         HeaderCustomParameterStorage.setDictionary(
             hints.asParameterDictionary(),
             for: HeaderStorageKey.subjectPoints,

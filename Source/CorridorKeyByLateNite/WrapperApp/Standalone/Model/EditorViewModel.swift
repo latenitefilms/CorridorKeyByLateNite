@@ -224,7 +224,16 @@ final class EditorViewModel {
     /// survive across sessions; per-clip parameters (sliders, screen
     /// colour, etc.) start from the factory defaults inside
     /// `PluginStateData()`.
-    var state: PluginStateData = EditorPreferences.makeInitialState()
+    var state: PluginStateData = EditorPreferences.makeInitialState() {
+        didSet {
+            guard oldValue.hintMode != state.hintMode || oldValue.hintPointSet != state.hintPointSet else { return }
+            // An in-flight run owns the old annotations. Cancel it before
+            // clearing, so queued results cannot repopulate a stale cache.
+            cancelAnalysis()
+            matteCache.removeAll()
+            analysisStatus = .idle
+        }
+    }
     /// Loaded clip metadata. `nil` while `.noClipLoaded`.
     var clipInfo: VideoSourceInfo?
     /// Most recently rendered frame, ready to draw on the preview
@@ -608,6 +617,8 @@ final class EditorViewModel {
         phase = .loadingClip(url)
         do {
             let source = try await VideoSource(url: url)
+            self.state.hintPointSet.clear()
+            self.undoManager?.removeAllActions(withTarget: self)
             self.videoSource = source
             let info = source.info
             self.clipInfo = info
@@ -668,6 +679,8 @@ final class EditorViewModel {
         playheadTime = .zero
         renderBackendDescription = "—"
         lastEngineDescription = "—"
+        state.hintPointSet.clear()
+        undoManager?.removeAllActions(withTarget: self)
         phase = .noClipLoaded
     }
 
@@ -980,6 +993,14 @@ final class EditorViewModel {
     /// the FxPlug OSC writes into the `HintPointSet` parameter.
     /// No-op when the tool is `.disabled`.
     func handleOSCClick(atNormalizedPoint point: CGPoint) {
+        guard let clipInfo, !isPlaying,
+              let frame = HintFrame(
+                  time: playheadTime,
+                  duration: CMTime(seconds: 1 / Double(clipInfo.nominalFrameRate), preferredTimescale: clipInfo.timescale)
+              ) else { return }
+        // A seek may still be decoding. Do not annotate the previous image
+        // using the new playhead's timestamp.
+        if let latestPreview, !frame.contains(latestPreview.presentationTime) { return }
         let tool = oscTool
         let clampedX = min(max(Double(point.x), 0), 1)
         let clampedY = min(max(Double(point.y), 0), 1)
@@ -989,13 +1010,13 @@ final class EditorViewModel {
         case .disabled:
             return
         case .foregroundHint:
-            nextSet.add(HintPoint(x: clampedX, y: clampedY, kind: .foreground))
+            nextSet.add(HintPoint(x: clampedX, y: clampedY, kind: .foreground, frame: frame))
             actionName = "Add Foreground Hint"
         case .backgroundHint:
-            nextSet.add(HintPoint(x: clampedX, y: clampedY, kind: .background))
+            nextSet.add(HintPoint(x: clampedX, y: clampedY, kind: .background, frame: frame))
             actionName = "Add Background Hint"
         case .eraseHint:
-            let didRemove = nextSet.removeNearest(toX: clampedX, y: clampedY, tolerance: 0.05)
+            let didRemove = nextSet.removeNearest(toX: clampedX, y: clampedY, tolerance: 0.05, at: playheadTime)
             actionName = didRemove ? "Erase Hint" : nil
         }
         // No-op clicks (erase tool with nothing in tolerance) skip
@@ -1003,6 +1024,19 @@ final class EditorViewModel {
         // with steps the user can't see.
         guard let actionName, nextSet != state.hintPointSet else { return }
         applyHintPointSet(nextSet, actionName: actionName)
+    }
+
+    /// Only annotations belonging to the displayed source frame.
+    var currentFrameHints: [HintPoint] {
+        state.hintPointSet.points(at: playheadTime)
+    }
+
+    /// Clears the displayed frame while preserving annotations elsewhere in the clip.
+    func clearHintsOnCurrentFrame() {
+        guard !currentFrameHints.isEmpty else { return }
+        var nextSet = state.hintPointSet
+        nextSet.clear(at: playheadTime)
+        applyHintPointSet(nextSet, actionName: "Clear Hints on This Frame")
     }
 
     /// Wipes every placed hint point.

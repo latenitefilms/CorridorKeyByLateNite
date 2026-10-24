@@ -100,22 +100,9 @@ struct PluginStateData: Codable, Sendable {
     init(
         screenColor: ScreenColor = .green,
         qualityMode: QualityMode = .automatic,
-        // Default-on quality stack — every parameter below that flips
-        // between "preserve every model pixel" and "polish the
-        // matte" defaults to polish. Users coming in cold get a comp-
-        // ready key on first frame; users tuning a tricky shot can
-        // still flip any individual stage off. The five flips:
-        //
-        //   * hintMode — Apple Vision foreground prior beats the
-        //     green-bias hint on most subjects.
-        //   * autoDespeckleEnabled — drops the salt-and-pepper noise
-        //     the model occasionally produces over moving green.
-        //   * lightWrapEnabled — inherits a touch of background
-        //     colour into the edge so composites don't look pasted.
-        //   * edgeDecontaminateEnabled — kills residual chroma fringe
-        //     on hair and feathered edges.
-        //   * temporalStabilityEnabled — dampens edge-band flicker
-        //     between frames.
+        // Apple Vision, despeckle, light wrap and temporal stability provide
+        // the initial key. Additional edge colour correction is opt-in because
+        // the neural foreground already reconstructs clean edge RGB.
         hintMode: HintMode = .appleVision,
         showSubjectMarker: Bool = false,
         subjectPositionX: Double = 0.5,
@@ -150,7 +137,7 @@ struct PluginStateData: Codable, Sendable {
         lightWrapEnabled: Bool = true,
         lightWrapStrength: Double = 0.25,
         lightWrapRadius: Double = 10.0,
-        edgeDecontaminateEnabled: Bool = true,
+        edgeDecontaminateEnabled: Bool = false,
         edgeDecontaminateStrength: Double = 0.5,
         temporalStabilityEnabled: Bool = true,
         temporalStabilityStrength: Double = 0.5,
@@ -272,7 +259,7 @@ struct PluginStateData: Codable, Sendable {
         self.lightWrapEnabled = try container.decodeIfPresent(Bool.self, forKey: .lightWrapEnabled) ?? true
         self.lightWrapStrength = try container.decodeIfPresent(Double.self, forKey: .lightWrapStrength) ?? 0.25
         self.lightWrapRadius = try container.decodeIfPresent(Double.self, forKey: .lightWrapRadius) ?? 10.0
-        self.edgeDecontaminateEnabled = try container.decodeIfPresent(Bool.self, forKey: .edgeDecontaminateEnabled) ?? true
+        self.edgeDecontaminateEnabled = try container.decodeIfPresent(Bool.self, forKey: .edgeDecontaminateEnabled) ?? false
         self.edgeDecontaminateStrength = try container.decodeIfPresent(Double.self, forKey: .edgeDecontaminateStrength) ?? 0.5
         self.temporalStabilityEnabled = try container.decodeIfPresent(Bool.self, forKey: .temporalStabilityEnabled) ?? true
         self.temporalStabilityStrength = try container.decodeIfPresent(Double.self, forKey: .temporalStabilityStrength) ?? 0.5

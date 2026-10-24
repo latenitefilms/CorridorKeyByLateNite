@@ -1,4 +1,5 @@
 import CoreVideo
+import CoreMedia
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -15,6 +16,115 @@ extension MLXInferenceTests {
     /// A direct model test cannot detect a second flip introduced by a host.
     @Suite("Standalone pipeline", .serialized)
     struct StandalonePipelineTests {
+        @Test("Host analysis and playback respect independent source and destination image origins")
+        func hostImageOrigins() throws {
+            let engine = try StandaloneRenderEngine()
+            let bridge = try PixelBufferTextureBridge(device: engine.device)
+            let pipeline = RenderPipeline()
+            let entry = try MetalDeviceCache.shared.entry(for: engine.device)
+            let queue = try #require(entry.borrowCommandQueue())
+            defer { entry.returnCommandQueue(queue) }
+            let width = 64
+            let height = 48
+            let state = Self.neutralState()
+            var textures: [(order: ImageRowOrder, texture: any MTLTexture, owner: CVPixelBuffer)] = []
+            for order in ImageRowOrder.allCases {
+                let source = try Self.makeSource(width: width, height: height) { column, row in
+                    let visualRow = order == .topToBottom ? row : height - 1 - row
+                    if visualRow < height / 2 {
+                        return SIMD4<UInt8>(column < width / 2 ? 210 : 150, 65, 120, 255)
+                    }
+                    return SIMD4<UInt8>(25, 220, 25, 255)
+                }
+                textures.append((order, try bridge.makeTexture(for: source).metalTexture, source))
+            }
+            let reference = try pipeline.extractAlphaMatteForAnalysis(
+                sourceTexture: textures[0].texture, state: state, workingGamut: .rec709,
+                renderTime: .zero, device: engine.device, entry: entry, commandQueue: queue
+            )
+            let reversed = try pipeline.extractAlphaMatteForAnalysis(
+                sourceTexture: textures[1].texture, state: state, workingGamut: .rec709,
+                renderTime: .zero, device: engine.device, entry: entry, commandQueue: queue,
+                sourceRowOrder: .bottomToTop
+            )
+            #expect(reference.alpha == reversed.alpha)
+            #expect(reference.foregroundHalfRGBA == reversed.foregroundHalfRGBA)
+            #expect(Self.bandMean(reference.alpha, width: 512, rows: 16..<96)
+                    > Self.bandMean(reference.alpha, width: 512, rows: 416..<496) + 0.3)
+            let cache = try AnalysisFrameCodec.encode(
+                alpha: reversed.alpha, foregroundHalfRGBA: reversed.foregroundHalfRGBA, width: 512, height: 512
+            )
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: width, height: height, mipmapped: false)
+            descriptor.storageMode = .shared
+            descriptor.usage = [.shaderRead, .renderTarget]
+            let destination = try #require(engine.device.makeTexture(descriptor: descriptor))
+            for useCache in [false, true] {
+                for mode in [OutputMode.processed, .matteOnly, .foregroundOnly, .sourcePlusMatte, .foregroundPlusMatte, .hint] {
+                    var configured = state
+                    configured.outputMode = mode
+                    if useCache {
+                        configured.cachedMatteBlob = cache
+                        configured.cachedMatteInferenceResolution = 512
+                    }
+                    _ = try pipeline.renderToTexture(source: textures[0].texture, destination: destination, state: configured)
+                    let expected = Self.readRGBA(destination)
+                    for source in textures {
+                        for destinationOrder in ImageRowOrder.allCases {
+                            _ = try pipeline.renderToTexture(
+                                source: source.texture, destination: destination, state: configured,
+                                sourceRowOrder: source.order, destinationRowOrder: destinationOrder
+                            )
+                            let actual = Self.readRGBA(destination)
+                            var maximumError: Float = 0
+                            for row in 0..<height {
+                                let outputRow = destinationOrder == .topToBottom ? row : height - 1 - row
+                                for column in 0..<(width * 4) {
+                                    maximumError = max(maximumError, abs(expected[row * width * 4 + column] - actual[outputRow * width * 4 + column]))
+                                }
+                            }
+                            #expect(maximumError < 0.002, "Source \(source.order), destination \(destinationOrder), mode \(mode), cache \(useCache)")
+                        }
+                    }
+                }
+            }
+            withExtendedLifetime(textures) {}
+        }
+
+        @Test("Manual Hint analysis and diagnostic use only the current frame's annotations",
+              arguments: [HintPointKind.foreground, .background])
+        func manualHintsAreFrameScoped(kind: HintPointKind) throws {
+            let engine = try StandaloneRenderEngine()
+            let source = try Self.makeSource(width: 64, height: 64) { _, _ in
+                kind == .foreground ? SIMD4<UInt8>(25, 220, 25, 255) : SIMD4<UInt8>(210, 65, 120, 255)
+            }
+            let duration = CMTime(value: 1, timescale: 24)
+            let frame = try #require(HintFrame(time: .zero, duration: duration))
+            var annotated = Self.neutralState()
+            annotated.hintMode = .manual
+            annotated.hintPointSet = HintPointSet(points: [
+                HintPoint(x: 0.5, y: 0.5, kind: kind, radiusNormalized: 0.3, frame: frame)
+            ])
+            // An unmarked frame in a manually annotated clip must still analyse.
+            let unmarked = try engine.extractMatteBlob(source: source, state: annotated, renderTime: duration)
+            let automatic = try engine.extractMatteBlob(source: source, state: Self.neutralState(), renderTime: duration)
+            let maxDelta = zip(unmarked.alphaFloats, automatic.alphaFloats).reduce(Float.zero) {
+                max($0, abs($1.0 - $1.1))
+            }
+            #expect(maxDelta < 0.0001, "Annotations must not leak to adjacent frames")
+
+            annotated.outputMode = .hint
+            let markedPixels = Self.readRGBA(try engine.render(source: source, state: annotated, renderTime: .zero).destinationTexture)
+            let unmarkedPixels = Self.readRGBA(try engine.render(source: source, state: annotated, renderTime: duration).destinationTexture)
+            var baseline = Self.neutralState()
+            baseline.outputMode = .hint
+            let baselinePixels = Self.readRGBA(try engine.render(source: source, state: baseline, renderTime: duration).destinationTexture)
+            #expect(unmarkedPixels == baselinePixels)
+            let center = (32 * 64 + 32) * 4
+            #expect(abs(markedPixels[center] - unmarkedPixels[center]) > 0.1)
+            // Points guide local areas; they do not turn everything outside them into background.
+            #expect(markedPixels[0] == unmarkedPixels[0])
+        }
+
         @Test("Analysis and cached composition preserve source orientation",
               arguments: ScreenColor.allCases, [false, true])
         func orientation(screenColor: ScreenColor, subjectAtTop: Bool) throws {

@@ -13,6 +13,41 @@
 
 import Foundation
 import CoreGraphics
+import CoreMedia
+
+/// Source-frame identity shared by the editor, OSC, analysis and diagnostics.
+/// A half-frame tolerance accommodates equivalent timestamps with different
+/// timescales without holding or interpolating annotations onto adjacent frames.
+public struct HintFrame: Hashable, Sendable, Codable {
+    private let seconds: Double
+    private let durationSeconds: Double
+    private let epoch: Int64
+
+    /// Creates a frame identity only for finite source times and positive durations.
+    public init?(time: CMTime, duration: CMTime) {
+        guard time.isNumeric, duration.isNumeric,
+              time.seconds.isFinite, duration.seconds.isFinite,
+              duration.seconds > 0 else { return nil }
+        seconds = time.seconds
+        durationSeconds = duration.seconds
+        epoch = time.epoch
+    }
+
+    /// Whether a source timestamp addresses this annotated frame.
+    public func contains(_ time: CMTime) -> Bool {
+        guard time.isNumeric, time.epoch == epoch else { return false }
+        let delta = time.seconds - seconds
+        return delta >= -durationSeconds / 2 && delta < durationSeconds / 2
+    }
+}
+
+/// Identical guidance in the standalone and Final Cut Pro inspectors.
+public enum ManualHintGuidance {
+    /// Describes the local influence and analysis workflow without promising tracking.
+    public static let explanation = "Hints guide small areas on the frame where you place them; they do not outline or track a subject. In Manual Hint, unmarked frames use the automatic chroma hint. Choose Analyse Clip after editing hints."
+    /// Explains how to migrate annotations whose original frame was never recorded.
+    public static let legacyExplanation = "Hints saved in earlier versions apply to every frame. Clear them and add new hints to make them frame-specific."
+}
 
 /// Foreground vs background hint label. Foreground points pull the
 /// matte toward 1.0 in their neighbourhood; background points pull it
@@ -24,19 +59,22 @@ public enum HintPointKind: Int, Sendable, Codable {
 
 /// One user-placed hint point. Coordinates are in object-normalized
 /// space (0…1 across the input image) so they remain valid when the
-/// user changes the canvas size, scrubs around timecodes, or applies
+/// user changes the canvas size or applies
 /// a transform on top of CorridorKey by LateNite.
 public struct HintPoint: Hashable, Sendable, Codable {
     public var x: Double
     public var y: Double
     public var kind: HintPointKind
     public var radiusNormalized: Double
+    /// `nil` preserves the clip-wide behaviour of hints saved before frame support.
+    public var frame: HintFrame?
 
-    public init(x: Double, y: Double, kind: HintPointKind, radiusNormalized: Double = 0.04) {
+    public init(x: Double, y: Double, kind: HintPointKind, radiusNormalized: Double = 0.04, frame: HintFrame? = nil) {
         self.x = x
         self.y = y
         self.kind = kind
         self.radiusNormalized = radiusNormalized
+        self.frame = frame
     }
 }
 
@@ -53,6 +91,14 @@ public struct HintPointSet: Hashable, Sendable, Codable {
     }
 
     public var isEmpty: Bool { points.isEmpty }
+
+    /// Older projects retain their original global hints until explicitly cleared.
+    public var hasLegacyPoints: Bool { points.contains { $0.frame == nil } }
+
+    /// Annotations for this source frame, in placement order. No temporal propagation.
+    public func points(at time: CMTime) -> [HintPoint] {
+        points.filter { $0.frame?.contains(time) ?? true }
+    }
 
     /// Persists to the host as a binary plist so we can embed it
     /// inside a custom-parameter NSDictionary alongside other custom
@@ -115,11 +161,12 @@ public struct HintPointSet: Hashable, Sendable, Codable {
     /// trigger a re-render. The OSC uses this for shift-click delete
     /// and right-click delete.
     @discardableResult
-    public mutating func removeNearest(toX x: Double, y: Double, tolerance: Double) -> Bool {
+    public mutating func removeNearest(toX x: Double, y: Double, tolerance: Double, at time: CMTime? = nil) -> Bool {
         guard !points.isEmpty else { return false }
         var nearestIndex: Int? = nil
         var nearestDistanceSquared = tolerance * tolerance
         for (index, point) in points.enumerated() {
+            if let time, let frame = point.frame, !frame.contains(time) { continue }
             let dx = point.x - x
             let dy = point.y - y
             let distanceSquared = dx * dx + dy * dy
@@ -137,5 +184,10 @@ public struct HintPointSet: Hashable, Sendable, Codable {
 
     public mutating func clear() {
         points.removeAll(keepingCapacity: false)
+    }
+
+    /// Removes only annotations visible at this time, including any legacy global hints.
+    public mutating func clear(at time: CMTime) {
+        points.removeAll { $0.frame?.contains(time) ?? true }
     }
 }

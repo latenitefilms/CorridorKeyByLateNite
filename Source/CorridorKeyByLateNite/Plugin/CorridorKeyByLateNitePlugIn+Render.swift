@@ -81,24 +81,27 @@ extension CorridorKeyToolboxPlugIn {
         for state: inout PluginStateData,
         at renderTime: CMTime
     ) {
+        // Use the immutable parameters supplied for this render. A fallback
+        // snapshot must match them before it can supply a cached matte.
+        let hints = AnalysisHintConfiguration(mode: state.hintMode, points: state.hintPointSet)
         if let cachedMatte = analysisSnapshotStore.cachedMatte(
             at: renderTime,
-            screenColorRaw: state.screenColor.rawValue
+            screenColorRaw: state.screenColor.rawValue,
+            hintConfiguration: hints
         ) {
             state.cachedMatteBlob = cachedMatte.blob
             state.cachedMatteInferenceResolution = cachedMatte.inferenceResolution
             return
         }
-
         guard let retrieval = apiManager.api(
             for: (any FxParameterRetrievalAPI_v6).self
         ) as? any FxParameterRetrievalAPI_v6,
               let analysis = loadAnalysisData(using: retrieval),
               let cachedMatte = analysis.cachedMatte(
                   at: renderTime,
-                  screenColorRaw: state.screenColor.rawValue
-              )
-        else { return }
+                  screenColorRaw: state.screenColor.rawValue,
+                  hintConfiguration: hints
+              ) else { return }
         state.cachedMatteBlob = cachedMatte.blob
         state.cachedMatteInferenceResolution = cachedMatte.inferenceResolution
     }

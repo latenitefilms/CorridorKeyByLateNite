@@ -75,6 +75,7 @@ final class CorridorKeyComputePipelines: Sendable {
     let spillAlphaAttenuation: any MTLComputePipelineState
     let sourcePassthrough: any MTLComputePipelineState
     let applyScreenMatrix: any MTLComputePipelineState
+    let flipVertical: any MTLComputePipelineState
     let resample: any MTLComputePipelineState
     let extractHint: any MTLComputePipelineState
     let refinerBlend: any MTLComputePipelineState
@@ -111,6 +112,7 @@ final class CorridorKeyComputePipelines: Sendable {
         spillAlphaAttenuation = try compute("corridorKeySpillAlphaAttenuationKernel")
         sourcePassthrough = try compute("corridorKeySourcePassthroughKernel")
         applyScreenMatrix = try compute("corridorKeyApplyScreenMatrixKernel")
+        flipVertical = try compute("corridorKeyFlipVerticalKernel")
         resample = try compute("corridorKeyResampleKernel")
         extractHint = try compute("corridorKeyExtractHintKernel")
         refinerBlend = try compute("corridorKeyRefinerBlendKernel")

@@ -76,7 +76,7 @@ struct PluginStateDataTests {
     @Test("Temporal stability defaults preserve backward compatibility")
     func temporalStabilityDefaults() {
         let defaults = PluginStateData()
-        // Default ON in v1.0 — alongside Light Wrap, Edge Decontaminate,
+        // Default ON in v1.0 — alongside Light Wrap,
         // Auto Despeckle, and Apple Vision hinting, this lands users on
         // a comp-ready key on first frame. Users tuning a tricky shot
         // can flip it off via the inspector.
@@ -200,4 +200,14 @@ struct PluginStateDataTests {
         state.destinationLongEdgePixels = 1920
         #expect(abs(state.destinationPixelRadius(fromNormalized: 10) - 10) < 0.001)
     }
+    @Test("Edge Decontaminate is opt-in while existing explicit choices survive decoding")
+    func edgeDecontaminationDefaultsOff() throws {
+        #expect(!PluginStateData().edgeDecontaminateEnabled)
+        let decoded = try JSONDecoder().decode(PluginStateData.self, from: Data("{}".utf8))
+        #expect(!decoded.edgeDecontaminateEnabled)
+        let enabled = PluginStateData(edgeDecontaminateEnabled: true)
+        let restored = PluginStateData.decoded(from: try enabled.encodedForHost())
+        #expect(restored.edgeDecontaminateEnabled)
+    }
+
 }

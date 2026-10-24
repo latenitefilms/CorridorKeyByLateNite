@@ -408,7 +408,7 @@ extension CorridorKeyToolboxPlugIn {
         create.addToggleButton(
             withName: "Edge Decontaminate",
             parameterID: ParameterIdentifier.edgeDecontaminateEnabled,
-            defaultValue: true,
+            defaultValue: false,
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 
@@ -496,7 +496,7 @@ extension CorridorKeyToolboxPlugIn {
         // effect) than greyed-out, which made the inspector look
         // broken when the API briefly stalled.
         let lightWrapOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.lightWrapEnabled, at: time, default: true)
-        let decontamOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.edgeDecontaminateEnabled, at: time, default: true)
+        let decontamOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.edgeDecontaminateEnabled, at: time, default: false)
         let temporalOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.temporalStabilityEnabled, at: time, default: true)
 
         setEnabled(setter: setter, parameterID: ParameterIdentifier.lightWrapStrength, enabled: lightWrapOn)

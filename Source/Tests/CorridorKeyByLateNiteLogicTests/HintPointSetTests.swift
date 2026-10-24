@@ -9,6 +9,7 @@
 //
 
 import Foundation
+import CoreMedia
 import Testing
 @testable import CorridorKeyToolboxLogic
 
@@ -90,4 +91,63 @@ struct HintPointSetTests {
         set.clear()
         #expect(set.isEmpty)
     }
+    @Test("Hints stay on their source frames at fractional frame rates and round-trip through FxPlug")
+    func frameScopedRoundTrip() throws {
+        let duration = CMTime(value: 1001, timescale: 30000)
+        let firstTime = CMTime(value: 1001 * 108000, timescale: 30000)
+        let secondTime = CMTimeAdd(firstTime, duration)
+        let firstFrame = try #require(HintFrame(time: firstTime, duration: duration))
+        let secondFrame = try #require(HintFrame(time: secondTime, duration: duration))
+        let foreground = HintPoint(x: 0.5, y: 0.5, kind: .foreground, frame: firstFrame)
+        let background = HintPoint(x: 0.5, y: 0.5, kind: .background, frame: secondFrame)
+        let original = HintPointSet(points: [foreground, background])
+        let restored = HintPointSet.fromParameterDictionary(original.asParameterDictionary())
+        #expect(restored == original)
+        #expect(restored.points(at: firstTime) == [foreground])
+        #expect(restored.points(at: secondTime) == [background])
+        #expect(restored.points(at: CMTimeAdd(secondTime, duration)).isEmpty)
+        #expect(restored.points(at: CMTimeConvertScale(firstTime, timescale: 60000, method: .default)) == [foreground])
+        #expect(!restored.hasLegacyPoints)
+    }
+
+    @Test("Erasing and clearing a frame preserve annotations at the same position on other frames")
+    func frameScopedEditing() throws {
+        let duration = CMTime(value: 1, timescale: 24)
+        let firstFrame = try #require(HintFrame(time: .zero, duration: duration))
+        let secondFrame = try #require(HintFrame(time: duration, duration: duration))
+        let first = HintPoint(x: 0.5, y: 0.5, kind: .foreground, frame: firstFrame)
+        let second = HintPoint(x: 0.5, y: 0.5, kind: .background, frame: secondFrame)
+        var hints = HintPointSet(points: [first, second])
+        let removed = hints.removeNearest(toX: 0.5, y: 0.5, tolerance: 0.05, at: .zero)
+        #expect(removed)
+        #expect(hints.points == [second])
+        let removedFromOtherFrame = hints.removeNearest(toX: 0.5, y: 0.5, tolerance: 0.05, at: .zero)
+        #expect(!removedFromOtherFrame)
+        hints.add(first)
+        hints.clear(at: duration)
+        #expect(hints.points == [first])
+    }
+
+    @Test("Legacy untimed hints decode without losing annotations or silently assigning a frame")
+    func legacyHints() throws {
+        let payload = Data(#"{"points":[{"x":0.25,"y":0.75,"kind":1,"radiusNormalized":0.04}]}"#.utf8)
+        let hints = try JSONDecoder().decode(HintPointSet.self, from: payload)
+        #expect(hints.hasLegacyPoints)
+        #expect(hints.points(at: .zero) == hints.points)
+        #expect(hints.points(at: CMTime(value: 10, timescale: 24)) == hints.points)
+    }
+
+    @Test("Invalid timestamps and durations never create global annotations")
+    func invalidFrameTimes() throws {
+        let duration = CMTime(value: 1, timescale: 24)
+        #expect(HintFrame(time: .invalid, duration: duration) == nil)
+        #expect(HintFrame(time: .indefinite, duration: duration) == nil)
+        #expect(HintFrame(time: .zero, duration: .zero) == nil)
+        #expect(HintFrame(time: .zero, duration: CMTime(value: -1, timescale: 24)) == nil)
+        let frame = try #require(HintFrame(time: .zero, duration: duration))
+        #expect(!frame.contains(.invalid))
+        #expect(!frame.contains(duration))
+        #expect(!frame.contains(CMTime(value: 0, timescale: 24, flags: .valid, epoch: 1)))
+    }
+
 }

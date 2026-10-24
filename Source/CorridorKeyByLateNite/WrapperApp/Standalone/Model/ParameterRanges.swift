@@ -151,7 +151,7 @@ enum ParameterRanges {
         static let sourcePassthroughEnabled: Bool = false
         static let autoDespeckleEnabled: Bool = true
         static let lightWrapEnabled: Bool = true
-        static let edgeDecontaminateEnabled: Bool = true
+        static let edgeDecontaminateEnabled: Bool = false
         static let temporalStabilityEnabled: Bool = true
     }
 }

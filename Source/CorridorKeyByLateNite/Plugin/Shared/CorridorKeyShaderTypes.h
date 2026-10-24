@@ -142,7 +142,7 @@ typedef struct CKLightWrapParams {
     float edgeBias;
 } CKLightWrapParams;
 
-// Edge colour decontamination parameters. Subtracts screen-colour residual
+// Edge colour decontamination parameters. Removes excess of the green or blue channel
 // from the foreground RGB, weighted by `(1 - matte)` so the opaque interior
 // is never touched. `screenColor` is the canonical reference for the keyed
 // screen — green or blue, picked from `ScreenColor.canonicalScreenReference`

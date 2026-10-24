@@ -99,6 +99,18 @@ struct CorridorKeyHeaderView: View {
             .controlSize(.small)
             .disabled(isAnalysisInFlight)
 
+            Menu("Subject Hints", systemImage: "person.crop.circle") {
+                Button("Clear Hints on This Frame", systemImage: "eraser") {
+                    bridge.clearHints(onCurrentFrame: true)
+                }
+                Button("Clear All Hints", systemImage: "trash") {
+                    bridge.clearHints(onCurrentFrame: false)
+                }
+            }
+            .labelStyle(.iconOnly)
+            .help(ManualHintGuidance.explanation + "\nClick for foreground, Shift-click for background, Option-click to erase."
+                  + (bridge.hasLegacyHints ? "\n" + ManualHintGuidance.legacyExplanation : ""))
+
             if case .warming = bridge.snapshot.warmup {
                 Button(action: bridge.cancelWarmup) {
                     Label("Cancel", systemImage: "xmark.circle")

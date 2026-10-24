@@ -38,7 +38,7 @@ struct OnScreenControlOverlay: View {
                 // Click target — only intercepts hits when an OSC
                 // tool is active so the rest of the time the user can
                 // still drag the parent window from the preview area.
-                if viewModel.oscTool != .disabled {
+                if viewModel.oscTool != .disabled && !viewModel.isPlaying {
                     Rectangle()
                         .fill(Color.white.opacity(0.0001))
                         .frame(width: fittedRect.width, height: fittedRect.height)
@@ -54,7 +54,7 @@ struct OnScreenControlOverlay: View {
                         .help(toolHint)
                 }
 
-                ForEach(Array(viewModel.state.hintPointSet.points.enumerated()), id: \.offset) { item in
+                ForEach(viewModel.currentFrameHints.enumerated(), id: \.offset) { item in
                     HintPointMarker(
                         point: item.element,
                         screenColor: viewModel.state.screenColor
@@ -65,15 +65,15 @@ struct OnScreenControlOverlay: View {
                     )
                 }
             }
-            .allowsHitTesting(viewModel.oscTool != .disabled)
+            .allowsHitTesting(viewModel.oscTool != .disabled && !viewModel.isPlaying)
         }
     }
 
     private var toolHint: String {
         switch viewModel.oscTool {
         case .disabled: return ""
-        case .foregroundHint: return "Click to drop a foreground hint."
-        case .backgroundHint: return "Click to drop a background hint."
+        case .foregroundHint: return "Click to add a local foreground hint on this frame."
+        case .backgroundHint: return "Click to add a local background hint on this frame."
         case .eraseHint: return "Click near a hint to remove it."
         }
     }
@@ -194,6 +194,11 @@ struct SubjectHintsMenu: View {
 
             Divider()
 
+            Button("Clear Hints on This Frame", systemImage: "eraser") {
+                viewModel.clearHintsOnCurrentFrame()
+            }
+            .disabled(viewModel.currentFrameHints.isEmpty)
+
             Button("Clear All Hints", systemImage: "trash") {
                 viewModel.clearAllHints()
             }
@@ -204,7 +209,7 @@ struct SubjectHintsMenu: View {
         }
         .menuStyle(.borderlessButton)
         .controlSize(.regular)
-        .help("Mark foreground / background regions to guide the keyer.")
+        .help("Mark local foreground or background areas on this frame, then choose Analyse Clip.")
     }
 
     private var menuLabelTitle: String {

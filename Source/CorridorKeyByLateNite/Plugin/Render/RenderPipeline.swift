@@ -39,6 +39,20 @@ import simd
 @testable import CorridorKeyToolboxMetalStages
 #endif
 
+/// Physical row order supplied by a host surface. Neural inputs and cached
+/// alpha/foreground always use top-to-bottom rows, independently of the host.
+enum ImageRowOrder: Sendable, CaseIterable {
+    case topToBottom
+    case bottomToTop
+
+#if FXPLUG_HOST
+    /// Resolves each tile separately: analysis, source and destination can differ.
+    init(imageOrigin: FxImageOrigin) {
+        self = imageOrigin == kFxImageOrigin_BOTTOM_LEFT ? .bottomToTop : .topToBottom
+    }
+#endif
+}
+
 #if FXPLUG_HOST
 /// Input bundle for an FxPlug render. Value-type keeps the orchestrator
 /// easy to reason about; `FxImageTile` is passed along because we only
@@ -100,10 +114,26 @@ final class RenderPipeline: @unchecked Sendable {
     /// FxPlug layer can update the runtime status fields.
     func render(_ request: RenderRequest) throws -> RenderReport {
         let context = try makeDeviceContext(for: request)
-        defer { context.entry.returnCommandQueue(context.commandQueue) }
+        defer {
+            context.normalizedSource?.returnManually()
+            context.entry.returnCommandQueue(context.commandQueue)
+        }
+        let hintTexture = request.alphaHintImage?.metalTexture(for: context.device)
+        let normalizedHint: PooledTexture?
+        if let hintTexture, let hintImage = request.alphaHintImage {
+            normalizedHint = try normalizeSourceRows(
+                hintTexture,
+                rowOrder: ImageRowOrder(imageOrigin: hintImage.imageOrigin),
+                entry: context.entry,
+                commandQueue: context.commandQueue
+            )
+        } else {
+            normalizedHint = nil
+        }
+        defer { normalizedHint?.returnManually() }
         let inputs = ResolvedRenderInputs(
             state: request.state,
-            alphaHintTexture: request.alphaHintImage?.metalTexture(for: context.device),
+            alphaHintTexture: normalizedHint?.texture ?? hintTexture,
             workingGamut: request.workingGamut,
             renderTime: request.renderTime
         )
@@ -122,13 +152,20 @@ final class RenderPipeline: @unchecked Sendable {
         alphaHint: (any MTLTexture)? = nil,
         state: PluginStateData,
         workingGamut: WorkingColorGamut = .rec709,
-        renderTime: CMTime = .zero
+        renderTime: CMTime = .zero,
+        sourceRowOrder: ImageRowOrder = .topToBottom,
+        destinationRowOrder: ImageRowOrder = .topToBottom
     ) throws -> RenderReport {
         let context = try makeDeviceContext(
             sourceTexture: source,
-            destinationTexture: destination
+            destinationTexture: destination,
+            sourceRowOrder: sourceRowOrder,
+            destinationRowOrder: destinationRowOrder
         )
-        defer { context.entry.returnCommandQueue(context.commandQueue) }
+        defer {
+            context.normalizedSource?.returnManually()
+            context.entry.returnCommandQueue(context.commandQueue)
+        }
         let inputs = ResolvedRenderInputs(
             state: state,
             alphaHintTexture: alphaHint,
@@ -251,18 +288,17 @@ final class RenderPipeline: @unchecked Sendable {
         device: any MTLDevice,
         entry: MetalDeviceCacheEntry,
         commandQueue: any MTLCommandQueue,
-        readbackSource: Bool = false
+        readbackSource: Bool = false,
+        sourceRowOrder: ImageRowOrder = .topToBottom
     ) throws -> AnalysisExtraction {
         entry.beginAnalysisFrame()
         defer { entry.endAnalysisFrame() }
-        // Manual hint mode requires at least one user-placed hint —
-        // an empty hint channel would feed MLX a degenerate prior and
-        // the analyser would fill the cache with garbage. Fail fast
-        // so the caller can surface the error in the analysis status
-        // row instead of silently producing a bad matte sequence.
+        // Require at least one annotation in the clip for Manual Hint.
+        // Unannotated frames still receive a valid chroma prior; points
+        // from other source frames must never be painted onto this one.
         if state.hintMode.requiresUserHints, state.hintPointSet.points.isEmpty {
             throw KeyingInferenceError.modelUnavailable(
-                "Manual Hint mode needs at least one foreground or background hint point. Open the Subject menu in the transport bar and click the preview to drop one."
+                "Manual Hint needs at least one foreground or background point in the clip. Add a hint in the viewer, then choose Analyse Clip."
             )
         }
         let screenTransform = ScreenColorEstimator.defaultTransform(for: state.screenColor)
@@ -273,11 +309,15 @@ final class RenderPipeline: @unchecked Sendable {
             deviceRegistryID: device.registryID
         )
 
+        let normalizedSource = try normalizeSourceRows(
+            sourceTexture, rowOrder: sourceRowOrder, entry: entry, commandQueue: commandQueue
+        )
+        defer { normalizedSource?.returnManually() }
         let pre = try runPreInference(
-            sourceTexture: sourceTexture,
+            sourceTexture: normalizedSource?.texture ?? sourceTexture,
             hintTexture: nil,
             hintMode: state.hintMode,
-            hintPoints: state.hintPointSet.points,
+            hintPoints: state.hintPointSet.points(at: renderTime),
             device: device,
             entry: entry,
             commandQueue: commandQueue,
@@ -450,6 +490,9 @@ final class RenderPipeline: @unchecked Sendable {
         let commandQueue: any MTLCommandQueue
         let sourceTexture: any MTLTexture
         let destinationTexture: any MTLTexture
+        /// Owned only when an incoming bottom-up surface needed normalization.
+        let normalizedSource: PooledTexture?
+        let destinationRowOrder: ImageRowOrder
         let pixelFormat: MTLPixelFormat
         let sourceWidth: Int
         let sourceHeight: Int
@@ -473,36 +516,20 @@ final class RenderPipeline: @unchecked Sendable {
     private func makeDeviceContext(for request: RenderRequest) throws -> DeviceContext {
         let destinationTile = request.destinationImage
         let sourceTile = request.sourceImage
-        let pixelFormat = MetalDeviceCache.metalPixelFormat(for: destinationTile)
         guard let device = deviceCache.device(forRegistryID: destinationTile.deviceRegistryID) else {
             throw MetalDeviceCacheError.unknownDevice(destinationTile.deviceRegistryID)
         }
-        let entry = try deviceCache.entry(for: device)
-        guard let commandQueue = entry.borrowCommandQueue() else {
-            throw MetalDeviceCacheError.queueExhausted
-        }
-        guard let sourceTexture = sourceTile.metalTexture(for: device) else {
-            entry.returnCommandQueue(commandQueue)
+        guard let sourceTexture = sourceTile.metalTexture(for: device),
+              let destinationTexture = destinationTile.metalTexture(for: device) else {
             throw MetalDeviceCacheError.unknownDevice(destinationTile.deviceRegistryID)
         }
-        guard let destinationTexture = destinationTile.metalTexture(for: device) else {
-            entry.returnCommandQueue(commandQueue)
-            throw MetalDeviceCacheError.unknownDevice(destinationTile.deviceRegistryID)
-        }
-        let outputWidth = Float(destinationTile.tilePixelBounds.right - destinationTile.tilePixelBounds.left)
-        let outputHeight = Float(destinationTile.tilePixelBounds.top - destinationTile.tilePixelBounds.bottom)
-        return DeviceContext(
-            device: device,
-            entry: entry,
-            commandQueue: commandQueue,
+        return try makeDeviceContext(
             sourceTexture: sourceTexture,
             destinationTexture: destinationTexture,
-            pixelFormat: pixelFormat,
-            sourceWidth: sourceTexture.width,
-            sourceHeight: sourceTexture.height,
-            longEdge: max(sourceTexture.width, sourceTexture.height),
-            outputWidth: outputWidth,
-            outputHeight: outputHeight
+            sourceRowOrder: ImageRowOrder(imageOrigin: sourceTile.imageOrigin),
+            destinationRowOrder: ImageRowOrder(imageOrigin: destinationTile.imageOrigin),
+            outputWidth: Float(destinationTile.tilePixelBounds.right - destinationTile.tilePixelBounds.left),
+            outputHeight: Float(destinationTile.tilePixelBounds.top - destinationTile.tilePixelBounds.bottom)
         )
     }
 #endif
@@ -512,26 +539,61 @@ final class RenderPipeline: @unchecked Sendable {
     /// stage covers the entire output texture.
     private func makeDeviceContext(
         sourceTexture: any MTLTexture,
-        destinationTexture: any MTLTexture
+        destinationTexture: any MTLTexture,
+        sourceRowOrder: ImageRowOrder = .topToBottom,
+        destinationRowOrder: ImageRowOrder = .topToBottom,
+        outputWidth: Float? = nil,
+        outputHeight: Float? = nil
     ) throws -> DeviceContext {
         let device = destinationTexture.device
         let entry = try deviceCache.entry(for: device)
         guard let commandQueue = entry.borrowCommandQueue() else {
             throw MetalDeviceCacheError.queueExhausted
         }
+        let normalizedSource: PooledTexture?
+        do {
+            normalizedSource = try normalizeSourceRows(sourceTexture, rowOrder: sourceRowOrder, entry: entry, commandQueue: commandQueue)
+        } catch {
+            entry.returnCommandQueue(commandQueue)
+            throw error
+        }
         return DeviceContext(
             device: device,
             entry: entry,
             commandQueue: commandQueue,
-            sourceTexture: sourceTexture,
+            sourceTexture: normalizedSource?.texture ?? sourceTexture,
             destinationTexture: destinationTexture,
+            normalizedSource: normalizedSource,
+            destinationRowOrder: destinationRowOrder,
             pixelFormat: destinationTexture.pixelFormat,
             sourceWidth: sourceTexture.width,
             sourceHeight: sourceTexture.height,
             longEdge: max(sourceTexture.width, sourceTexture.height),
-            outputWidth: Float(destinationTexture.width),
-            outputHeight: Float(destinationTexture.height)
+            outputWidth: outputWidth ?? Float(destinationTexture.width),
+            outputHeight: outputHeight ?? Float(destinationTexture.height)
         )
+    }
+
+    /// Converts at the boundary rather than changing the model's writeback or
+    /// cache codec. Top-down sources take the zero-allocation path.
+    private func normalizeSourceRows(
+        _ source: any MTLTexture,
+        rowOrder: ImageRowOrder,
+        entry: MetalDeviceCacheEntry,
+        commandQueue: any MTLCommandQueue
+    ) throws -> PooledTexture? {
+        guard rowOrder == .bottomToTop else { return nil }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            throw MetalDeviceCacheError.commandBufferCreationFailed
+        }
+        let normalized = try RenderStages.flipVertically(source: source, entry: entry, commandBuffer: commandBuffer)
+        do {
+            try commitAndWait(commandBuffer: commandBuffer)
+            return normalized
+        } catch {
+            normalized.returnManually()
+            throw error
+        }
     }
 
     /// Writes the source tile straight through to the destination. Used when
@@ -637,7 +699,7 @@ final class RenderPipeline: @unchecked Sendable {
         let rotatedSource = rotatedSourcePooled?.texture ?? context.sourceTexture
 
         // Step 2: produce the hint texture exactly as the analyse path
-        // does (external > Vision > manual zero-base > green-bias).
+        // does (external > Vision + chroma > chroma).
         let hintPooled: PooledTexture
         if let hostTexture = inputs.alphaHintTexture {
             hintPooled = try RenderStages.extractHint(
@@ -692,10 +754,11 @@ final class RenderPipeline: @unchecked Sendable {
         // Step 3: layer OSC hint points on top of whichever upstream
         // hint we just produced — so the diagnostic also shows the
         // user's manual dots.
-        if !inputs.state.hintPointSet.points.isEmpty {
+        let frameHints = inputs.state.hintPointSet.points(at: inputs.renderTime)
+        if !frameHints.isEmpty {
             try RenderStages.applyHintPoints(
                 hint: hintPooled.texture,
-                points: inputs.state.hintPointSet.points,
+                points: frameHints,
                 entry: context.entry,
                 commandBuffer: commandBuffer
             )
@@ -1382,6 +1445,7 @@ final class RenderPipeline: @unchecked Sendable {
             tileWidth: context.outputWidth,
             tileHeight: context.outputHeight,
             outputMode: state.outputMode,
+            destinationRowOrder: context.destinationRowOrder,
             pixelFormat: context.pixelFormat,
             entry: context.entry,
             commandBuffer: commandBuffer
@@ -1399,6 +1463,7 @@ final class RenderPipeline: @unchecked Sendable {
         tileWidth: Float,
         tileHeight: Float,
         outputMode: OutputMode,
+        destinationRowOrder: ImageRowOrder = .topToBottom,
         pixelFormat: MTLPixelFormat,
         entry: MetalDeviceCacheEntry,
         commandBuffer: any MTLCommandBuffer
@@ -1419,11 +1484,13 @@ final class RenderPipeline: @unchecked Sendable {
         let halfW = tileWidth * 0.5
         let halfH = tileHeight * 0.5
 
+        let topTextureY: Float = destinationRowOrder == .topToBottom ? 0 : 1
+        let bottomTextureY: Float = 1 - topTextureY
         var vertices: [CKVertex2D] = [
-            CKVertex2D(position: SIMD2<Float>(halfW, -halfH), textureCoordinate: SIMD2<Float>(1, 1)),
-            CKVertex2D(position: SIMD2<Float>(-halfW, -halfH), textureCoordinate: SIMD2<Float>(0, 1)),
-            CKVertex2D(position: SIMD2<Float>(halfW, halfH), textureCoordinate: SIMD2<Float>(1, 0)),
-            CKVertex2D(position: SIMD2<Float>(-halfW, halfH), textureCoordinate: SIMD2<Float>(0, 0))
+            CKVertex2D(position: SIMD2<Float>(halfW, -halfH), textureCoordinate: SIMD2<Float>(1, bottomTextureY)),
+            CKVertex2D(position: SIMD2<Float>(-halfW, -halfH), textureCoordinate: SIMD2<Float>(0, bottomTextureY)),
+            CKVertex2D(position: SIMD2<Float>(halfW, halfH), textureCoordinate: SIMD2<Float>(1, topTextureY)),
+            CKVertex2D(position: SIMD2<Float>(-halfW, halfH), textureCoordinate: SIMD2<Float>(0, topTextureY))
         ]
         var viewportSize = SIMD2<UInt32>(UInt32(tileWidth), UInt32(tileHeight))
 

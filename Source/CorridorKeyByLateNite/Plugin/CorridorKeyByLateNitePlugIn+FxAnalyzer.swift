@@ -77,7 +77,10 @@ final class AnalysisSessionState: @unchecked Sendable {
             inferenceResolution: inferenceResolution,
             matteWidth: matteWidth,
             matteHeight: matteHeight,
-            mattes: mattes
+            mattes: mattes,
+            hintConfiguration: AnalysisHintConfiguration(
+                mode: HintMode(rawValue: hintModeRaw) ?? .appleVision, points: hintPointSet
+            )
         )
     }
 
@@ -130,11 +133,13 @@ final class AnalysisSnapshotStore: @unchecked Sendable {
 
     func cachedMatte(
         at renderTime: CMTime,
-        screenColorRaw: Int
+        screenColorRaw: Int,
+        hintConfiguration: AnalysisHintConfiguration
     ) -> CachedAnalysisMatte? {
         currentSnapshot()?.cachedMatte(
             at: renderTime,
-            screenColorRaw: screenColorRaw
+            screenColorRaw: screenColorRaw,
+            hintConfiguration: hintConfiguration
         )
     }
 }
@@ -378,6 +383,10 @@ extension CorridorKeyToolboxPlugIn {
             )
         }
 
+        if frameIndex == 0 {
+            PluginLog.notice("Analyse input: imageOrigin=\(frame.imageOrigin), canonical cache rows=top-to-bottom.")
+        }
+
         // Build the analyse-state with the snapshotted user values. The
         // hint mode + hint points are critical here: skipping them would
         // make the cached matte differ from the Standalone Editor's
@@ -415,7 +424,8 @@ extension CorridorKeyToolboxPlugIn {
             device: device,
             entry: entry,
             commandQueue: commandQueue,
-            readbackSource: needsTemporalReadback
+            readbackSource: needsTemporalReadback,
+            sourceRowOrder: ImageRowOrder(imageOrigin: frame.imageOrigin)
         )
         let extractElapsed = ContinuousClock.now - extractStart
         let extractDurationSeconds = Double(extractElapsed.components.seconds)

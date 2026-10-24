@@ -102,6 +102,17 @@ fragment float4 corridorKeyComposeFragment(
     }
 }
 
+/// Converts a bottom-up host surface to the pipeline's top-down row order.
+/// A texture read/write preserves all channels, including source alpha.
+kernel void corridorKeyFlipVerticalKernel(
+    texture2d<float, access::read> source [[texture(CKTextureIndexSource)]],
+    texture2d<float, access::write> destination [[texture(CKTextureIndexOutput)]],
+    uint2 position [[thread_position_in_grid]]
+) {
+    if (position.x >= destination.get_width() || position.y >= destination.get_height()) { return; }
+    destination.write(source.read(uint2(position.x, source.get_height() - 1u - position.y)), position);
+}
+
 // MARK: - Screen colour domain mapping (compute-based)
 
 /// Applies a 3x3 colour matrix to the source texture. Used to map blue-screen
@@ -1057,6 +1068,18 @@ kernel void corridorKeyMatteRefineKernel(
     destination.write(float4(alpha, 0.0, 0.0, 1.0), gid);
 }
 
+/// Removes only excess of the selected screen channel. Projecting the entire
+/// RGB vector onto green/blue removes legitimate neutral light and creates the
+/// complementary fringe. The other two channels provide a conservative floor,
+/// so this correction cannot push the screen channel below both of them.
+inline float3 decontaminateEdgeColor(float3 foreground, float matte, float3 screen, float strength) {
+    uint screenChannel = screen.g >= screen.b ? 1u : 2u;
+    float nonScreenMaximum = screenChannel == 1u ? max(foreground.r, foreground.b) : max(foreground.r, foreground.g);
+    float excess = max(foreground[screenChannel] - nonScreenMaximum, 0.0);
+    foreground[screenChannel] -= excess * (1.0 - saturate(matte)) * saturate(strength);
+    return foreground;
+}
+
 // MARK: - Fused foreground post-process (passthrough + light-wrap + decontam + inverse-rotation)
 
 /// Collapses four per-pixel foreground passes into a single dispatch.
@@ -1110,12 +1133,7 @@ kernel void corridorKeyForegroundPostProcessKernel(
 
     // Stage 3: edge colour decontamination.
     if (params.edgeDecontaminateEnabled != 0 && params.edgeDecontaminateStrength > 0.0) {
-        float3 screen = params.screenColor;
-        float screenLen = max(length(screen), 1e-3);
-        float3 screenDir = screen / screenLen;
-        float residual = max(dot(rgb, screenDir), 0.0);
-        rgb = rgb - screenDir * residual * (1.0 - m) * params.edgeDecontaminateStrength;
-        rgb = max(rgb, float3(0.0));
+        rgb = decontaminateEdgeColor(rgb, m, params.screenColor, params.edgeDecontaminateStrength);
     }
 
     // Stage 4: inverse screen-colour rotation. Identity for both
@@ -1234,10 +1252,10 @@ kernel void corridorKeyLightWrapKernel(
 // MARK: - Edge colour decontamination (Phase 4.4)
 
 /// Removes residual screen colour from foreground RGB in the matte edge
-/// band (where `0 < matte < 1`). Applies a per-pixel screen-colour subtract
-/// weighted by `(1 - matte) * strength`. The opaque interior stays
-/// untouched, and the fully transparent regions don't contribute to the
-/// composite anyway.
+/// band (where `0 < matte < 1`). Removes only excess green or blue
+/// weighted by `(1 - matte) * strength`. Neutral and already-clean colours
+/// are preserved. The opaque interior stays untouched, and fully transparent
+/// regions don't contribute to the composite anyway.
 kernel void corridorKeyEdgeDecontaminateKernel(
     texture2d<float, access::read> foreground [[texture(CKTextureIndexForeground)]],
     texture2d<float, access::read> matte [[texture(CKTextureIndexMatte)]],
@@ -1250,15 +1268,8 @@ kernel void corridorKeyEdgeDecontaminateKernel(
 
     float3 fg = foreground.read(gid).rgb;
     float m = saturate(matte.read(gid).r);
-    // Weight by (1 - m) so the interior is untouched. The subtraction
-    // component is the "how much screen colour is still in this pixel" —
-    // we project fg onto the screen colour direction and scale.
-    float3 screen = params.screenColor;
-    float screenLen = max(length(screen), 1e-3);
-    float3 screenDir = screen / screenLen;
-    float residual = max(dot(fg, screenDir), 0.0);
-    float3 decont = fg - screenDir * residual * (1.0 - m) * params.strength;
-    destination.write(float4(max(decont, float3(0.0)), 1.0), gid);
+    float3 decontaminated = decontaminateEdgeColor(fg, m, params.screenColor, params.strength);
+    destination.write(float4(decontaminated, 1.0), gid);
 }
 
 // MARK: - Connected-components despeckle (Phase 4.2)

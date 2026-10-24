@@ -301,7 +301,7 @@
 					<parameter name="Light Wrap" id="8001" flags="12901679120" default="1" value="1"/>
 					<parameter name="Wrap Strength" id="8002" flags="12901679120" default="0.25" value="0.25"/>
 					<parameter name="Wrap Radius" id="8003" flags="12901679120" default="10" value="10"/>
-					<parameter name="Edge Decontaminate" id="8004" flags="12901679120" default="1" value="1"/>
+					<parameter name="Edge Decontaminate" id="8004" flags="12901679120" default="0" value="0"/>
 					<parameter name="Decontam. Strength" id="8005" flags="12901679120" default="0.5" value="0.5"/>
 				</parameter>
 				<parameter name="Temporal Stability" id="150" flags="8589938704">

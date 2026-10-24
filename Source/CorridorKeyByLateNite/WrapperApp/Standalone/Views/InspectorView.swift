@@ -221,9 +221,21 @@ private struct SettingsGroup: View {
                 onChange: viewModel.parameterDidChange
             )
 
+            if viewModel.state.hintMode == .manual || !viewModel.state.hintPointSet.isEmpty {
+                Text(ManualHintGuidance.explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if viewModel.state.hintPointSet.hasLegacyPoints {
+                Text(ManualHintGuidance.legacyExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if viewModel.state.hintMode == .manual && viewModel.state.hintPointSet.isEmpty {
                 Label(
-                    "Manual Hint mode needs at least one foreground / background point — open the Subject menu in the transport bar.",
+                    "Add a foreground or background hint using the Subject Hints menu, then choose Analyse Clip.",
                     systemImage: "exclamationmark.triangle.fill"
                 )
                 .font(.caption)

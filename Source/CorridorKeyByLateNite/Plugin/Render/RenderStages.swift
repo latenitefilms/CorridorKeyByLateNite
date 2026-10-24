@@ -23,6 +23,29 @@ import CorridorKeyToolboxLogic
 
 enum RenderStages {
 
+    /// Reverses texture rows at the host boundary, preserving channel values.
+    /// Callers skip this allocation when the host already supplies top-down pixels.
+    static func flipVertically(
+        source: any MTLTexture,
+        entry: MetalDeviceCacheEntry,
+        commandBuffer: any MTLCommandBuffer
+    ) throws -> PooledTexture {
+        guard let output = entry.texturePool.acquire(
+            width: source.width, height: source.height, pixelFormat: source.pixelFormat
+        ) else { throw MetalDeviceCacheError.textureAllocationFailed }
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            output.returnManually()
+            throw MetalDeviceCacheError.commandEncoderCreationFailed
+        }
+        encoder.label = "CorridorKey by LateNite Normalize Image Rows"
+        encoder.setComputePipelineState(entry.computePipelines.flipVertical)
+        encoder.setTexture(source, index: Int(CKTextureIndexSource.rawValue))
+        encoder.setTexture(output.texture, index: Int(CKTextureIndexOutput.rawValue))
+        dispatch(encoder: encoder, pipeline: entry.computePipelines.flipVertical, width: source.width, height: source.height)
+        encoder.endEncoding()
+        return output
+    }
+
     // MARK: - Screen colour matrix
 
     /// Applies a 3x3 colour matrix to `source`, writing into a pooled

@@ -40,6 +40,28 @@ It uses Apple's [Vision Framework](https://developer.apple.com/documentation/vis
 
 ---
 
+## Manual Hint
+
+Foreground and background points adjust a small, soft-edged area of the coarse mask supplied to CorridorKey. Foreground points are not an outline or a selection: objects outside those points can still appear in the matte. A background point influences the area around it, rather than selecting an entire object for removal. Use the **Hint** output to inspect the mask the model receives.
+
+New points belong to the frame where you place them. Pause on a frame, add foreground or background hints, then move to another frame to add a separate set. Choose **Analyse Clip** after editing. Changing hints invalidates the previous analysis in both the Standalone Editor and Final Cut Pro.
+
+Frames without points use the automatic chroma hint. CorridorKey processes each frame independently; these points do not train the model, track the subject or propagate a correction through the clip. Temporal Stability smooths the resulting mattes and is not a tracking system.
+
+In the Standalone Editor, use the **Subject Hints** menu. In Final Cut Pro, click the viewer for foreground, Shift-click for background, and Option-click to erase a nearby hint. Both hosts offer **Clear Hints on This Frame** and **Clear All Hints**.
+
+Hints saved by older versions have no frame information and retain their original clip-wide behaviour. Clear and replace them to use frame-specific hints. Existing analysis must be rebuilt once after this update.
+
+---
+
+## Edge Decontaminate
+
+**Edge Decontaminate** reduces residual green or blue spill in partially transparent edges, using the selected **Screen Colour**. It removes only excess of that colour, preserving neutral edges and opaque interiors.
+
+The control is off by default in the Standalone Editor and Final Cut Pro. Enable it when an edge still contains screen spill; naturally green or blue details may also be affected. Existing saved settings retain their chosen value.
+
+---
+
 ## What is CorridorKey?
 
 [CorridorKey](https://github.com/nikopueringer/CorridorKey) is an open source project created by the talented [Corridor Digital](https://www.corridordigital.com) team.

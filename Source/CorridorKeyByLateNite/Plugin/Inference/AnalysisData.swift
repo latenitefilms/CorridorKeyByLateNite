@@ -31,6 +31,7 @@ enum AnalysisDataKey {
     static let matteWidth: String = "matteWidth"
     static let matteHeight: String = "matteHeight"
     static let mattes: String = "mattes"
+    static let hintConfiguration: String = "hintConfiguration"
 }
 
 /// In-memory representation of the analysis cache. Built either by the
@@ -44,8 +45,10 @@ struct AnalysisData: Sendable {
     /// `qualityModeRaw` so the inspector can tell the user when a saved
     /// cache no longer matches the Quality setting they've selected. Version 4
     /// invalidates v1 model mattes so saved clips are analysed with v2. Version 5
-    /// requires complete alpha + reconstructed foreground frames (CKF1).
-    static let currentSchemaVersion: Int = 5
+    /// requires complete alpha + reconstructed foreground frames (CKF1). Version 6
+    /// records the annotations used to build the cache, including their frame times.
+    /// Version 7 stores alpha and RGB in canonical top-down rows for every host.
+    static let currentSchemaVersion: Int = 7
 
     let schemaVersion: Int
     let frameDuration: CMTime
@@ -67,6 +70,13 @@ struct AnalysisData: Sendable {
     /// not reach that frame yet — the render path treats that as a cache miss
     /// for that specific time.
     let mattes: [Int: Data]
+    /// Immutable input snapshot: edits must not reuse mattes from older annotations.
+    var hintConfiguration: AnalysisHintConfiguration? = nil
+
+    /// Checks the entire annotation set because temporal blending can affect later frames.
+    func matchesHints(mode: HintMode, points: HintPointSet) -> Bool {
+        hintConfiguration == AnalysisHintConfiguration(mode: mode, points: points)
+    }
 
     /// Returns the 0-based frame index for the given render time, relative to
     /// the analysed range. Returns `nil` when the render time sits outside
@@ -91,9 +101,11 @@ struct AnalysisData: Sendable {
     /// analysis metadata matches the current render request.
     func cachedMatte(
         at renderTime: CMTime,
-        screenColorRaw requestedScreenColorRaw: Int
+        screenColorRaw requestedScreenColorRaw: Int,
+        hintConfiguration requestedHints: AnalysisHintConfiguration? = nil
     ) -> CachedAnalysisMatte? {
-        guard screenColorRaw == requestedScreenColorRaw,
+        guard requestedHints == nil || hintConfiguration == requestedHints,
+              screenColorRaw == requestedScreenColorRaw,
               let blob = matte(at: renderTime)
         else { return nil }
         return CachedAnalysisMatte(blob: blob, inferenceResolution: inferenceResolution)
@@ -114,6 +126,11 @@ struct AnalysisData: Sendable {
         let firstFrameTimeDict = CMTimeCopyAsDictionary(firstFrameTime, allocator: kCFAllocatorDefault) as NSDictionary?
 
         let contents = NSMutableDictionary()
+        if let hintConfiguration {
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
+            contents[AnalysisDataKey.hintConfiguration] = try? encoder.encode(hintConfiguration)
+        }
         contents[AnalysisDataKey.schemaVersion] = NSNumber(value: schemaVersion)
         if let frameDurationDict {
             contents[AnalysisDataKey.frameDuration] = frameDurationDict
@@ -185,7 +202,10 @@ struct AnalysisData: Sendable {
             inferenceResolution: inferenceResolution,
             matteWidth: matteWidth,
             matteHeight: matteHeight,
-            mattes: mattes
+            mattes: mattes,
+            hintConfiguration: (dictionary[AnalysisDataKey.hintConfiguration] as? Data).flatMap {
+                try? PropertyListDecoder().decode(AnalysisHintConfiguration.self, from: $0)
+            }
         )
     }
 }
@@ -194,4 +214,10 @@ struct AnalysisData: Sendable {
 struct CachedAnalysisMatte: Sendable {
     let blob: Data
     let inferenceResolution: Int
+}
+
+/// The hint inputs captured at analysis start, shared by both hosts.
+struct AnalysisHintConfiguration: Equatable, Sendable, Codable {
+    let mode: HintMode
+    let points: HintPointSet
 }

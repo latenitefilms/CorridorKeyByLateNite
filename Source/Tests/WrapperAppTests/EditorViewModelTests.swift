@@ -133,6 +133,70 @@ struct EditorViewModelTests {
         }
     }
 
+    @Test("Manual hints edit and undo only their source frame and invalidate analysed mattes")
+    func manualHintFrameEditing() throws {
+        let viewModel = EditorViewModel(renderEngine: try StandaloneRenderEngine())
+        let savedHintMode = EditorPreferences.hintMode
+        defer { EditorPreferences.hintMode = savedHintMode }
+        // Metadata alone exercises editing without starting a decoder or model warm-up.
+        viewModel.clipInfo = VideoSourceInfo(
+            url: URL(fileURLWithPath: "/tmp/hint-editing.mov"), renderSize: CGSize(width: 320, height: 180),
+            nominalFrameRate: 24, duration: CMTime(value: 4, timescale: 24), nativePixelFormat: 0,
+            timescale: 24000, videoTrackID: 1, preferredTransform: .identity,
+            colorPrimaries: nil, transferFunction: nil, yCbCrMatrix: nil
+        )
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        viewModel.undoManager = undo
+        viewModel.state.hintMode = .manual
+        viewModel.matteCache[0] = MatteCacheEntry(blob: Data([1]), width: 1, height: 1, inferenceResolution: 512)
+        viewModel.analysisStatus = .completed(elapsedSeconds: 1, totalFrames: 1)
+        viewModel.oscTool = .foregroundHint
+        undo.beginUndoGrouping()
+        viewModel.handleOSCClick(atNormalizedPoint: CGPoint(x: 0.5, y: 0.5))
+        undo.endUndoGrouping()
+        #expect(viewModel.currentFrameHints.count == 1)
+        #expect(viewModel.matteCache.isEmpty)
+        #expect(viewModel.analysisStatus == .idle)
+
+        viewModel.playheadTime = CMTime(value: 1, timescale: 24)
+        #expect(viewModel.currentFrameHints.isEmpty)
+        viewModel.oscTool = .backgroundHint
+        undo.beginUndoGrouping()
+        viewModel.handleOSCClick(atNormalizedPoint: CGPoint(x: 0.5, y: 0.5))
+        undo.endUndoGrouping()
+        #expect(viewModel.state.hintPointSet.points.count == 2)
+        #expect(viewModel.currentFrameHints.first?.kind == .background)
+
+        undo.beginUndoGrouping()
+        viewModel.clearHintsOnCurrentFrame()
+        undo.endUndoGrouping()
+        #expect(viewModel.currentFrameHints.isEmpty)
+        #expect(viewModel.state.hintPointSet.points.count == 1)
+        // Undo after seeking must restore the original frame, not the new playhead.
+        viewModel.playheadTime = .zero
+        undo.undo()
+        #expect(viewModel.currentFrameHints.first?.kind == .foreground)
+        #expect(viewModel.state.hintPointSet.points.count == 2)
+        viewModel.playheadTime = CMTime(value: 1, timescale: 24)
+        #expect(viewModel.currentFrameHints.first?.kind == .background)
+        undo.redo()
+        #expect(viewModel.currentFrameHints.isEmpty)
+        viewModel.closeClip()
+        #expect(viewModel.state.hintPointSet.isEmpty)
+        #expect(!undo.canUndo)
+    }
+
+    @Test("Changing Hint mode invalidates the cache while post-processing keeps it")
+    func hintModeCacheInvalidation() throws {
+        let viewModel = EditorViewModel(renderEngine: try StandaloneRenderEngine())
+        viewModel.matteCache[0] = MatteCacheEntry(blob: Data([1]), width: 1, height: 1, inferenceResolution: 512)
+        viewModel.state.alphaGamma = 1.3
+        #expect(viewModel.matteCache.count == 1)
+        viewModel.state.hintMode = viewModel.state.hintMode == .manual ? .automatic : .manual
+        #expect(viewModel.matteCache.isEmpty)
+    }
+
     private func framesAtPlayhead(_ viewModel: EditorViewModel) -> Int {
         let fps = max(Double(viewModel.clipInfo?.nominalFrameRate ?? 1), 0.001)
         return Int((viewModel.playheadTime.seconds * fps).rounded())

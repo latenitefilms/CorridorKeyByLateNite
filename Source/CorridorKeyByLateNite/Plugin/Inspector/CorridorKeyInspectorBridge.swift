@@ -46,7 +46,26 @@ final class CorridorKeyInspectorBridge {
         refreshSnapshot()
     }
 
+    /// Whether saved hints predate per-frame annotations.
+    private(set) var hasLegacyHints = false
+
     // MARK: - User actions
+
+    /// Removes annotations on the playhead frame or throughout the clip.
+    func clearHints(onCurrentFrame: Bool) {
+        guard let action = apiManager.api(for: (any FxCustomParameterActionAPI_v4).self) as? any FxCustomParameterActionAPI_v4 else { return }
+        action.startAction(self)
+        defer { action.endAction(self) }
+        guard let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6,
+              let plugin else { return }
+        var hints = plugin.loadHintPointSet(using: retrieval)
+        if onCurrentFrame {
+            hints.clear(at: action.currentTime())
+        } else {
+            hints.clear()
+        }
+        HeaderCustomParameterStorage.setDictionary(hints.asParameterDictionary(), for: HeaderStorageKey.subjectPoints, using: apiManager)
+    }
 
     func triggerAnalysis() {
         plugin?.startForwardAnalysisPass()
@@ -90,8 +109,13 @@ final class CorridorKeyInspectorBridge {
         actionAPI.startAction(self)
         defer { actionAPI.endAction(self) }
 
-        let state = currentAnalysisState()
-        let (analysed, total, resolution) = currentAnalysisCounts(for: state)
+        if let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6 {
+            hasLegacyHints = plugin?.loadHintPointSet(using: retrieval).hasLegacyPoints ?? false
+        }
+        let hostState = currentAnalysisState()
+        let (analysed, total, resolution) = currentAnalysisCounts(for: hostState)
+        // The host can still report completion after an annotation edit.
+        let state: CorridorKeyAnalysisSnapshot.State = hostState == .completed && total == 0 ? .notAnalysed : hostState
         let warmup = plugin?.renderPipeline.inferenceCoordinator.warmupStatus ?? .cold
         let eta = updatedETA(forState: state, analysed: analysed, total: total)
         let lastRender = plugin?.lastFrameMilliseconds.read()
@@ -195,7 +219,12 @@ final class CorridorKeyInspectorBridge {
             fromParameter: ParameterIdentifier.qualityMode,
             at: CMTime.zero
         )
-        if Int(currentQualityRaw) != data.qualityModeRaw {
+        var hintModeRaw = Int32(HintMode.appleVision.rawValue)
+        retrieval.getIntValue(&hintModeRaw, fromParameter: ParameterIdentifier.hintMode, at: .zero)
+        if !data.matchesHints(
+            mode: HintMode(rawValue: Int(hintModeRaw)) ?? .appleVision,
+            points: plugin.loadHintPointSet(using: retrieval)
+        ) || Int(currentQualityRaw) != data.qualityModeRaw {
             return (0, 0, 0)
         }
         return (data.analyzedCount, data.frameCount, data.inferenceResolution)

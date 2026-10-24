@@ -62,15 +62,14 @@ struct AnalysisDataTests {
         #expect(AnalysisData.fromParameterDictionary(nil) == nil)
     }
 
-    @Test("V1 analysis cannot supply cached mattes to the v2 model")
+    @Test("Caches created before frame-specific hints and canonical image rows require reanalysis")
     func previousModelCacheIsRejected() {
-        let dictionary = NSMutableDictionary()
-        dictionary[AnalysisDataKey.schemaVersion] = NSNumber(value: 3)
-        dictionary[AnalysisDataKey.frameCount] = NSNumber(value: 1)
-        #expect(AnalysisData.currentSchemaVersion == 5)
-        dictionary[AnalysisDataKey.schemaVersion] = NSNumber(value: 4)
-        #expect(AnalysisData.fromParameterDictionary(dictionary) == nil)
-        #expect(AnalysisData.fromParameterDictionary(dictionary) == nil)
+        for schema in [3, 4, 5, 6] {
+            let dictionary = NSMutableDictionary()
+            dictionary[AnalysisDataKey.schemaVersion] = NSNumber(value: schema)
+            dictionary[AnalysisDataKey.frameCount] = NSNumber(value: 1)
+            #expect(AnalysisData.fromParameterDictionary(dictionary) == nil)
+        }
     }
 
     @Test("Frame index maps render time to the right slot")
@@ -168,4 +167,34 @@ struct AnalysisDataTests {
             screenColorRaw: ScreenColor.blue.rawValue
         ) == nil)
     }
+    @Test("Persisted cache rejects added, removed, retimed hints and changes to Hint mode")
+    func hintCacheInvalidation() throws {
+        let duration = CMTime(value: 1, timescale: 24)
+        let frame = try #require(HintFrame(time: .zero, duration: duration))
+        let points = HintPointSet(points: [HintPoint(x: 0.5, y: 0.5, kind: .background, frame: frame)])
+        let configuration = AnalysisHintConfiguration(mode: .manual, points: points)
+        let original = AnalysisData(
+            schemaVersion: AnalysisData.currentSchemaVersion, frameDuration: duration,
+            firstFrameTime: .zero, frameCount: 1, analyzedCount: 1,
+            screenColorRaw: 0, qualityModeRaw: 0, inferenceResolution: 512,
+            matteWidth: 1, matteHeight: 1, mattes: [0: Data([1])],
+            hintConfiguration: configuration
+        )
+        let restored = try #require(AnalysisData.fromParameterDictionary(original.asParameterDictionary()))
+        #expect(restored.matchesHints(mode: .manual, points: points))
+        #expect(restored.cachedMatte(at: .zero, screenColorRaw: 0, hintConfiguration: configuration) != nil)
+        #expect(!restored.matchesHints(mode: .automatic, points: points))
+        var changed = points
+        let nextFrame = try #require(HintFrame(time: duration, duration: duration))
+        changed.points[0].frame = nextFrame
+        #expect(!restored.matchesHints(mode: .manual, points: changed))
+        changed.add(HintPoint(x: 0.2, y: 0.3, kind: .foreground, frame: frame))
+        #expect(restored.cachedMatte(at: .zero, screenColorRaw: 0,
+                                  hintConfiguration: AnalysisHintConfiguration(mode: .manual, points: changed)) == nil)
+        #expect(!restored.matchesHints(mode: .manual, points: HintPointSet()))
+        var missingConfiguration = original
+        missingConfiguration.hintConfiguration = nil
+        #expect(missingConfiguration.cachedMatte(at: .zero, screenColorRaw: 0, hintConfiguration: configuration) == nil)
+    }
+
 }

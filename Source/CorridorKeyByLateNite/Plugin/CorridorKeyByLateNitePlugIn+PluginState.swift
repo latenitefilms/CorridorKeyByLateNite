@@ -122,11 +122,7 @@ extension CorridorKeyToolboxPlugIn {
         // Interior. Defaults below mirror `PluginStateData()`'s
         // designated initialiser exactly so the FxPlug and the
         // Standalone Editor land on the same matte when nothing
-        // overrides — earlier drift here meant a fresh FCP project
-        // ran the keyer with Source Passthrough on / Auto Despeckle
-        // off / Light Wrap off / Edge Decontaminate off / Temporal
-        // Stability off, while the Standalone Editor ran with the
-        // opposite combination.
+        // overrides. Additional edge colour correction is opt-in.
         state.sourcePassthroughEnabled = boolValue(
             retrieval: retrieval,
             parameterID: ParameterIdentifier.sourcePassthrough,
@@ -219,7 +215,7 @@ extension CorridorKeyToolboxPlugIn {
             retrieval: retrieval,
             parameterID: ParameterIdentifier.edgeDecontaminateEnabled,
             time: renderTime,
-            default: true
+            default: false
         )
         state.edgeDecontaminateStrength = floatValue(
             retrieval: retrieval,
@@ -270,6 +266,10 @@ extension CorridorKeyToolboxPlugIn {
             default: .lanczos
         )
 
+        // Load the user's OSC-placed hint dots from the published header
+        // storage dictionary so they round-trip through the `.moef` wrapper.
+        state.hintPointSet = loadHintPointSet(using: retrieval)
+
         // If FxAnalyzer has cached a matte for this frame, pack the
         // compressed blob and its inference resolution into the state so the
         // render callback can skip MLX entirely. Screen colour must match the
@@ -277,15 +277,12 @@ extension CorridorKeyToolboxPlugIn {
         if let analysis = loadAnalysisData(using: retrieval),
            let cachedMatte = analysis.cachedMatte(
                 at: renderTime,
-                screenColorRaw: state.screenColor.rawValue
+                screenColorRaw: state.screenColor.rawValue,
+                hintConfiguration: AnalysisHintConfiguration(mode: state.hintMode, points: state.hintPointSet)
            ) {
             state.cachedMatteBlob = cachedMatte.blob
             state.cachedMatteInferenceResolution = cachedMatte.inferenceResolution
         }
-
-        // Load the user's OSC-placed hint dots from the published header
-        // storage dictionary so they round-trip through the `.moef` wrapper.
-        state.hintPointSet = loadHintPointSet(using: retrieval)
 
         let nsData = try state.encodedForHost()
         pluginState?.pointee = nsData
