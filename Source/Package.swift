@@ -247,7 +247,6 @@ let package = Package(
                 "CorridorKeyByLateNite/WrapperApp/WrapperApp.entitlements", "CorridorKeyByLateNite/WrapperApp/WrapperApp-Bridging-Header.h",
                 "CorridorKeyByLateNite/WrapperApp/WelcomeView.swift", "CorridorKeyByLateNite/WrapperApp/Credits.rtf",
                 "CorridorKeyByLateNite/WrapperApp/CorridorKeyByLateNiteApp.swift", "CorridorKeyByLateNite/WrapperApp/MotionTemplateInstaller.swift",
-                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/ProResExporter.swift",
                 "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/ScreenColorAutoDetector.swift",
                 "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/BackdropImageLoader.swift"
             ],
@@ -260,10 +259,15 @@ let package = Package(
                 "Tests/CorridorKeyByLateNiteInferenceTests/V2ModelContractTests.swift",
                 "Tests/CorridorKeyByLateNiteInferenceTests/SharedMLXBridgeRegistryWaitTests.swift",
                 "Tests/CorridorKeyByLateNiteInferenceTests/StandalonePipelineTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/StillImageTests.swift",
                 "CorridorKeyByLateNite/Plugin/Render/RenderPipeline.swift",
                 "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StandaloneRenderEngine.swift",
                 "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/AnalysisRunner.swift",
                 "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/VideoSource.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/MediaSource.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageSource.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageExporter.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/ProResExporter.swift",
                 "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/PixelBufferTextureBridge.swift"
             ],
             // Read the validated v2 artifact from production resources rather

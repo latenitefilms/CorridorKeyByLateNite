@@ -17,33 +17,50 @@ struct ExportSheet: View {
     @State private var codec: ExportOptions.ExportCodec = .proRes4444
     @State private var preserveAlpha: Bool = true
     @State private var destinationURL: URL?
+    @State private var imageFormat: StillImageExportFormat = .png
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Export Keyed Clip")
+            Text(viewModel.isStillImage ? "Export Keyed Image" : "Export Keyed Clip")
                 .font(.title2)
                 .bold()
 
-            Text("Renders the current parameters across every analysed frame and writes the result to a QuickTime movie. Apple ProRes carries the highest quality; HEVC keeps file sizes compact and is hardware-encoded on Apple Silicon. Choose a codec with alpha (ProRes 4444 or HEVC with Alpha) to embed the matte directly into the output file.")
+            Text(viewModel.isStillImage
+                 ? "Saves the current output at the image’s original resolution. PNG and TIFF preserve transparency with 16-bit colour. The preview backdrop is not included."
+                 : "Renders the current parameters across every analysed frame and writes the result to a QuickTime movie. Apple ProRes carries the highest quality; HEVC keeps file sizes compact and is hardware-encoded on Apple Silicon. Choose a codec with alpha (ProRes 4444 or HEVC with Alpha) to embed the matte directly into the output file.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 10) {
-                EnumPicker(
-                    title: "Codec",
-                    selection: $codec,
-                    defaultValue: .proRes4444,
-                    onChange: {}
-                )
+                if viewModel.isStillImage {
+                    Picker("Format", selection: $imageFormat) {
+                        ForEach(StillImageExportFormat.allCases) { format in
+                            Text(format.displayName).tag(format)
+                        }
+                    }
+                    .onChange(of: imageFormat) { _, _ in
+                        // A new format needs a matching user-approved destination.
+                        destinationURL = nil
+                    }
+                } else {
+                    EnumPicker(
+                        title: "Codec",
+                        selection: $codec,
+                        defaultValue: .proRes4444,
+                        onChange: {}
+                    )
 
-                Toggle("Preserve Alpha Channel", isOn: $preserveAlpha)
-                    .disabled(!codec.supportsAlpha)
+                    Toggle("Preserve Alpha Channel", isOn: $preserveAlpha)
+                        .disabled(!codec.supportsAlpha)
+                }
             }
+            .disabled(viewModel.exportStatus.inProgress)
 
             HStack(spacing: 8) {
                 Button("Choose Destination…", systemImage: "folder", action: chooseDestination)
                     .buttonStyle(.bordered)
+                    .disabled(viewModel.exportStatus.inProgress)
                 Spacer()
                 Text(destinationLabel)
                     .font(.callout)
@@ -90,8 +107,10 @@ struct ExportSheet: View {
         panel.title = "Export As"
         panel.prompt = "Export"
         panel.canCreateDirectories = true
-        panel.allowedContentTypes = [.quickTimeMovie]
-        panel.nameFieldStringValue = (viewModel.clipInfo?.url.deletingPathExtension().lastPathComponent ?? "Untitled") + " (Keyed).mov"
+        panel.allowedContentTypes = viewModel.isStillImage ? [imageFormat.contentType] : [.quickTimeMovie]
+        let filenameExtension = viewModel.isStillImage ? imageFormat.filenameExtension : "mov"
+        panel.nameFieldStringValue = (viewModel.clipInfo?.url.deletingPathExtension().lastPathComponent ?? "Untitled")
+            + " (Keyed)." + filenameExtension
         let response = panel.runModal()
         guard response == .OK, let url = panel.url else { return }
         destinationURL = url
@@ -99,6 +118,10 @@ struct ExportSheet: View {
 
     private func startExport() {
         guard let destinationURL else { return }
+        if viewModel.isStillImage {
+            viewModel.runExport(options: StillImageExportOptions(destination: destinationURL, format: imageFormat))
+            return
+        }
         let options = ExportOptions(
             destination: destinationURL,
             codec: codec,

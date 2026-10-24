@@ -139,7 +139,7 @@ struct EditorViewModelTests {
         let savedHintMode = EditorPreferences.hintMode
         defer { EditorPreferences.hintMode = savedHintMode }
         // Metadata alone exercises editing without starting a decoder or model warm-up.
-        viewModel.clipInfo = VideoSourceInfo(
+        viewModel.clipInfo = MediaSourceInfo(
             url: URL(fileURLWithPath: "/tmp/hint-editing.mov"), renderSize: CGSize(width: 320, height: 180),
             nominalFrameRate: 24, duration: CMTime(value: 4, timescale: 24), nativePixelFormat: 0,
             timescale: 24000, videoTrackID: 1, preferredTransform: .identity,

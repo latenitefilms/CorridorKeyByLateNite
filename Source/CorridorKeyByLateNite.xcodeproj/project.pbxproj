@@ -132,6 +132,10 @@
 		WB0000000000000000000005 /* StandaloneRenderEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000005 /* StandaloneRenderEngineTests.swift */; };
 		WB0000000000000000000006 /* AnalysisAndExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000006 /* AnalysisAndExportTests.swift */; };
 		WB0000000000000000000007 /* EditorViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000007 /* EditorViewModelTests.swift */; };
+		SI0100000000000000000001 /* MediaSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000001 /* MediaSource.swift */; };
+		SI0100000000000000000002 /* StillImageSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000002 /* StillImageSource.swift */; };
+		SI0100000000000000000003 /* StillImageExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000003 /* StillImageExporter.swift */; };
+		SI0100000000000000000004 /* StillImageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000004 /* StillImageTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -277,6 +281,10 @@
 		WR0000000000000000000006 /* AnalysisAndExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisAndExportTests.swift; path = Tests/WrapperAppTests/AnalysisAndExportTests.swift; sourceTree = "<group>"; };
 		WR0000000000000000000007 /* EditorViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EditorViewModelTests.swift; path = Tests/WrapperAppTests/EditorViewModelTests.swift; sourceTree = "<group>"; };
 		WT0300000000000000000001 /* WrapperAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WrapperAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		SI0300000000000000000001 /* MediaSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaSource.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/MediaSource.swift; sourceTree = "<group>"; };
+		SI0300000000000000000002 /* StillImageSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageSource.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageSource.swift; sourceTree = "<group>"; };
+		SI0300000000000000000003 /* StillImageExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageExporter.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageExporter.swift; sourceTree = "<group>"; };
+		SI0300000000000000000004 /* StillImageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageTests.swift; path = Tests/CorridorKeyByLateNiteInferenceTests/StillImageTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -527,6 +535,9 @@
 				SR0000000000000000000005 /* ProResExporter.swift */,
 				SR000000000000000000000E /* ScreenColorAutoDetector.swift */,
 				SR0000000000000000000003 /* StandaloneRenderEngine.swift */,
+				SI0300000000000000000001 /* MediaSource.swift */,
+				SI0300000000000000000002 /* StillImageSource.swift */,
+				SI0300000000000000000003 /* StillImageExporter.swift */,
 				SR0000000000000000000002 /* VideoSource.swift */,
 			);
 			name = Engine;
@@ -576,6 +587,7 @@
 				ER0000000000000000000003 /* FirstFrameParityTests.swift */,
 				WR0000000000000000000002 /* SyntheticVideoFixture.swift */,
 				WR0000000000000000000003 /* PixelBufferTextureBridgeTests.swift */,
+				SI0300000000000000000004 /* StillImageTests.swift */,
 				WR0000000000000000000004 /* VideoSourceTests.swift */,
 				WR0000000000000000000005 /* StandaloneRenderEngineTests.swift */,
 				WR0000000000000000000006 /* AnalysisAndExportTests.swift */,
@@ -747,6 +759,9 @@
 			files = (
 				OS0400000000000000000001 /* OnScreenControlOverlay.swift in Sources */,
 				SB0000000000000000000001 /* PixelBufferTextureBridge.swift in Sources */,
+				SI0100000000000000000001 /* MediaSource.swift in Sources */,
+				SI0100000000000000000002 /* StillImageSource.swift in Sources */,
+				SI0100000000000000000003 /* StillImageExporter.swift in Sources */,
 				SB0000000000000000000002 /* VideoSource.swift in Sources */,
 				SB0000000000000000000003 /* StandaloneRenderEngine.swift in Sources */,
 				SB0000000000000000000004 /* AnalysisRunner.swift in Sources */,
@@ -848,6 +863,7 @@
 				EB0000000000000000000003 /* FirstFrameParityTests.swift in Sources */,
 				WB0000000000000000000002 /* SyntheticVideoFixture.swift in Sources */,
 				WB0000000000000000000003 /* PixelBufferTextureBridgeTests.swift in Sources */,
+				SI0100000000000000000004 /* StillImageTests.swift in Sources */,
 				WB0000000000000000000004 /* VideoSourceTests.swift in Sources */,
 				WB0000000000000000000005 /* StandaloneRenderEngineTests.swift in Sources */,
 				WB0000000000000000000006 /* AnalysisAndExportTests.swift in Sources */,

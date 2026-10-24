@@ -14,7 +14,7 @@ Click **Open Standalone Editor**.
 
 ![](/static/wrapper-app.png)
 
-You can now load in a clip.
+Choose **Import Media…** or drop a video or still image into the editor. Still-image formats include PNG, TIFF, JPEG, and HEIC. Images open at their original pixel resolution with embedded orientation applied. Files containing multiple images use the primary image.
 
 ![](/static/standalone-editor.png)
 
@@ -31,6 +31,8 @@ Then press **Analyse Clip**:
 ![](/static/standalone-editor-result.png)
 
 Once you're happy to you can export your result as ProRes or HEVC (with alpha):
+
+For a still image, use the same **Analyse Clip** button and keying controls, then choose **Export…** to save a 16-bit PNG or TIFF with transparency. The export uses the current **Output** setting and excludes the preview backdrop. Stills display their pixel dimensions instead of playback controls.
 
 ![](/static/standalone-export.png)
 

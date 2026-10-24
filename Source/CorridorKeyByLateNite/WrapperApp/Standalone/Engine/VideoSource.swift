@@ -24,44 +24,6 @@ import CoreImage
 import CoreVideo
 import CoreMedia
 
-/// Static information about a video clip — the bits the standalone
-/// editor needs to render the correct preview and lay out the timeline.
-struct VideoSourceInfo: Sendable {
-    let url: URL
-    /// Source-pixel resolution after applying any `preferredTransform`
-    /// rotation. The renderer always sees the clip the right way up.
-    let renderSize: CGSize
-    /// Display frame rate. Used to drive the transport and to sample
-    /// frames at the natural interval during analyse / export.
-    let nominalFrameRate: Float
-    /// Total clip duration. Cached so the UI does not have to wait
-    /// on `AVAsset.load(.duration)` per frame.
-    let duration: CMTime
-    /// Native pixel format of the source track's first sample. Used to
-    /// pick a matching destination pixel format on export — e.g. emit
-    /// ProRes 4444 at 16 bpc when the source is HDR / float.
-    let nativePixelFormat: OSType
-    /// Time scale of the source track. Used to build CMTimes that align
-    /// to the source frame grid (so scrubbing snaps to whole frames).
-    let timescale: CMTimeScale
-    /// AV Foundation track identifier for the video. Cached so
-    /// downstream readers reference the same track.
-    let videoTrackID: CMPersistentTrackID
-    /// Preferred transform of the source track (rotation matrix).
-    /// Applied automatically by `AVAssetImageGenerator` and the export
-    /// reader when `appliesPreferredTrackTransform` is true.
-    let preferredTransform: CGAffineTransform
-    /// Source colour-space metadata read from the track's format
-    /// description. `nil` when the source omits the extension (most
-    /// SDR Rec.709 clips do — the exporter falls back to BT.709 in
-    /// that case). When present these fields are passed through
-    /// verbatim to the export writer so HDR / wide-gamut sources
-    /// keep their tags rather than being silently re-tagged BT.709.
-    let colorPrimaries: String?
-    let transferFunction: String?
-    let yCbCrMatrix: String?
-}
-
 enum VideoSourceError: Error, CustomStringConvertible {
     case noVideoTrack(URL)
     case readerSetupFailed(any Error)
@@ -108,9 +70,9 @@ enum VideoSourceError: Error, CustomStringConvertible {
 /// `movies.read-write` entitlement) return `false` from
 /// `startAccessing…`; we still record that and skip the matching
 /// `stop…` call so we never unbalance the access count.
-final class VideoSource: @unchecked Sendable {
+final class VideoSource: EditorMediaSource, @unchecked Sendable {
 
-    let info: VideoSourceInfo
+    let info: MediaSourceInfo
     private let asset: AVURLAsset
     private let url: URL
     private let didStartAccessing: Bool
@@ -154,7 +116,7 @@ final class VideoSource: @unchecked Sendable {
     private static func loadInfo(
         for asset: AVURLAsset,
         url: URL
-    ) async throws -> VideoSourceInfo {
+    ) async throws -> MediaSourceInfo {
         let tracks = try await asset.loadTracks(withMediaType: .video)
         guard let videoTrack = tracks.first else {
             throw VideoSourceError.noVideoTrack(url)
@@ -203,7 +165,7 @@ final class VideoSource: @unchecked Sendable {
             nativePixelFormat = kCVPixelFormatType_64RGBAHalf
         }
 
-        return VideoSourceInfo(
+        return MediaSourceInfo(
             url: url,
             renderSize: renderSize,
             nominalFrameRate: nominalFrameRate,
@@ -232,30 +194,6 @@ final class VideoSource: @unchecked Sendable {
         let transfer = (extensions[kCMFormatDescriptionExtension_TransferFunction] as? String)
         let matrix = (extensions[kCMFormatDescriptionExtension_YCbCrMatrix] as? String)
         return (primaries, transfer, matrix)
-    }
-
-    /// Snaps `time` to the nearest source frame and clamps to the
-    /// last valid frame index. The asset's duration is one frame
-    /// past the last frame's presentation time (because each frame
-    /// covers one frame-duration interval), so a naïve nearest-
-    /// frame mapping at `duration` would return frame N for an
-    /// N-frame clip and surface as "5/4 f" in the transport bar.
-    /// Capping to `totalFrameCount() - 1` here keeps every
-    /// downstream display lined up with the actual frame range.
-    func nearestFrameTime(to time: CMTime) -> CMTime {
-        let fps = max(Double(info.nominalFrameRate), 0.001)
-        let lastFrameIndex = max(0, totalFrameCount() - 1)
-        let rawFrameIndex = (time.seconds * fps).rounded()
-        let clampedFrameIndex = max(0, min(Double(lastFrameIndex), rawFrameIndex))
-        return CMTime(seconds: clampedFrameIndex / fps, preferredTimescale: info.timescale)
-    }
-
-    /// Returns the total whole-frame count in the clip. The transport
-    /// uses this to size the scrubber.
-    func totalFrameCount() -> Int {
-        let fps = Double(info.nominalFrameRate)
-        guard fps > 0 else { return 1 }
-        return max(1, Int((info.duration.seconds * fps).rounded()))
     }
 
     /// Pulls a single frame at `time` as a Metal-compatible
@@ -312,7 +250,7 @@ final class VideoSource: @unchecked Sendable {
     func makeFrameReader(
         startTime: CMTime = .zero,
         preferredPixelFormat: OSType = kCVPixelFormatType_64RGBAHalf
-    ) async throws -> VideoFrameReader {
+    ) async throws -> any MediaFrameReader {
         let reader: AVAssetReader
         do {
             reader = try AVAssetReader(asset: asset)
@@ -389,7 +327,7 @@ final class VideoSource: @unchecked Sendable {
 /// Wraps an `AVAssetReader` plus its track output so callers don't
 /// have to juggle the pair. Used by the export pass to pull frames in
 /// display order.
-final class VideoFrameReader: @unchecked Sendable {
+final class VideoFrameReader: MediaFrameReader, @unchecked Sendable {
     private let reader: AVAssetReader
     private let output: AVAssetReaderTrackOutput
     let preferredTransform: CGAffineTransform

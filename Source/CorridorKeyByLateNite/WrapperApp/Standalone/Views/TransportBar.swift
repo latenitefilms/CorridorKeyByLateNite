@@ -31,22 +31,28 @@ struct TransportBar: View {
                 Button("Import…", systemImage: "square.and.arrow.down", action: onImport)
                     .buttonStyle(.bordered)
 
-                Button("Close Clip", systemImage: "xmark.circle", action: onClose)
+                Button(viewModel.isStillImage ? "Close Image" : "Close Clip", systemImage: "xmark.circle", action: onClose)
                     .buttonStyle(.bordered)
                     .disabled(!viewModel.phase.isReady)
 
                 Spacer()
 
-                playbackCluster
+                if viewModel.isStillImage {
+                    StillImageInfoLabel(renderSize: viewModel.renderSize)
+                } else {
+                    playbackCluster
+                }
 
                 Spacer()
 
-                Toggle(isOn: $viewModel.loopEnabled) {
-                    Label("Loop", systemImage: "repeat")
+                if !viewModel.isStillImage {
+                    Toggle(isOn: $viewModel.loopEnabled) {
+                        Label("Loop", systemImage: "repeat")
+                    }
+                    .toggleStyle(.button)
+                    .controlSize(.regular)
+                    .help("Restart playback when the clip ends.")
                 }
-                .toggleStyle(.button)
-                .controlSize(.regular)
-                .help("Restart playback when the clip ends.")
 
                 ShowOriginalButton(viewModel: viewModel)
                     .disabled(!viewModel.phase.isReady)
@@ -63,7 +69,9 @@ struct TransportBar: View {
                     .disabled(!viewModel.phase.isReady || viewModel.exportStatus.inProgress)
             }
 
-            scrubberRow
+            if !viewModel.isStillImage {
+                scrubberRow
+            }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
@@ -204,6 +212,17 @@ struct TransportBar: View {
     private func timeLabel(for time: CMTime) -> String {
         let frameRate = Double(viewModel.clipInfo?.nominalFrameRate ?? 24)
         return TransportTimecodeFormatter(frameRate: frameRate).format(time)
+    }
+}
+
+/// Native pixel dimensions replace timecode when editing a still.
+private struct StillImageInfoLabel: View {
+    let renderSize: CGSize
+
+    var body: some View {
+        Label("\(Int(renderSize.width)) × \(Int(renderSize.height)) pixels", systemImage: "photo")
+            .font(.callout.monospacedDigit())
+            .foregroundStyle(.secondary)
     }
 }
 

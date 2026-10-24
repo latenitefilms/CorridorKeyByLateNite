@@ -31,6 +31,10 @@
 //
 
 import Foundation
+
+#if CORRIDOR_KEY_HEADLESS_TESTS
+@testable import CorridorKeyToolboxLogic
+#endif
 import AVFoundation
 import CoreMedia
 import CoreVideo
@@ -136,12 +140,12 @@ enum ExportRunnerEvent: @unchecked Sendable {
 actor ProResExporter {
 
     private let renderEngine: StandaloneRenderEngine
-    private let videoSource: VideoSource
+    private let videoSource: any EditorMediaSource
     private let project: ExportProjectSnapshot
 
     init(
         renderEngine: StandaloneRenderEngine,
-        videoSource: VideoSource,
+        videoSource: any EditorMediaSource,
         project: ExportProjectSnapshot
     ) {
         self.renderEngine = renderEngine
@@ -223,7 +227,7 @@ actor ProResExporter {
         writer.startSession(atSourceTime: .zero)
         eventHandler(.started(totalFrames: frameCount))
 
-        let frameReader: VideoFrameReader
+        let frameReader: any MediaFrameReader
         do {
             frameReader = try await videoSource.makeFrameReader(startTime: .zero)
         } catch {
@@ -268,18 +272,7 @@ actor ProResExporter {
             // Without one, the renderer pass-throughs and the export
             // emits the source untouched — which is the explicit "not
             // analysed yet" state we surface in the FxPlug too.
-            var stateForFrame = project.state
-            if let cached = project.cachedMatte(forFrameIndex: frameIndex) {
-                stateForFrame.cachedMatteBlob = cached.blob
-                stateForFrame.cachedMatteInferenceResolution = cached.inferenceResolution
-            } else {
-                stateForFrame.cachedMatteBlob = nil
-                stateForFrame.cachedMatteInferenceResolution = 0
-            }
-            stateForFrame.destinationLongEdgePixels = max(
-                Int(renderSize.width.rounded()),
-                Int(renderSize.height.rounded())
-            )
+            let stateForFrame = project.renderState(forFrameIndex: frameIndex, renderSize: renderSize)
 
             let result: StandaloneRenderResult
             do {
@@ -327,7 +320,7 @@ actor ProResExporter {
     /// what keeps HDR / Rec.2020 / DCI-P3 sources looking correct
     /// downstream — silently re-tagging them BT.709 made wide-gamut
     /// clips appear desaturated when reopened in pro tools.
-    private static func colorProperties(for info: VideoSourceInfo) -> [String: Any] {
+    private static func colorProperties(for info: MediaSourceInfo) -> [String: Any] {
         let primaries = info.colorPrimaries ?? AVVideoColorPrimaries_ITU_R_709_2
         let transfer = info.transferFunction ?? AVVideoTransferFunction_ITU_R_709_2
         let matrix = info.yCbCrMatrix ?? AVVideoYCbCrMatrix_ITU_R_709_2
@@ -373,5 +366,15 @@ struct ExportProjectSnapshot: @unchecked Sendable {
 
     func cachedMatte(forFrameIndex index: Int) -> MatteCacheEntry? {
         cachedMattes[index]
+    }
+
+    /// Resolves identical frame parameters for movie and still-image export.
+    func renderState(forFrameIndex index: Int, renderSize: CGSize) -> PluginStateData {
+        var resolved = state
+        let cached = cachedMattes[index]
+        resolved.cachedMatteBlob = cached?.blob
+        resolved.cachedMatteInferenceResolution = cached?.inferenceResolution ?? 0
+        resolved.destinationLongEdgePixels = max(Int(renderSize.width.rounded()), Int(renderSize.height.rounded()))
+        return resolved
     }
 }

@@ -235,7 +235,9 @@ final class EditorViewModel {
         }
     }
     /// Loaded clip metadata. `nil` while `.noClipLoaded`.
-    var clipInfo: VideoSourceInfo?
+    var clipInfo: MediaSourceInfo?
+    /// Stills use the shared keying controls without a playback timeline.
+    var isStillImage: Bool { clipInfo?.kind == .stillImage }
     /// Most recently rendered frame, ready to draw on the preview
     /// surface. Updated whenever the playhead moves or a parameter
     /// changes.
@@ -341,7 +343,10 @@ final class EditorViewModel {
     // MARK: - Internal state
 
     @ObservationIgnored
-    private var videoSource: VideoSource?
+    private var videoSource: (any EditorMediaSource)?
+    /// Invalidates imports that finish after another import or Close.
+    @ObservationIgnored
+    private var loadIdentifier = UUID()
     @ObservationIgnored
     private var inflightRenderTask: Task<Void, Never>?
     @ObservationIgnored
@@ -608,15 +613,18 @@ final class EditorViewModel {
 
     // MARK: - Clip loading
 
-    /// Loads a clip into the editor. Existing matte cache is dropped.
+    /// Loads a video or still image. Existing matte cache is dropped.
     /// On success transitions to `.ready`, auto-detects the Screen
     /// Colour from the first frame, and renders the first frame for
     /// preview.
     func loadClip(at url: URL) async {
         cancelInflightWork()
+        let identifier = UUID()
+        loadIdentifier = identifier
         phase = .loadingClip(url)
         do {
-            let source = try await VideoSource(url: url)
+            let source = try await MediaSourceLoader.load(url: url)
+            guard loadIdentifier == identifier, !Task.isCancelled else { return }
             self.state.hintPointSet.clear()
             self.undoManager?.removeAllActions(withTarget: self)
             self.videoSource = source
@@ -628,11 +636,14 @@ final class EditorViewModel {
             self.analysisStatus = .idle
             self.exportStatus = .idle
             self.playheadTime = .zero
-            await autoDetectScreenColor(source: source)
+            self.latestPreview = nil
+            await autoDetectScreenColor(source: source, loadIdentifier: identifier)
+            guard loadIdentifier == identifier, !Task.isCancelled else { return }
             self.phase = .ready
             beginWarmupForCurrentQuality()
             renderPreview(at: .zero)
         } catch {
+            guard loadIdentifier == identifier, !Task.isCancelled else { return }
             self.phase = .loadFailed(error.localizedDescription)
         }
     }
@@ -646,12 +657,13 @@ final class EditorViewModel {
     ///
     /// Best-effort: any decode failure leaves the screen colour
     /// untouched. The user can flip the picker manually in that case.
-    private func autoDetectScreenColor(source: VideoSource) async {
+    private func autoDetectScreenColor(source: any EditorMediaSource, loadIdentifier: UUID) async {
         do {
             let pixelBuffer = try await source.makeFrame(
                 atTime: .zero,
                 preferredPixelFormat: kCVPixelFormatType_32BGRA
             )
+            guard self.loadIdentifier == loadIdentifier, !Task.isCancelled else { return }
             let detected = ScreenColorAutoDetector.detect(
                 firstFrame: pixelBuffer,
                 fallback: state.screenColor
@@ -668,6 +680,7 @@ final class EditorViewModel {
     /// Closes the current clip and returns the editor to the empty
     /// state. Cancels any in-flight analyse / export work.
     func closeClip() {
+        loadIdentifier = UUID()
         cancelInflightWork()
         stopPlayback()
         videoSource = nil
@@ -699,7 +712,7 @@ final class EditorViewModel {
     }
 
     private func startPlayback() {
-        guard let clipInfo, !isPlaying else { return }
+        guard let clipInfo, phase.isReady, !isStillImage, !isPlaying else { return }
         targetPlaybackFPS = max(Double(clipInfo.nominalFrameRate), 0)
         measuredPlaybackFPS = 0
         isPlaying = true
@@ -1185,24 +1198,43 @@ final class EditorViewModel {
     /// user picked in the save panel; this method assumes that URL is
     /// already accessible to the wrapper app's sandbox.
     func runExport(options: ExportOptions) {
-        guard let source = videoSource else { return }
-        cancelExport()
-        exportRunIdentifier += 1
-        let runIdentifier = exportRunIdentifier
+        guard let source = videoSource, phase.isReady, !isStillImage else { return }
         let snapshot = ExportProjectSnapshot(state: state, cachedMattes: matteCache)
         let exporter = ProResExporter(
             renderEngine: renderEngine,
             videoSource: source,
             project: snapshot
         )
-        let totalFramesSnapshot = totalFrames
+        startExport(totalFrames: totalFrames) { continuation in
+            await exporter.run(options: options) { event in continuation.yield(event) }
+        }
+    }
+
+    /// Exports the still at its native resolution with an alpha channel.
+    func runExport(options: StillImageExportOptions) {
+        guard let source = videoSource, phase.isReady, isStillImage else { return }
+        let exporter = StillImageExporter(
+            renderEngine: renderEngine, source: source,
+            project: ExportProjectSnapshot(state: state, cachedMattes: matteCache)
+        )
+        startExport(totalFrames: 1) { continuation in
+            await exporter.run(options: options) { event in continuation.yield(event) }
+        }
+    }
+
+    /// Owns progress, cancellation, and lifetime identically for both exporters.
+    private func startExport(
+        totalFrames totalFramesSnapshot: Int,
+        operation: @escaping @Sendable (AsyncStream<ExportRunnerEvent>.Continuation) async -> Void
+    ) {
+        cancelExport()
+        exportRunIdentifier += 1
+        let runIdentifier = exportRunIdentifier
         exportStatus = .running(processed: 0, total: totalFramesSnapshot)
 
         let (eventStream, continuation) = AsyncStream<ExportRunnerEvent>.makeStream()
         let runTask = Task(priority: .userInitiated) {
-            await exporter.run(options: options) { event in
-                continuation.yield(event)
-            }
+            await operation(continuation)
             continuation.finish()
         }
         exportRunnerTask = runTask
@@ -1358,6 +1390,7 @@ final class EditorViewModel {
 
     @discardableResult
     private func cancelInflightWork() -> [Task<Void, Never>] {
+        loadIdentifier = UUID()
         var tasks: [Task<Void, Never>] = []
         if let inflightRenderTask {
             tasks.append(inflightRenderTask)

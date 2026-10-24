@@ -67,7 +67,7 @@ struct EditorView: View {
         }
         .fileImporter(
             isPresented: $isImporting,
-            allowedContentTypes: [.movie, .video, .quickTimeMovie, .mpeg4Movie],
+            allowedContentTypes: MediaSourceLoader.supportedContentTypes,
             allowsMultipleSelection: false
         ) { result in
             handleImportResult(result)
@@ -89,7 +89,7 @@ struct EditorView: View {
             viewModel.cancelWorkForEditorShutdown()
         }
         .alert(
-            "Couldn't load clip",
+            "Couldn't load media",
             isPresented: Binding(
                 get: { loadFailureMessage != nil },
                 set: { if !$0 { loadFailureMessage = nil } }
@@ -178,7 +178,7 @@ struct EditorView: View {
         case .ready:
             guard let url = viewModel.clipInfo?.url else { return "CorridorKey by LateNite" }
             return url.deletingPathExtension().lastPathComponent
-        case .loadFailed: return "Couldn't load clip"
+        case .loadFailed: return "Couldn't load media"
         }
     }
 
@@ -244,17 +244,17 @@ private struct EditorEmptyState: View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 18) {
-                Image(systemName: "film.stack")
+                Image(systemName: "photo.on.rectangle")
                     .font(.system(size: 64, weight: .light))
                     .foregroundStyle(.secondary)
-                Text("Drop a clip here, or import one to begin.")
+                Text("Drop a video or still image here, or import one to begin.")
                     .font(.title3)
                     .foregroundStyle(.secondary)
-                Text("Final Cut Pro–quality keying without leaving this app.\nSupports H.264, HEVC, ProRes, and more.")
+                Text("Supports ProRes, HEVC, H.264, PNG, TIFF, JPEG, HEIC, and more.")
                     .multilineTextAlignment(.center)
                     .font(.callout)
                     .foregroundStyle(.tertiary)
-                Button("Import Clip…", systemImage: "square.and.arrow.down", action: onPickFile)
+                Button("Import Media…", systemImage: "square.and.arrow.down", action: onPickFile)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .padding(.top, 8)

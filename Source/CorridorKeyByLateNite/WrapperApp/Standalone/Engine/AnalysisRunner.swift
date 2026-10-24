@@ -54,9 +54,9 @@ enum AnalysisRunnerEvent: @unchecked Sendable {
 actor AnalysisRunner {
 
     private let renderEngine: StandaloneRenderEngine
-    private let videoSource: VideoSource
+    private let videoSource: any EditorMediaSource
 
-    init(renderEngine: StandaloneRenderEngine, videoSource: VideoSource) {
+    init(renderEngine: StandaloneRenderEngine, videoSource: any EditorMediaSource) {
         self.renderEngine = renderEngine
         self.videoSource = videoSource
     }
@@ -80,7 +80,7 @@ actor AnalysisRunner {
 
         // Build the AVAssetReader once for the whole pass — far faster
         // than reseeking per frame via AVAssetImageGenerator.
-        let frameReader: VideoFrameReader
+        let frameReader: any MediaFrameReader
         do {
             frameReader = try await videoSource.makeFrameReader(startTime: .zero)
         } catch {
