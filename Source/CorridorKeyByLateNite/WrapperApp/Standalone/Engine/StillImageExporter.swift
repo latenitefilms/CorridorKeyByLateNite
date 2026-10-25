@@ -48,6 +48,9 @@ actor StillImageExporter {
         eventHandler(.started(totalFrames: 1))
         do {
             try Task.checkCancellation()
+            let cacheSessions = try project.pinAnalysisCache(frameCount: 1)
+            defer { withExtendedLifetime(cacheSessions) {} }
+            try Task.checkCancellation()
             let frame = try await source.makeFrame(atTime: .zero)
             var state = project.renderState(forFrameIndex: 0, renderSize: source.info.renderSize)
             // PNG/TIFF encode alpha with their own association convention.
@@ -56,18 +59,21 @@ actor StillImageExporter {
             if state.outputMode == .foregroundPlusMatte { state.outputMode = .processed }
             let result = try renderEngine.render(source: frame, state: state, renderTime: .zero)
             try Task.checkCancellation()
-            guard let workingColorSpace = CGColorSpace(name: CGColorSpace.extendedSRGB),
-                  let outputColorSpace = source.info.imageColorSpace ?? CGColorSpace(name: CGColorSpace.sRGB) else {
+            let isLinear = result.report.effectiveInferenceResolution == 0 ? state.video.inputIsLinear : state.outputIsLinear
+            let gamut = StandaloneRenderEngine.workingGamut(for: frame)
+            let profile = gamut == .displayP3 ? CGColorSpace.displayP3 : (gamut == .rec2020 ? CGColorSpace.itur_2020 : CGColorSpace.sRGB)
+            guard let sourceColorSpace = CGColorSpace(name: profile),
+                  let outputColorSpace = isLinear ? CGColorSpaceCreateExtendedLinearized(sourceColorSpace) : sourceColorSpace else {
                 throw CocoaError(.fileWriteUnknown)
             }
-            let image = CIImage(cvPixelBuffer: result.destinationPixelBuffer, options: [.colorSpace: workingColorSpace])
+            let image = CIImage(cvPixelBuffer: result.destinationPixelBuffer, options: [.colorSpace: outputColorSpace])
             let context = CIContext(mtlDevice: renderEngine.device)
             let data: Data?
             switch options.format {
             case .png:
                 data = context.pngRepresentation(of: image, format: .RGBA16, colorSpace: outputColorSpace)
             case .tiff:
-                data = context.tiffRepresentation(of: image, format: .RGBA16, colorSpace: outputColorSpace)
+                data = context.tiffRepresentation(of: image, format: isLinear ? .RGBAh : .RGBA16, colorSpace: outputColorSpace)
             }
             guard let data else { throw CocoaError(.fileWriteUnknown) }
             try Task.checkCancellation()

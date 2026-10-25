@@ -1,11 +1,13 @@
-# Community MLX evaluation — 24 October 2026
+# Community MLX evaluation — updated 25 October 2026
 
 ## Recommendation
 
-Keep the validated local v2 artifact for this change. The community mixed-FP16
-implementation is the strongest candidate for the next inference optimization;
-its released files are not a drop-in replacement for our Swift `.mlxfn` import.
-Do not make Q8 the quality-first default on the evidence currently available.
+Keep the validated local staged v2 artifact. The implementation now includes
+continuous RVM state, overlapping temporal windows, bidirectional external hints,
+aspect-preserving padding and linear-color controls in both hosts. The local
+mixed-FP16 experiment failed the unchanged compiled 2048 foreground quality gate
+(maximum error 0.077886, limit 0.05), so FP32 activations remain the shipping
+choice. Q8 has not been validated as a quality-first default.
 
 This is a review of the supplied `LLM Resources/corridorkey-v2-mlx` source and
 its recorded measurements. That directory contains no model weights. We have
@@ -19,8 +21,8 @@ quality advantage over our current artifact on matched footage and hardware.
 | Network | Both v2 keying stages, C-RADIO, MoGe, RVM | Same model family and foundations |
 | Runtime | Existing MLX Swift dependency, serialized function import | Python graph interpreter, MLX operators and custom Metal kernels; CPU PyTorch preparation |
 | Precision | FP16 weight storage, FP32 computation | FP32; mixed FP16 with sensitive operations in FP32; affine group-64 Q8 linear weights with FP16 remainder |
-| Shape | Shared weights across 512/768/1024/1536/2048 square graphs | Static 1024×1536 and 768×1280 profiles |
-| Video history | Independent 1/1 inference, app's alpha stability pass | Persistent RVM state and overlapping stage-one Hann windows, normally 4/2 |
+| Shape | Shared weights across 512/768/1024/1536/2048 square profiles, reflected aspect fit and cropped predictions | Static 1024×1536 and 768×1280 profiles |
+| Video history | Persistent RVM, overlapping stage-one cosine windows up to 80 frames, separate optional alpha stability | Persistent RVM state and overlapping stage-one Hann windows, normally 4/2 |
 | Native integration | Bundled and validated for sandboxed Swift hosts | Requires conversion/reimplementation of graph execution, custom operators, shapes, color and temporal contracts |
 
 The community format is `corridorkey-mlx-graph-v1`: `graph.json` plus component
@@ -60,12 +62,13 @@ third-party framework has been incorporated in this change.
 
 ## Green and blue selection
 
-Keep **Screen Color** in both hosts with the current names and defaults. V2 uses
+Keep **Screen Colour** in both hosts. V2 uses
 one model for both screens, but the selection still determines the chroma hint,
 despill, spill-alpha suppression and edge decontamination. Even the community
 CLI retains `--screen blue` for cleanup. Removing the control without replacing
-those dependencies would change results. No Motion-template default change is
-needed for the cache correction.
+those dependencies would change results. Both hosts now support Auto, Green,
+Blue and Custom; Auto and zero additional despill are the new defaults, with
+matching Motion-template values. Saved explicit selections are preserved.
 
 ## Hardware priorities
 
@@ -81,11 +84,13 @@ AVFoundation/VideoToolbox for media decoding/encoding. Media Engines accelerate
 supported video codecs, not CorridorKey matrix operations. Verify actual
 hardware routing in Instruments rather than infer it from API names.
 
-Next compare mixed FP16 against the current artifact at identical shapes, hints,
-temporal mode and outputs on the green, blue and HardestShotEver fixtures. Measure
-warm inference, complete analysis, cached playback, physical footprint and sustained
-thermal behavior separately. Validate smaller-memory M1/M2 machines as well as
-newer hardware before changing Automatic quality policy or shipping quantization.
+Further precision work must pass comparisons at identical shapes, hints, temporal
+mode and outputs on green, blue and difficult transparency fixtures. Current
+stage, full-image and Swift runtime results are recorded in
+[the migration report](CorridorKey-v2.md). Warm inference, complete analysis,
+cached playback, physical footprint and sustained thermal behavior are distinct
+measurements. Smaller-memory M1/M2 machines and newer hardware still need testing
+before changing Automatic quality policy or shipping quantization.
 
 Source references: [community repository](https://github.com/peterteravskis/corridorkey-v2-mlx),
 [precision study](https://github.com/peterteravskis/corridorkey-v2-mlx/blob/main/docs/PRECISION.md),

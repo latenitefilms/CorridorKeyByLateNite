@@ -76,6 +76,7 @@ final class CorridorKeyComputePipelines: Sendable {
     let sourcePassthrough: any MTLComputePipelineState
     let applyScreenMatrix: any MTLComputePipelineState
     let flipVertical: any MTLComputePipelineState
+    let colorTransform: any MTLComputePipelineState
     let resample: any MTLComputePipelineState
     let extractHint: any MTLComputePipelineState
     let refinerBlend: any MTLComputePipelineState
@@ -98,6 +99,7 @@ final class CorridorKeyComputePipelines: Sendable {
             }
             return try device.makeComputePipelineState(function: function)
         }
+        colorTransform = try compute("corridorKeyColorTransformKernel")
         combineAndNormalize = try compute("corridorKeyCombineAndNormalizeKernel")
         normalizeToBuffer = try compute("corridorKeyNormalizeToBufferKernel")
         mlxWritebackFused = try compute("corridorKeyMLXWritebackFusedKernel")

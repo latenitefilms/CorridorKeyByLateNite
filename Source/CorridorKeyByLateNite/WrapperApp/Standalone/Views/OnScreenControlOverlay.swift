@@ -149,7 +149,7 @@ struct HintPointMarker: View {
 
     private var screenColorSwatch: Color {
         switch screenColor {
-        case .green: return Color(red: 0.20, green: 0.78, blue: 0.30)
+        case .green, .automatic, .custom: return Color(red: 0.20, green: 0.78, blue: 0.30)
         case .blue: return Color(red: 0.20, green: 0.42, blue: 0.95)
         }
     }

@@ -15,6 +15,35 @@ import Testing
 @Suite("AnalysisData")
 struct AnalysisDataTests {
 
+    @Test("FxPlug persistence stores compact references without embedding frame pixels")
+    func diskReferenceRoundTrip() throws {
+        let sessionID = UUID()
+        let references = Dictionary(uniqueKeysWithValues: (0..<1000).map { index in
+            (index, AnalysisFrameReference(sessionID: sessionID, frameID: UUID(), byteCount: 37_000_000))
+        })
+        let original = AnalysisData(
+            schemaVersion: AnalysisData.currentSchemaVersion,
+            frameDuration: CMTime(value: 1, timescale: 24), firstFrameTime: .zero,
+            frameCount: 1000, analyzedCount: 1000, screenColorRaw: 0,
+            qualityModeRaw: QualityMode.maximum2048.rawValue,
+            inferenceResolution: 2048, matteWidth: 2048, matteHeight: 2048,
+            mattes: [:], frameReferences: references
+        )
+        let dictionary = original.asParameterDictionary()
+        let archive = try NSKeyedArchiver.archivedData(withRootObject: dictionary, requiringSecureCoding: true)
+        // A thousand 37 MB frames must remain small library metadata.
+        #expect(archive.count < 200_000)
+        let decoded = try NSKeyedUnarchiver.unarchivedObject(
+            ofClasses: [NSDictionary.self, NSString.self, NSNumber.self, NSData.self], from: archive
+        ) as? NSDictionary
+        let restored = try #require(AnalysisData.fromParameterDictionary(decoded))
+        #expect(restored.frameReferences == references)
+        #expect(restored.mattes.isEmpty)
+        let last = try #require(restored.cachedMatte(at: CMTime(value: 999, timescale: 24), screenColorRaw: 0))
+        #expect(last.reference == references[999])
+        #expect(last.blob == nil)
+    }
+
     @Test("Dictionary round-trip preserves every field")
     func dictionaryRoundTrip() {
         let matteA = Data([0x01, 0x02, 0x03])

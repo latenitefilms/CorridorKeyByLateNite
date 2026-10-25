@@ -4,6 +4,7 @@ import CoreMedia
 import CoreVideo
 import Foundation
 import ImageIO
+import Metal
 import Synchronization
 import Testing
 import UniformTypeIdentifiers
@@ -17,6 +18,58 @@ import UniformTypeIdentifiers
 
 @Suite("Still image import and export", .serialized)
 struct StillImageTests {
+    @Test("External matte reader preserves orientation, validates dimensions, and limits a single hint to its reference")
+    func externalHintImage() async throws {
+        let url = try Self.writeImage(type: .png)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        var settings = VideoInferenceSettings()
+        settings.useAlphaHint = true
+        settings.hintFrames = .singleFrame
+        settings.referenceFrame = 1
+        settings.timeAwareness = .two
+        settings.alphaHintAsset = try AlphaHintAsset(url: url)
+        let reader = try await AlphaHintReader(settings: settings, frameCount: 3, frameDuration: CMTime(value: 1, timescale: 24))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let queue = try #require(device.makeCommandQueue())
+        #expect(try reader.texture(frameIndex: 0, sourceWidth: 64, sourceHeight: 48, device: device, commandQueue: queue) == nil)
+        #expect(throws: VideoInferenceSettingsError.self) {
+            try reader.texture(frameIndex: 1, sourceWidth: 32, sourceHeight: 48, device: device, commandQueue: queue)
+        }
+        let texture = try #require(try reader.texture(frameIndex: 1, sourceWidth: 64, sourceHeight: 48, device: device, commandQueue: queue))
+        let buffer = try #require(device.makeBuffer(length: 64 * 48 * 8, options: .storageModeShared))
+        let command = try #require(queue.makeCommandBuffer())
+        let blit = try #require(command.makeBlitCommandEncoder())
+        blit.copy(from: texture, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+                  sourceSize: MTLSize(width: 64, height: 48, depth: 1), to: buffer, destinationOffset: 0,
+                  destinationBytesPerRow: 512, destinationBytesPerImage: 64 * 48 * 8)
+        blit.endEncoding()
+        command.commit()
+        await command.completed()
+        #expect(command.error == nil)
+        let pixels = buffer.contents().assumingMemoryBound(to: Float16.self)
+        #expect(abs(Float(pixels[0]) - 0.2126) < 0.002)
+        #expect(abs(Float(pixels[63 * 4]) - 0.0722) < 0.002)
+        #expect(abs(Float(pixels[(47 * 64) * 4]) - 0.7152) < 0.002)
+        settings.hintFrames = .allFrames
+        await #expect(throws: VideoInferenceSettingsError.self) {
+            try await AlphaHintReader(settings: settings, frameCount: 3, frameDuration: CMTime(value: 1, timescale: 24))
+        }
+        let sequenceFolder = url.deletingLastPathComponent().appending(path: "Sequence", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: sequenceFolder, withIntermediateDirectories: true)
+        for index in 1...3 {
+            try FileManager.default.copyItem(at: url, to: sequenceFolder.appending(path: "Hint-\(index).png"))
+        }
+        settings.alphaHintAsset = try AlphaHintAsset(url: sequenceFolder)
+        let sequence = try await AlphaHintReader(settings: settings, frameCount: 3, frameDuration: CMTime(value: 1, timescale: 24))
+        #expect(try sequence.texture(frameIndex: 2, sourceWidth: 64, sourceHeight: 48, device: device, commandQueue: queue) != nil)
+        #expect(throws: VideoInferenceSettingsError.self) {
+            try sequence.texture(frameIndex: 3, sourceWidth: 64, sourceHeight: 48, device: device, commandQueue: queue)
+        }
+        await #expect(throws: VideoInferenceSettingsError.self) {
+            try await AlphaHintReader(settings: settings, frameCount: 2, frameDuration: CMTime(value: 1, timescale: 24))
+        }
+    }
+
     @Test("PNG, TIFF, JPEG, and HEIC enter the same single-frame pipeline", arguments: ["png", "tiff", "jpeg", "heic"])
     func importsImage(format: String) async throws {
         let url = try Self.writeImage(type: #require(UTType(filenameExtension: format)))
@@ -151,8 +204,10 @@ struct StillImageTests {
         let source = try await StillImageSource(url: url)
         #expect(source.info.imageColorSpace?.name == CGColorSpace.displayP3)
         let output = url.deletingLastPathComponent().appending(path: "Wide.\(format.filenameExtension)")
+        var state = Self.neutralState()
+        state.outputMode = .original
         let exporter = StillImageExporter(renderEngine: try StandaloneRenderEngine(), source: source,
-                                          project: ExportProjectSnapshot(state: Self.neutralState(), cachedMattes: [:]))
+                                          project: ExportProjectSnapshot(state: state, cachedMattes: [:]))
         await exporter.run(options: StillImageExportOptions(destination: output, format: format)) { _ in }
         let written = try #require(CGImageSourceCreateWithURL(output as CFURL, nil))
         let image = try #require(CGImageSourceCreateImageAtIndex(written, 0, nil))
@@ -165,14 +220,35 @@ struct StillImageTests {
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let source = try await StillImageSource(url: url)
         let output = url.deletingLastPathComponent().appending(path: "Missing/Keyed.png")
+        var state = Self.neutralState()
+        state.outputMode = .original
         let exporter = StillImageExporter(renderEngine: try StandaloneRenderEngine(), source: source,
-                                          project: ExportProjectSnapshot(state: Self.neutralState(), cachedMattes: [:]))
+                                          project: ExportProjectSnapshot(state: state, cachedMattes: [:]))
         let events = Mutex<[ExportRunnerEvent]>([])
         await exporter.run(options: StillImageExportOptions(destination: output, format: .png)) { event in
             events.withLock { $0.append(event) }
         }
         #expect(events.withLock { $0.contains { if case .failed = $0 { true } else { false } } })
         #expect(!FileManager.default.fileExists(atPath: output.path))
+    }
+
+    @Test("Missing analysis cannot silently export the source or replace an existing image")
+    func missingAnalysisPreservesDestination() async throws {
+        let url = try Self.writeImage(type: .png)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let source = try await StillImageSource(url: url)
+        let output = url.deletingLastPathComponent().appending(path: "Existing.png")
+        let sentinel = Data("existing image".utf8)
+        try sentinel.write(to: output)
+        let exporter = StillImageExporter(renderEngine: try StandaloneRenderEngine(), source: source,
+                                          project: ExportProjectSnapshot(state: Self.neutralState(), cachedMattes: [:]))
+        let events = Mutex<[ExportRunnerEvent]>([])
+        await exporter.run(options: StillImageExportOptions(destination: output, format: .png)) { event in
+            events.withLock { $0.append(event) }
+        }
+        #expect(try Data(contentsOf: output) == sentinel)
+        #expect(events.withLock { $0.contains { if case .failed = $0 { true } else { false } } })
+        #expect(!events.withLock { $0.contains { if case .completed = $0 { true } else { false } } })
     }
 
     @Test("Analysis consumes one still and builds a usable matte cache")
@@ -196,7 +272,7 @@ struct StillImageTests {
         #expect(entries.count == 1)
         #expect(events.withLock { $0.contains { if case .completed = $0 { true } else { false } } })
         let entry = try #require(entries.first)
-        #expect(!entry.blob.isEmpty)
+        #expect(try !entry.blob.isEmpty)
     }
 
     #if !CORRIDOR_KEY_HEADLESS_TESTS

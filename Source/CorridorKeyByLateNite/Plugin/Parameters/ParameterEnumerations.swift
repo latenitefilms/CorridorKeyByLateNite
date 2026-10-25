@@ -16,11 +16,15 @@ import simd
 public enum ScreenColor: Int, Sendable, CaseIterable, Codable {
     case green = 0
     case blue = 1
+    case automatic = 2
+    case custom = 3
 
     public var displayName: String {
         switch self {
         case .green: return "Green"
         case .blue: return "Blue"
+        case .automatic: return "Auto"
+        case .custom: return "Custom"
         }
     }
 
@@ -30,7 +34,7 @@ public enum ScreenColor: Int, Sendable, CaseIterable, Codable {
     /// in `ofx_screen_color.hpp` so behaviour matches across hosts.
     public var canonicalScreenReference: SIMD3<Float> {
         switch self {
-        case .green: return SIMD3<Float>(0.08, 0.84, 0.08)
+        case .green, .automatic, .custom: return SIMD3<Float>(0.08, 0.84, 0.08)
         case .blue:  return SIMD3<Float>(0.08, 0.16, 0.84)
         }
     }
@@ -49,12 +53,15 @@ public enum HintMode: Int, Sendable, CaseIterable, Codable {
     /// Chroma prior plus required foreground/background points. This remains
     /// an automated rough hint, not upstream v2's authoritative roto input.
     case manual = 2
+    /// Let v2 select a subject without an alpha prior (confidence -1).
+    case none = 3
 
     public var displayName: String {
         switch self {
         case .automatic: return "Automatic"
         case .appleVision: return "Apple Vision Framework"
         case .manual: return "Manual Hint"
+        case .none: return "None"
         }
     }
 
@@ -236,6 +243,8 @@ public enum OutputMode: Int, Sendable, CaseIterable, Codable {
     /// before MLX inference is involved. Visualised as red-on-black:
     /// red = "this is foreground" hint, black = "this is screen".
     case hint = 5
+    /// Untouched source image, independent of whether analysis exists.
+    case original = 6
 
     public var shaderValue: Int32 { Int32(rawValue) }
 
@@ -247,6 +256,7 @@ public enum OutputMode: Int, Sendable, CaseIterable, Codable {
         case .sourcePlusMatte: return "Source + Matte"
         case .foregroundPlusMatte: return "Foreground + Matte"
         case .hint: return "Hint (Diagnostic)"
+        case .original: return "Original"
         }
     }
 }

@@ -50,7 +50,7 @@ struct VideoSourceTests {
         #expect(abs(snapped.seconds - snappedFrame / frameRate) < 1.0e-6)
     }
 
-    @Test("decodes a single frame via the image generator without permission errors")
+    @Test("decodes a single frame via the shared reader without permission errors")
     func makeFrameDecodesFirstFrame() async throws {
         let url = try await SyntheticVideoFixture.writeMP4()
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
@@ -58,6 +58,25 @@ struct VideoSourceTests {
         let pixelBuffer = try await source.makeFrame(atTime: .zero)
         #expect(CVPixelBufferGetWidth(pixelBuffer) == 320)
         #expect(CVPixelBufferGetHeight(pixelBuffer) == 180)
+    }
+
+    @Test("scrubbing and sequential reading apply the same portrait rotation")
+    func rotatedFramesMatchDisplayDimensions() async throws {
+        let url = try await SyntheticVideoFixture.writeMP4(
+            transform: CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 180, ty: 0)
+        )
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let source = try await VideoSource(url: url)
+        #expect(source.info.renderSize == CGSize(width: 180, height: 320))
+
+        let scrubbedFrame = try await source.makeFrame(atTime: .zero)
+        let reader = try await source.makeFrameReader()
+        defer { reader.cancel() }
+        let sequentialFrame = try #require(try reader.nextFrame())
+        for pixelBuffer in [scrubbedFrame, sequentialFrame.pixelBuffer] {
+            #expect(CVPixelBufferGetWidth(pixelBuffer) == 180)
+            #expect(CVPixelBufferGetHeight(pixelBuffer) == 320)
+        }
     }
 
     @Test("frame reader walks every frame in display order")

@@ -165,6 +165,8 @@
 		<version>2</version>
 		<target object="10010" channel="./50" name=""/>
 		<target object="10010" channel="./100" name="Settings"/>
+		<target object="10010" channel="./160" name="Time Awareness"/>
+		<target object="10010" channel="./170" name="Alpha Hint"/>
 		<target object="10010" channel="./110" name="Interior Detail"/>
 		<target object="10010" channel="./120" name="Matte"/>
 		<target object="10010" channel="./130" name="Edge &amp; Spill"/>
@@ -272,11 +274,30 @@
 				</parameter>
 				<parameter name="Settings" id="100" flags="8589938704">
 					<parameter name="Quality" id="1002" flags="12901679120" default="0" value="0"/>
-					<parameter name="Screen Colour" id="1001" flags="12901679120" default="0" value="0"/>
+					<parameter name="Screen Colour" id="1001" flags="12901679120" default="2" value="2"/>
+					<parameter name="Custom Screen Colour" id="9011" flags="12901679120">
+						<parameter name="Red" id="1" flags="12901679120" default="0.08" value="0.08"/>
+						<parameter name="Green" id="2" flags="12901679120" default="0.84" value="0.84"/>
+						<parameter name="Blue" id="3" flags="12901679120" default="0.08" value="0.08"/>
+					</parameter>
 					<parameter name="Upscale Method" id="6002" flags="12901679120" default="1" value="1"/>
 					<parameter name="Output" id="5001" flags="12901679120" default="0" value="0"/>
 					<parameter name="Hint" id="1007" flags="12901679120" default="1" value="1"/>
+					<parameter name="Input is Linear" id="9001" flags="12901679120" default="0" value="0"/>
+					<parameter name="Linearize Output" id="9002" flags="12901679120" default="0" value="0"/>
+					<parameter name="Keep Original in Solid Areas" id="9003" flags="12901679120" default="0" value="0"/>
 					<parameter name="Show Subject Marker" id="1005" flags="12901679120" default="0" value="0"/>
+				</parameter>
+				<parameter name="Time Awareness" id="160" flags="8589938704">
+					<parameter name="Time Awareness" id="9004" flags="12901679120" default="0" value="0"/>
+					<parameter name="Low GPU Memory" id="9005" flags="12901679120" default="1" value="1"/>
+				</parameter>
+				<parameter name="Alpha Hint" id="170" flags="8589938704">
+					<parameter name="Use Alpha Hint" id="9006" flags="12901679120" default="0" value="0"/>
+					<parameter name="Hint Frames" id="9007" flags="12901679120" default="0" value="0"/>
+					<parameter name="Reference Frame" id="9008" flags="12901679120" default="0" value="0"/>
+					<parameter name="Alpha Hint Strength" id="9009" flags="12901679120" default="0.75" value="0.75"/>
+					<parameter name="Internal Hint Strength" id="9010" flags="12901679120" default="0.95" value="0.95"/>
 				</parameter>
 				<parameter name="Interior Detail" id="110" flags="8589938704">
 					<parameter name="Source Passthrough" id="2001" flags="12901679120" default="0" value="0"/>
@@ -294,7 +315,7 @@
 					<parameter name="Refiner Strength" id="3008" flags="12901679120" default="1" value="1"/>
 				</parameter>
 				<parameter name="Edge &amp; Spill" id="130" flags="8589938704">
-					<parameter name="Despill Strength" id="4001" flags="12901679120" default="0.5" value="0.5"/>
+					<parameter name="Despill Strength" id="4001" flags="12901679120" default="0" value="0"/>
 					<parameter name="Spill Method" id="4002" flags="12901679120" default="4" value="4"/>
 				</parameter>
 				<parameter name="Edge Refinement" id="140" flags="8589938704">

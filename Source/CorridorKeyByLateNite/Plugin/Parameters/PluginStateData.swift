@@ -14,6 +14,26 @@ import CoreMedia
 /// A fully resolved render state. Contains everything the renderer and analyser
 /// need so that no parameter API calls happen off of the main FxPlug thread.
 struct PluginStateData: Codable, Sendable {
+    /// Shared v2 video, hint and color controls.
+    var video = VideoInferenceSettings()
+    /// Zero-based source position for external hint diagnostics, not an analysis setting.
+    var sourceFrameIndex = 0
+    /// Describes encoded RGB; matte diagnostics remain coverage values.
+    var outputIsLinear: Bool {
+        switch outputMode {
+        case .original: video.inputIsLinear
+        case .matteOnly, .hint: false
+        default: video.linearizeOutput
+        }
+    }
+
+    /// Every input that changes stored predictions, including optional legacy smoothing.
+    var analysisHintConfiguration: AnalysisHintConfiguration {
+        AnalysisHintConfiguration(mode: hintMode, points: hintPointSet, video: video.analysisIdentity,
+            temporalStabilityEnabled: temporalStabilityEnabled,
+            temporalStabilityStrength: temporalStabilityEnabled ? temporalStabilityStrength : 0)
+    }
+
     // Key setup
     var screenColor: ScreenColor
     var qualityMode: QualityMode
@@ -80,12 +100,12 @@ struct PluginStateData: Codable, Sendable {
     /// translate normalised radii into destination pixels.
     var destinationLongEdgePixels: Int
 
-    /// Complete cached alpha + reconstructed foreground frame. The historical
-    /// property/key name stays stable for serialized render states. We embed the
-    /// compressed blob directly in the state so the render callback doesn't
-    /// need to touch the custom parameter again (which would mean re-loading
-    /// the whole clip-wide cache for every render on every thread).
+    /// Inline complete frame for fixtures and immediate callers. Production
+    /// analysis uses `cachedFrameReference`; this serialized key stays stable.
     var cachedMatteBlob: Data?
+    /// Local disposable cache reference. Production analysis stores payloads on
+    /// disk so render states and saved effects stay small.
+    var cachedFrameReference: AnalysisFrameReference? = nil
     /// Inference resolution the cached matte was produced at. `0` when no
     /// matte is cached. The render path bypasses the MLX path only when this
     /// matches the quality mode the user is currently requesting.
@@ -98,7 +118,7 @@ struct PluginStateData: Codable, Sendable {
     var hintPointSet: HintPointSet
 
     init(
-        screenColor: ScreenColor = .green,
+        screenColor: ScreenColor = .automatic,
         qualityMode: QualityMode = .automatic,
         // Apple Vision, despeckle, light wrap and temporal stability provide
         // the initial key. Additional edge colour correction is opt-in because
@@ -125,7 +145,7 @@ struct PluginStateData: Codable, Sendable {
         autoDespeckleEnabled: Bool = true,
         despeckleSize: Int = 100,
         refinerStrength: Double = 1.0,
-        despillStrength: Double = 0.5,
+        despillStrength: Double = 0,
         // Ultra is the comp-ready default — its YCbCr-projection path
         // removes the soft chroma fringe the older Average / Double
         // Limit kernels leave on hair and feathered edges, without
@@ -192,6 +212,8 @@ struct PluginStateData: Codable, Sendable {
     /// light wrap, edge decontamination) doesn't invalidate saved documents
     /// from earlier builds. Missing keys fall back to their default values.
     enum CodingKeys: String, CodingKey {
+        case video
+        case sourceFrameIndex
         case screenColor
         case qualityMode
         case hintMode
@@ -224,13 +246,16 @@ struct PluginStateData: Codable, Sendable {
         case longEdgeBaseline
         case destinationLongEdgePixels
         case cachedMatteBlob
+        case cachedFrameReference
         case cachedMatteInferenceResolution
         case hintPointSet
     }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.screenColor = try container.decodeIfPresent(ScreenColor.self, forKey: .screenColor) ?? .green
+        self.sourceFrameIndex = try container.decodeIfPresent(Int.self, forKey: .sourceFrameIndex) ?? 0
+        self.video = try container.decodeIfPresent(VideoInferenceSettings.self, forKey: .video) ?? VideoInferenceSettings()
+        self.screenColor = try container.decodeIfPresent(ScreenColor.self, forKey: .screenColor) ?? .automatic
         self.qualityMode = try container.decodeIfPresent(QualityMode.self, forKey: .qualityMode) ?? .automatic
         self.hintMode = try container.decodeIfPresent(HintMode.self, forKey: .hintMode) ?? .appleVision
         self.showSubjectMarker = try container.decodeIfPresent(Bool.self, forKey: .showSubjectMarker) ?? false
@@ -254,7 +279,7 @@ struct PluginStateData: Codable, Sendable {
         self.autoDespeckleEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoDespeckleEnabled) ?? true
         self.despeckleSize = try container.decodeIfPresent(Int.self, forKey: .despeckleSize) ?? 100
         self.refinerStrength = try container.decodeIfPresent(Double.self, forKey: .refinerStrength) ?? 1.0
-        self.despillStrength = try container.decodeIfPresent(Double.self, forKey: .despillStrength) ?? 0.5
+        self.despillStrength = try container.decodeIfPresent(Double.self, forKey: .despillStrength) ?? 0
         self.spillMethod = try container.decodeIfPresent(SpillMethod.self, forKey: .spillMethod) ?? .ultra
         self.lightWrapEnabled = try container.decodeIfPresent(Bool.self, forKey: .lightWrapEnabled) ?? true
         self.lightWrapStrength = try container.decodeIfPresent(Double.self, forKey: .lightWrapStrength) ?? 0.25
@@ -269,6 +294,7 @@ struct PluginStateData: Codable, Sendable {
         self.longEdgeBaseline = try container.decodeIfPresent(Double.self, forKey: .longEdgeBaseline) ?? 1920.0
         self.destinationLongEdgePixels = try container.decodeIfPresent(Int.self, forKey: .destinationLongEdgePixels) ?? 1920
         self.cachedMatteBlob = try container.decodeIfPresent(Data.self, forKey: .cachedMatteBlob)
+        self.cachedFrameReference = try container.decodeIfPresent(AnalysisFrameReference.self, forKey: .cachedFrameReference)
         self.cachedMatteInferenceResolution = try container.decodeIfPresent(Int.self, forKey: .cachedMatteInferenceResolution) ?? 0
         self.hintPointSet = try container.decodeIfPresent(HintPointSet.self, forKey: .hintPointSet) ?? HintPointSet()
     }
@@ -278,6 +304,8 @@ struct PluginStateData: Codable, Sendable {
     /// projects without that key still load with the new default.
     func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(video, forKey: .video)
+        try container.encode(sourceFrameIndex, forKey: .sourceFrameIndex)
         try container.encode(screenColor, forKey: .screenColor)
         try container.encode(qualityMode, forKey: .qualityMode)
         try container.encode(hintMode, forKey: .hintMode)
@@ -310,13 +338,13 @@ struct PluginStateData: Codable, Sendable {
         try container.encode(longEdgeBaseline, forKey: .longEdgeBaseline)
         try container.encode(destinationLongEdgePixels, forKey: .destinationLongEdgePixels)
         try container.encodeIfPresent(cachedMatteBlob, forKey: .cachedMatteBlob)
+        try container.encodeIfPresent(cachedFrameReference, forKey: .cachedFrameReference)
         try container.encode(cachedMatteInferenceResolution, forKey: .cachedMatteInferenceResolution)
         try container.encode(hintPointSet, forKey: .hintPointSet)
     }
 
-    /// Encodes the snapshot for hand-off to the FxPlug host. Binary plist is
-    /// used because we need to embed a raw `Data` payload (the cached matte)
-    /// efficiently — JSON would base64 it and bloat the blob by ~33 %.
+    /// Encodes compact settings and a local frame reference for the FxPlug host.
+    /// Binary plist also preserves inline diagnostic frames without base64 expansion.
     func encodedForHost() throws -> NSData {
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary

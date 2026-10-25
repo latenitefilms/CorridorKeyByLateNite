@@ -11,6 +11,7 @@ import Foundation
 import Observation
 import AppKit
 import CoreMedia
+import Metal
 
 /// Main-actor-isolated bridge owned by the SwiftUI header. We hold the
 /// `apiManager` weakly-ish through a retained protocol existential so the
@@ -48,6 +49,50 @@ final class CorridorKeyInspectorBridge {
 
     /// Whether saved hints predate per-frame annotations.
     private(set) var hasLegacyHints = false
+    /// Saved external matte shown by the common file picker.
+    var alphaHintAsset: AlphaHintAsset?
+    /// Parameter-write failures remain visible rather than losing a file selection silently.
+    private(set) var hintSelectionError: String?
+    /// Estimate from the same preflight used by the standalone editor.
+    private(set) var videoMemoryDescription = ""
+
+    /// Persists only the security-scoped asset; native parameters store its timing and strength.
+    func saveAlphaHintAsset() {
+        guard let action = apiManager.api(for: (any FxCustomParameterActionAPI_v4).self) as? any FxCustomParameterActionAPI_v4 else { return }
+        action.startAction(self)
+        defer { action.endAction(self) }
+        do {
+            let dictionary: NSDictionary
+            if let alphaHintAsset {
+                dictionary = ["asset": try PropertyListEncoder().encode(alphaHintAsset)]
+            } else {
+                dictionary = [:]
+            }
+            guard HeaderCustomParameterStorage.setDictionary(dictionary, for: HeaderStorageKey.alphaHintAsset, using: apiManager) else {
+                hintSelectionError = "Final Cut Pro could not save the Alpha Hint selection. Choose the file again."
+                return
+            }
+            hintSelectionError = nil
+        } catch {
+            hintSelectionError = error.localizedDescription
+        }
+    }
+
+    /// Uses source-relative, zero-based timing, matching the standalone editor.
+    func setCurrentFrameAsHintReference() {
+        guard let action = apiManager.api(for: (any FxCustomParameterActionAPI_v4).self) as? any FxCustomParameterActionAPI_v4 else { return }
+        action.startAction(self)
+        defer { action.endAction(self) }
+        guard let timing = apiManager.api(for: (any FxTimingAPI_v4).self) as? any FxTimingAPI_v4,
+              let setting = apiManager.api(for: (any FxParameterSettingAPI_v5).self) as? any FxParameterSettingAPI_v5 else { return }
+        var duration = CMTime.invalid
+        var start = CMTime.invalid
+        timing.frameDuration(&duration)
+        timing.startTimeOfInput(toFilter: &start)
+        let position = CMTimeSubtract(action.currentTime(), start).seconds / duration.seconds
+        guard position.isFinite, position >= 0, position <= Double(Int32.max) else { return }
+        setting.setIntValue(Int32(position.rounded()), toParameter: ParameterIdentifier.referenceFrame, at: .zero)
+    }
 
     // MARK: - User actions
 
@@ -111,6 +156,15 @@ final class CorridorKeyInspectorBridge {
 
         if let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6 {
             hasLegacyHints = plugin?.loadHintPointSet(using: retrieval).hasLegacyPoints ?? false
+            if let video = plugin?.videoSettings(using: retrieval, at: actionAPI.currentTime()), let device = MTLCreateSystemDefaultDevice() {
+                alphaHintAsset = video.alphaHintAsset
+                var rawQuality: Int32 = 0
+                retrieval.getIntValue(&rawQuality, fromParameter: ParameterIdentifier.qualityMode, at: actionAPI.currentTime())
+                let quality = QualityMode(rawValue: Int(rawQuality)) ?? .automatic
+                let resolution = quality.resolvedInferenceResolution(forLongEdge: 1920, deviceRegistryID: device.registryID)
+                videoMemoryDescription = video.memoryDescription(resolution: resolution, frameCount: max(1, snapshot.totalFrameCount > 0 ? snapshot.totalFrameCount : video.timeAwareness.frameCount),
+                                                                  deviceBudget: device.recommendedMaxWorkingSetSize)
+            }
         }
         let hostState = currentAnalysisState()
         let (analysed, total, resolution) = currentAnalysisCounts(for: hostState)
@@ -221,9 +275,15 @@ final class CorridorKeyInspectorBridge {
         )
         var hintModeRaw = Int32(HintMode.appleVision.rawValue)
         retrieval.getIntValue(&hintModeRaw, fromParameter: ParameterIdentifier.hintMode, at: .zero)
+        var smoothing = ObjCBool(false)
+        var smoothingStrength = 0.5
+        retrieval.getBoolValue(&smoothing, fromParameter: ParameterIdentifier.temporalStabilityEnabled, at: .zero)
+        retrieval.getFloatValue(&smoothingStrength, fromParameter: ParameterIdentifier.temporalStabilityStrength, at: .zero)
         if !data.matchesHints(
             mode: HintMode(rawValue: Int(hintModeRaw)) ?? .appleVision,
-            points: plugin.loadHintPointSet(using: retrieval)
+            points: plugin.loadHintPointSet(using: retrieval),
+            video: plugin.videoSettings(using: retrieval, at: .zero),
+            temporalStabilityEnabled: smoothing.boolValue, temporalStabilityStrength: smoothingStrength
         ) || Int(currentQualityRaw) != data.qualityModeRaw {
             return (0, 0, 0)
         }

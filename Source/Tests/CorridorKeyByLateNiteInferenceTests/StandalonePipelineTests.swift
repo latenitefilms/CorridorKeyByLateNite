@@ -16,6 +16,94 @@ extension MLXInferenceTests {
     /// A direct model test cannot detect a second flip introduced by a host.
     @Suite("Standalone pipeline", .serialized)
     struct StandalonePipelineTests {
+        @Test("Linear output preserves signed source RGB in solid regions and never transforms alpha")
+        func linearOutputControls() throws {
+            let engine = try StandaloneRenderEngine()
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: 4, height: 4, mipmapped: false)
+            descriptor.storageMode = .shared
+            descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
+            let source = try #require(engine.device.makeTexture(descriptor: descriptor))
+            let destination = try #require(engine.device.makeTexture(descriptor: descriptor))
+            let color = SIMD4<Float>(-0.125, 2, 0.5, 1)
+            try [SIMD4<Float>](repeating: color, count: 16).withUnsafeBytes {
+                let base = try #require($0.baseAddress)
+                source.replace(region: MTLRegionMake2D(0, 0, 4, 4), mipmapLevel: 0,
+                               withBytes: base, bytesPerRow: 64)
+            }
+            var state = Self.neutralState()
+            state.outputMode = .processed
+            state.video.inputIsLinear = true
+            state.video.linearizeOutput = true
+            state.video.keepOriginalInSolidAreas = true
+            state.cachedMatteInferenceResolution = 512
+            state.cachedMatteBlob = try AnalysisFrameCodec.encode(
+                alpha: [Float](repeating: 0.98, count: 512 * 512),
+                foregroundHalfRGBA: Self.constantForeground(SIMD4(0.2, 0.4, 0.6, 1)), width: 512, height: 512)
+            _ = try RenderPipeline().renderToTexture(source: source, destination: destination, state: state, workingGamut: .rec709)
+            let pixels = Self.readRGBA(destination)
+            let alpha = Float(Float16(0.98))
+            #expect(abs(pixels[3] - alpha) < 0.0001)
+            for channel in 0..<3 { #expect(abs(pixels[channel] - color[channel] * alpha) < 0.0001) }
+            state.outputMode = .original
+            _ = try RenderPipeline().renderToTexture(source: source, destination: destination, state: state, workingGamut: .rec709)
+            #expect(Array(Self.readRGBA(destination).prefix(4)) == [color.x, color.y, color.z, color.w])
+        }
+
+        @Test("Disk-backed rendering matches inline frames and rejects lost, wrong-size or damaged predictions")
+        func diskBackedRendering() throws {
+            let engine = try StandaloneRenderEngine()
+            let source = try Self.makeSource(width: 64, height: 48) { _, _ in SIMD4<UInt8>(40, 170, 60, 255) }
+            let foreground = try AnalysisFrameCodec.foregroundHalfRGBA(
+                [Float](repeating: 0.4, count: 512 * 384 * 4)
+            )
+            let blob = try AnalysisFrameCodec.encode(
+                alpha: [Float](repeating: 0.65, count: 512 * 384), foregroundHalfRGBA: foreground,
+                width: 512, height: 384
+            )
+            var state = Self.neutralState()
+            state.cachedMatteInferenceResolution = 512
+            state.cachedMatteBlob = blob
+            let inline = try engine.render(source: source, state: state, renderTime: .zero)
+            let session = try AnalysisDiskCache.shared.beginSession()
+            state.cachedMatteBlob = nil
+            state.cachedFrameReference = try AnalysisDiskCache.shared.store(blob, in: session)
+            let disk = try engine.render(source: source, state: state, renderTime: .zero)
+            #expect(Self.readRGBA(inline.destinationTexture) == Self.readRGBA(disk.destinationTexture))
+
+            state.cachedFrameReference = AnalysisFrameReference(sessionID: UUID(), frameID: UUID(), byteCount: blob.count)
+            #expect(throws: AnalysisDiskCacheError.self) { try engine.render(source: source, state: state, renderTime: .zero) }
+
+            let wrongSize = try AnalysisFrameCodec.encode(
+                alpha: [Float](repeating: 0.65, count: 16 * 16),
+                foregroundHalfRGBA: Data(repeating: 0, count: 16 * 16 * 8), width: 16, height: 16
+            )
+            state.cachedFrameReference = try AnalysisDiskCache.shared.store(wrongSize, in: session)
+            #expect(throws: AnalysisDiskCacheError.self) { try engine.render(source: source, state: state, renderTime: .zero) }
+
+            // Preserve the compressed envelope but truncate its LZ4 stream.
+            state.cachedFrameReference = try AnalysisDiskCache.shared.store(Data(blob.prefix(17)), in: session)
+            #expect(throws: AnalysisDiskCacheError.self) { try engine.render(source: source, state: state, renderTime: .zero) }
+            withExtendedLifetime(session) {}
+        }
+
+        @Test("Preview worker preserves source pixels and rejects cancelled queued renders")
+        func previewWorker() async throws {
+            let engine = try StandaloneRenderEngine()
+            let worker = StandalonePreviewRenderer(engine: engine)
+            let source = try Self.makeSource(width: 64, height: 48) { column, row in
+                SIMD4<UInt8>(UInt8(column * 3), UInt8(row * 4), 97, 255)
+            }
+            let frame = ReaderFrame(pixelBuffer: source, presentationTime: .zero, duration: .invalid)
+            let expected = try engine.renderShowingOriginal(source: source)
+            let actual = try await worker.render(frame: frame, state: Self.neutralState(), showingOriginal: true)
+            #expect(Self.readRGBA(expected.destinationTexture) == Self.readRGBA(actual.destinationTexture))
+            let cancelled = Task {
+                withUnsafeCurrentTask { $0?.cancel() }
+                return try await worker.render(frame: frame, state: Self.neutralState())
+            }
+            await #expect(throws: CancellationError.self) { try await cancelled.value }
+        }
+
         @Test("Host analysis and playback respect independent source and destination image origins")
         func hostImageOrigins() throws {
             let engine = try StandaloneRenderEngine()
@@ -49,10 +137,10 @@ extension MLXInferenceTests {
             )
             #expect(reference.alpha == reversed.alpha)
             #expect(reference.foregroundHalfRGBA == reversed.foregroundHalfRGBA)
-            #expect(Self.bandMean(reference.alpha, width: 512, rows: 16..<96)
-                    > Self.bandMean(reference.alpha, width: 512, rows: 416..<496) + 0.3)
+            #expect(Self.bandMean(reference.alpha, width: reference.width, rows: 16..<96)
+                    > Self.bandMean(reference.alpha, width: reference.width, rows: (reference.height - 96)..<(reference.height - 16)) + 0.3)
             let cache = try AnalysisFrameCodec.encode(
-                alpha: reversed.alpha, foregroundHalfRGBA: reversed.foregroundHalfRGBA, width: 512, height: 512
+                alpha: reversed.alpha, foregroundHalfRGBA: reversed.foregroundHalfRGBA, width: reversed.width, height: reversed.height
             )
             let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: width, height: height, mipmapped: false)
             descriptor.storageMode = .shared
@@ -138,6 +226,9 @@ extension MLXInferenceTests {
             }
             var state = Self.neutralState()
             state.screenColor = screenColor
+            if screenColor == .custom {
+                state.video.customScreenColor = SIMD3<Double>(ScreenColor.blue.canonicalScreenReference)
+            }
             let analysed = try engine.extractMatteBlob(source: source, state: state, renderTime: .zero)
             let sourceTexture = try bridge.makeTexture(for: source).metalTexture
             let entry = try MetalDeviceCache.shared.entry(for: engine.device)
@@ -154,7 +245,7 @@ extension MLXInferenceTests {
             #expect(analysed.foregroundHalfRGBA == direct.foregroundHalfRGBA,
                     "Both hosts must retain the model's reconstructed foreground unchanged")
             let upper = Self.bandMean(analysed.alphaFloats, width: analysed.width, rows: 16..<96)
-            let lower = Self.bandMean(analysed.alphaFloats, width: analysed.width, rows: 416..<496)
+            let lower = Self.bandMean(analysed.alphaFloats, width: analysed.width, rows: (analysed.height - 96)..<(analysed.height - 16))
             #expect(subjectAtTop ? upper > lower + 0.2 : lower > upper + 0.2)
 
             state.cachedMatteBlob = analysed.blob
@@ -232,7 +323,15 @@ extension MLXInferenceTests {
             descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
             let destination = try #require(engine.device.makeTexture(descriptor: descriptor))
             let expected = SIMD3<Float>(0.4, 0.2, 0.3)
-            let modelRGB = ColorGamutMatrix.transform(for: gamut).workingToRec709 * expected
+            let linearExpected = expected
+            func decode(_ value: Float) -> Float { value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4) }
+            func encode(_ value: Float) -> Float {
+                let magnitude = abs(value)
+                let output = magnitude <= 0.0031308 ? magnitude * 12.92 : 1.055 * pow(magnitude, 1 / 2.4) - 0.055
+                return value < 0 ? -output : output
+            }
+            let canonical = ColorGamutMatrix.transform(for: gamut).workingToRec709 * SIMD3(decode(linearExpected.x), decode(linearExpected.y), decode(linearExpected.z))
+            let modelRGB = SIMD3(encode(canonical.x), encode(canonical.y), encode(canonical.z))
             var state = Self.neutralState()
             state.outputMode = .foregroundOnly
             state.cachedMatteInferenceResolution = 512
@@ -286,16 +385,23 @@ extension MLXInferenceTests {
             let source = try await video.makeFrame(atTime: .zero)
             let engine = try StandaloneRenderEngine()
             defer { engine.releaseAnalysisCache() }
+            let cacheSession = try AnalysisDiskCache.shared.beginSession()
+            defer { withExtendedLifetime(cacheSession) {} }
             for quality in QualityMode.allCases where quality != .automatic {
                 var state = Self.neutralState()
                 state.qualityMode = quality
                 let output = try engine.extractMatteBlob(source: source, state: state, renderTime: .zero)
                 state.cachedMatteBlob = output.blob
                 state.cachedMatteInferenceResolution = output.inferenceResolution
+                var diskState = state
+                diskState.cachedMatteBlob = nil
+                diskState.cachedFrameReference = try AnalysisDiskCache.shared.store(output.blob, in: cacheSession)
                 let header = try #require(AnalysisFrameCodec.parseHeader(output.blob))
                 var decoded = Data(count: header.decodedByteCount)
                 var decodeMilliseconds: [Double] = []
                 var renderMilliseconds: [Double] = []
+                var uncachedReadMilliseconds: [Double] = []
+                var cachedReadMilliseconds: [Double] = []
                 _ = try engine.render(source: source, state: state, renderTime: .zero)
                 for _ in 0..<7 {
                     let decodeStart = ContinuousClock.now
@@ -307,8 +413,22 @@ extension MLXInferenceTests {
                         _ = try engine.render(source: source, state: state, renderTime: .zero)
                         renderMilliseconds.append(Self.milliseconds(since: renderStart))
                     }
+                    // Only our compressed-RAM cache is cleared. The filesystem
+                    // may retain these just-written bytes; this is not cold SSD I/O.
+                    AnalysisDiskCache.shared.clearMemory()
+                    try autoreleasepool {
+                        let start = ContinuousClock.now
+                        _ = try engine.render(source: source, state: diskState, renderTime: .zero)
+                        uncachedReadMilliseconds.append(Self.milliseconds(since: start))
+                    }
+                    try autoreleasepool {
+                        let start = ContinuousClock.now
+                        _ = try engine.render(source: source, state: diskState, renderTime: .zero)
+                        cachedReadMilliseconds.append(Self.milliseconds(since: start))
+                    }
                 }
                 print("V2 cache \(output.inferenceResolution): bytes=\(output.blob.count), decode median ms=\(decodeMilliseconds.sorted()[3]), render median ms=\(renderMilliseconds.sorted()[3])")
+                print("V2 disk cache \(output.inferenceResolution): RAM miss median ms=\(uncachedReadMilliseconds.sorted()[3]), RAM hit median ms=\(cachedReadMilliseconds.sorted()[3]), retained bytes=\(AnalysisDiskCache.shared.retainedMemoryBytes)")
                 if output.inferenceResolution == 2048,
                    let destination = ProcessInfo.processInfo.environment["CORRIDORKEY_CACHE_BENCHMARK_RAW"] {
                     try decoded.write(to: URL(fileURLWithPath: destination))
@@ -408,7 +528,7 @@ extension MLXInferenceTests {
             await runner.run(state: state) { event in
                 switch event {
                 case let .frameProcessed(frameIndex, _, entry):
-                    received.withLock { $0[frameIndex] = entry.blob }
+                    received.withLock { $0[frameIndex] = try? entry.blob }
                 case let .failed(message):
                     Issue.record(Comment(rawValue: message))
                 default: break
@@ -419,18 +539,20 @@ extension MLXInferenceTests {
             let reader = try await video.makeFrameReader(startTime: .zero)
             defer { reader.cancel(); engine.releaseAnalysisCache() }
             var history = TemporalBlender.History()
+            let shared = try engine.makeVideoSession(state: state, frameCount: 4, sourceSize: video.info.renderSize)
             var frameIndex = 0
             while let frame = try reader.nextFrame() {
-                let output = try engine.extractMatteBlob(source: frame.pixelBuffer, state: state, renderTime: frame.presentationTime)
-                var alpha = output.alphaFloats
-                history.apply(alpha: &alpha, source: output.sourceFloats, width: output.width, height: output.height,
-                              frameIndex: frameIndex, configuration: .init(strength: 0.75, motionThreshold: 0.05))
-                let expected = try AnalysisFrameCodec.encode(
-                    alpha: alpha, foregroundHalfRGBA: output.foregroundHalfRGBA,
-                    width: output.width, height: output.height
-                )
-                #expect(cached[frameIndex] == expected)
+                try engine.appendVideoFrame(source: frame.pixelBuffer, state: state, renderTime: frame.presentationTime,
+                    frameIndex: frameIndex, session: shared, hintReader: nil)
                 frameIndex += 1
+            }
+            try shared.finish { output in
+                var alpha = output.alpha
+                history.apply(alpha: &alpha, source: output.source, width: output.geometry.contentWidth, height: output.geometry.contentHeight,
+                              frameIndex: output.index, configuration: .init(strength: 0.75, motionThreshold: 0.05))
+                let expected = try AnalysisFrameCodec.encode(alpha: alpha, foregroundHalfRGBA: output.foregroundHalfRGBA,
+                    width: output.geometry.contentWidth, height: output.geometry.contentHeight)
+                #expect(cached[output.index] == expected)
             }
         }
 
@@ -497,7 +619,7 @@ extension MLXInferenceTests {
 
         /// Removes optional postprocessing to isolate the source/matte contract.
         private static func neutralState() -> PluginStateData {
-            PluginStateData(qualityMode: .draft512, hintMode: .automatic,
+            PluginStateData(screenColor: .green, qualityMode: .draft512, hintMode: .automatic,
                             autoDespeckleEnabled: false, despillStrength: 0,
                             lightWrapEnabled: false, edgeDecontaminateEnabled: false,
                             temporalStabilityEnabled: false, upscaleMethod: .bilinear)
@@ -534,6 +656,16 @@ extension MLXInferenceTests {
         }
 
         private static func readRGBA(_ texture: any MTLTexture) -> [Float] {
+            if texture.pixelFormat == .rgba32Float {
+                var values = [Float](repeating: 0, count: texture.width * texture.height * 4)
+                values.withUnsafeMutableBytes { pointer in
+                    if let base = pointer.baseAddress {
+                        texture.getBytes(base, bytesPerRow: texture.width * 16,
+                            from: MTLRegionMake2D(0, 0, texture.width, texture.height), mipmapLevel: 0)
+                    }
+                }
+                return values
+            }
             if texture.pixelFormat == .rgba16Float {
                 var halves = [UInt16](repeating: 0, count: texture.width * texture.height * 4)
                 halves.withUnsafeMutableBytes { pointer in
@@ -562,7 +694,11 @@ extension MLXInferenceTests {
         }
 
         private static func bandMean(_ alpha: [Float], width: Int, rows: Range<Int>) -> Float {
-            alpha[(rows.lowerBound * width)..<(rows.upperBound * width)].reduce(0, +)
+            guard rows.lowerBound >= 0, rows.upperBound * width <= alpha.count else {
+                Issue.record("The requested orientation band exceeds the cropped prediction")
+                return 0
+            }
+            return alpha[(rows.lowerBound * width)..<(rows.upperBound * width)].reduce(0, +)
                 / Float(rows.count * width)
         }
     }

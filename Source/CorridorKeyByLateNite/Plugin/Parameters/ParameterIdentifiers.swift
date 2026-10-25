@@ -25,8 +25,23 @@ enum ParameterIdentifier {
     static let edgeSpillGroup: UInt32 = 130
     static let edgeRefinementGroup: UInt32 = 140
     static let temporalStabilityGroup: UInt32 = 150
+    static let timeAwarenessGroup: UInt32 = 160
+    static let alphaHintGroup: UInt32 = 170
+
+    // V2 additions. Existing identifiers are never renumbered.
+    static let inputIsLinear: UInt32 = 9001
+    static let linearizeOutput: UInt32 = 9002
+    static let keepOriginalInSolidAreas: UInt32 = 9003
+    static let timeAwareness: UInt32 = 9004
+    static let lowGPUMemory: UInt32 = 9005
+    static let useAlphaHint: UInt32 = 9006
+    static let hintFrames: UInt32 = 9007
+    static let referenceFrame: UInt32 = 9008
+    static let alphaHintStrength: UInt32 = 9009
+    static let internalHintStrength: UInt32 = 9010
 
     // Settings
+    static let customScreenColor: UInt32 = 9011
     static let screenColor: UInt32 = 1001
     static let qualityMode: UInt32 = 1002
 
@@ -92,6 +107,7 @@ enum HeaderStorageKey {
     static let schemaVersion = "schemaVersion"
     static let analysisData = "analysisData"
     static let subjectPoints = "subjectPoints"
+    static let alphaHintAsset = "alphaHintAsset"
 }
 
 /// Convenience wrapper that makes the raw `kFxParameterFlag_*` constants feel at

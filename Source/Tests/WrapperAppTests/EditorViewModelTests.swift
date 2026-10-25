@@ -18,6 +18,31 @@ import CoreMedia
 @MainActor
 struct EditorViewModelTests {
 
+    @Test("Missing local analysis keeps Analyse Clip available and retains failing export references")
+    func missingCacheCanBeAnalysedAgain() async throws {
+        let url = try await SyntheticVideoFixture.writeMP4(frameCount: 1, fps: 24)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let viewModel = EditorViewModel(renderEngine: try StandaloneRenderEngine())
+        await viewModel.loadClip(at: url)
+        for task in viewModel.cancelWorkForEditorShutdown() { await task.value }
+        viewModel.state.qualityMode = .draft512
+        viewModel.matteCache[0] = MatteCacheEntry(
+            reference: AnalysisFrameReference(sessionID: UUID(), frameID: UUID(), byteCount: 100),
+            width: 512, height: 512, inferenceResolution: 512
+        )
+        viewModel.renderPreview(at: .zero)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while ContinuousClock.now < deadline {
+            if case .failed = viewModel.analysisStatus { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.phase.isReady)
+        #expect(viewModel.analysisStatus == .failed(AnalysisDiskCacheError.missingFrame.localizedDescription))
+        #expect(viewModel.latestPreview == nil)
+        #expect(viewModel.matteCache[0]?.reference != nil)
+        viewModel.closeClip()
+    }
+
     @Test("loads a synthetic MP4 and transitions to .ready with clip metadata populated")
     func loadsClipFromFileImporterURL() async throws {
         let url = try await SyntheticVideoFixture.writeMP4()

@@ -23,6 +23,25 @@ import CorridorKeyToolboxLogic
 
 @Suite("FusedKernels")
 struct FusedKernelTests {
+    @Test("Custom red screen cleanup suppresses red without changing green or blue")
+    func customRedScreen() throws {
+        let entry = try TestHarness.makeEntry()
+        let queue = try #require(entry.borrowCommandQueue())
+        defer { entry.returnCommandQueue(queue) }
+        let source = try makeColourTexture(entry: entry, width: 4, height: 4, pixelFormat: .rgba32Float,
+                                           colour: SIMD4(0.8, 0.3, 0.3, 1))
+        let matte = try makeScalarTexture(entry: entry, width: 4, height: 4, value: 0.5)
+        let command = try #require(queue.makeCommandBuffer())
+        let output = try #require(try RenderStages.applyEdgeDecontamination(foreground: source, matte: matte,
+            screenColor: SIMD3(0.9, 0.1, 0.1), strength: 1, entry: entry, commandBuffer: command))
+        defer { output.returnManually() }
+        try commitAndWait(command)
+        let pixel = readFirstPixel(texture: output.texture)
+        #expect(abs(pixel.x - 0.55) < 0.001)
+        #expect(abs(pixel.y - 0.3) < 0.001)
+        #expect(abs(pixel.z - 0.3) < 0.001)
+    }
+
 
     // MARK: - Fused matte refine
 
@@ -356,7 +375,8 @@ struct FusedKernelTests {
             let output = readFirstPixel(texture: fused.texture)
             let unfusedOutput = readFirstPixel(texture: separate.texture)
             #expect(simd_distance(output, unfusedOutput) < 0.0001)
-            let screenChannel = screenColor == .green ? 1 : 2
+            let reference = screenColor.canonicalScreenReference
+            let screenChannel = reference.z > reference.y ? 2 : 1
             let otherChannels = [0, 1, 2].filter { $0 != screenChannel }
             let floor = max(color[otherChannels[0]], color[otherChannels[1]])
             if color[screenChannel] <= floor || matteValue == 1 {

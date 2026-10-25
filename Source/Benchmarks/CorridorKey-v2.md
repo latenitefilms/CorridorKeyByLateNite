@@ -1,5 +1,112 @@
 # CorridorKey v2 migration validation
 
+## Staged video implementation — 25 October 2026
+
+The current backend now implements temporal windows, continuous RVM state,
+overlapping batons, bidirectional external hints, signed linear-color controls,
+aspect-preserving inference and bounded intermediate storage in both hosts.
+See `Tools/CorridorKeyV2/README.md` for reproduction and the runtime contract.
+
+Current staged artifact: 2,534,056,943 bytes; SHA-256:
+`ea19b82bd259ac91a751c2976368c0931cfa1f7b853d4ee5e17a437ae0872574`.
+
+The final-image oracle passed 11 synthetic frames across 512/T2, 512/T4,
+1024/T2, 1536/T1 and 2048/T1. Maximum alpha error was below 0.001 and
+linear foreground error below 0.0036. This includes continuous recurrence,
+overlap carry, cosine accumulation and FP16 baton rounding. Stage-level
+validation alone initially missed an RVM sequence-axis assembly error; the
+end-to-end check found it and both Swift call paths were corrected.
+
+The two supplied four-frame benchmark clips also passed at 512/T4: maximum
+alpha error 0.006544 and maximum linear foreground error 0.011920; worst mean
+errors 0.00008881 and 0.00009851 respectively. The independent final-image gates
+remain max <=0.05 and mean <=0.002. These 19 checked frames are numerical
+agreement evidence, not a ground-truth perceptual-quality benchmark.
+
+Long-profile smoke checks executed T=8/24/48/80 at 512, with finite batons,
+auxiliary hints and first/last refined outputs. Peak MLX allocations were
+3.78/4.58/5.38/7.40 GiB respectively. The check repeats a synthetic plate and
+does not measure full clip analysis, total process memory or higher-resolution
+long-window quality. Memory preflight now reserves more working memory than
+the measured 512/T80 peak. Reports: `video-clip-validation.json` and
+`video-profile-validation.json` in `Tools/CorridorKeyV2`.
+
+### Current implementation verification
+
+- The final headless regression passed **187 tests in 32 suites** (two
+  Release-only checks were skipped here and passed separately in Release). The separate
+  all-quality/all-screen model dispatch sweep also passed. The shared Swift
+  session matches the independent reference, preserves frame order and cropped
+  geometry, produces identical low-memory/full-memory results and propagates a
+  single reference both forwards and backwards.
+- Current headless application line coverage is **77.65% (6,673 / 8,594)**.
+  Temporal session: **93.55%**; video settings: **87.59%**; disk cache: **84.55%**.
+  This remains below the requested 80% target and excludes Xcode-only sources.
+- Signed Debug and Release app/FxPlug builds and the Debug test-bundle build
+  succeed. The Release app passes deep, strict code-signature verification using
+  the Mac's trust services. This is development signing, not App Store approval. The embedded
+  model's SHA-256 matches the staged artifact above. Motion XML and both sandbox
+  entitlements validate.
+- Signed host tests cover portrait decoding, editor transport, the four-frame
+  real-clip workflow and movie-hint timing/preview. All four analysis/export
+  tests passed after correcting ImageIO's zero-image movie classification. The
+  six-frame temporal movie-hint export checks complete analysis and linear
+  ProRes transfer metadata. Keyed exports now reject missing analysis before
+  touching the destination; Original and Hint remain available without a cache.
+- **12 optimized tests passed**, including the independent temporal-reference
+  comparison and still-image/export regressions. A separate optimized Swift
+  test passed T=8/24/48/80 dispatch and finite-output checks at 512, exercising
+  compiled graph ownership as well as the Python smoke test.
+- All **12 Python lowering tests** passed. The 30-call memory regression kept
+  active MLX allocation at 4,642 MiB (the test process retains two engines), and
+  clearing the cache reclaimed all 1,024 MiB of reusable buffers. These values
+  are not total application RSS or a one-engine minimum memory requirement.
+- A fresh 30-second Instruments Leaks attachment reported one unattributed
+  16-byte `NSArray` allocation (`<Call stack limit reached>`). This is not a
+  clean-leaks claim. The bounded capture did not cover the full application or
+  a complete temporal sequence; it is saved at
+  `/private/tmp/ckv2-video-session-leaks.trace` on the validation Mac.
+
+SwiftLint is unavailable on this Mac. Live Final Cut Pro interaction, complete
+application coverage, accessibility, TestFlight/App Store distribution and testing
+on smaller-memory Macs remain release checks. The memory budget shown in the
+inspectors is Metal's recommended device working set, not a free-VRAM reading.
+
+The new cache schema is **9**: existing clips need **Analyse Clip** again.
+The 2.53 GB model is installed locally and intentionally Git-ignored; fresh
+checkouts must reproduce or obtain this matching artifact before building.
+
+### Current optimized single-frame measurements
+
+M1 Max / 64 GB, SwiftPM Release, five warmed samples per cell, alternating
+compiled/uncompiled order. The staged artifact's independent T=1 adapter includes
+Metal output writeback, excluding decoding, hint generation, postprocessing and
+export. It is not a temporal-sequence or Final Cut Pro playback benchmark.
+
+| Resolution | Uncompiled green / blue | Compiled green / blue |
+|---|---:|---:|
+| 512 | 359.1 / 351.3 ms | 341.7 / 330.8 ms |
+| 768 | 633.5 / 646.5 ms | 605.2 / 619.4 ms |
+| 1024 | 1,112.5 / 1,092.0 ms | 1,022.0 / 1,017.9 ms |
+| 1536 | 2,632.3 / 2,766.2 ms | 2,550.8 / 2,653.8 ms |
+| 2048 | 5,385.9 / 5,368.7 ms | 5,222.7 / 5,266.4 ms |
+
+Compilation reduced latency by **1.9–8.1%**, median **4.3%**, in this short sample.
+Alpha matched exactly; maximum foreground difference was 0.0000002385.
+Raw results are in `Tools/CorridorKeyV2/video-compiled-runtime.json`. These are
+measured local gains, not the v1 implementation's published 1.5–2x claim.
+
+All measurements below are historical baselines and do not measure the new
+temporal execution path. In particular, earlier statements excluding temporal
+inference and linear controls describe the previous migration, not current scope.
+Do not apply the v1 community implementation's 1.5–2x compilation claim to v2.
+Mixed FP16 activations remain rejected for shipping because compiled 2048 RGB
+exceeded the unchanged quality gate.
+
+
+The 24 October performance/storage follow-up is recorded at the end of this
+document. Earlier measurements below describe the original migration and cache.
+
 Measured on 23 October 2026: Apple M1 Max, 64 GB unified memory, macOS 26.5,
 Xcode 26.6 / Swift 6.3.3, MLX Swift 0.31.3, conversion MLX Python 0.31.0.
 
@@ -334,3 +441,61 @@ must follow `Tools/CorridorKeyV2/README.md` to recreate the model before buildin
 
 See [the community MLX assessment](CorridorKey-v2-community-MLX.md) for mixed-FP16,
 Q8, temporal/native-resolution differences and the reason to retain Screen Color.
+
+## 24 October: bounded storage and runtime compilation
+
+Both hosts now retain frame references and write complete CKF1 predictions to
+their own sandbox cache directories. Compressed RAM storage is capped at 128 MiB
+per process and frame payloads at 64 GiB per host. Whole inactive passes are
+evicted in access order. Analysis and standalone exports pin their passes with
+cross-process file locks; interrupted manifest writes are reconciled at the
+start of the next pass. A frame that cannot fit fails explicitly. The quota
+still limits long high-quality clips; it does not make their RGB payloads smaller.
+
+Schema 8 invalidates previous caches. **Choose Analyse Clip again after this
+update.** Libraries now contain compact references, so moving them to another
+Mac or clearing the cache also requires analysis again. Both inspectors show
+the same explanation. Missing or damaged referenced frames fail instead of
+silently producing unkeyed output. Standalone recovery keeps Analyse Clip enabled.
+The secure archive regression stores 1,000 references in under 200 KB rather
+than embedding the represented 37 GB of image data.
+
+Standalone analysis compresses once, after temporal processing. Preview renders
+run on a serial actor away from the main actor, with cancellation checks before
+queued work starts. A coalescing worker prefetches requested/next frames without
+retaining a whole clip. Numeric inspector fields now accept the same full ranges
+as FxPlug while the sliders retain their existing fine-adjustment ranges. Names,
+defaults and the Motion template have not changed.
+
+Release builds compile fixed-shape MLX graphs, including contiguous output
+materialization. Debug builds use the imported graph because MLX Swift 0.31.3's
+unoptimized compiler-cache destruction overflowed the worker stack. Optimized
+inference and engine destruction passed on every supported quality and both
+screen patterns. The synthetic regression's alpha/RGB texture outputs matched.
+
+On this M1 Max, five alternating warm samples per case measured improvements of
+2.7–10.6% in nine of ten cases; the 1024 green case was 0.5% slower. The median
+relative improvement across cases was 5.4%. These include Swift inference and
+Metal writeback, and exclude decoding, disk-cache reads, refinements and encoding.
+They are not Final Cut Pro throughput or sustained thermal measurements.
+Measurements: `Tools/CorridorKeyV2/compiled-runtime.json`.
+
+The complete headless run passed 177 tests, with the optimized-only regression
+skipped in Debug and separately passed in Release. The signed sandboxed Xcode
+view-model suite passed all 10 tests, including missing-cache recovery. The later
+disk-render regression and five cache tests passed together; disk and inline
+rendering match, and missing, wrong-size and truncated compressed frames fail.
+Both Xcode products and the integration-test bundle build with Swift 6.
+
+The full headless run measured 79.81% line coverage for the mirrored app source
+files and 81.30% for the new disk cache. This is not full-app/FxPlug coverage and
+does not meet the requested overall 80% target. SwiftLint remains unavailable on
+this Mac; the existing headless test warnings are not a clean lint result.
+
+A 35-second attached Instruments Leaks capture reported one 16-byte NSArray
+finding with an unresolved allocation stack. It cannot be attributed from this
+capture, and **leak-free status is not established**. The separate Metal capture
+contains no command-buffer error rows. These bounded headless captures do not
+validate live Final Cut Pro, the full UI, sustained GPU utilization or smaller-
+memory Macs. Captures are `/tmp/ckv2-bounded-cache-leaks.trace` and
+`/tmp/ckv2-bounded-cache-metal.trace` on the validation Mac.

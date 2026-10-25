@@ -25,6 +25,10 @@ struct InspectorView: View {
                 InspectorGroupSeparator()
                 SettingsGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
+                VideoTimeAwarenessGroup(viewModel: viewModel)
+                InspectorGroupSeparator()
+                VideoAlphaHintGroup(viewModel: viewModel)
+                InspectorGroupSeparator()
                 InteriorDetailGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
                 MatteGroup(viewModel: viewModel)
@@ -100,6 +104,10 @@ private struct AnalysisStatusGroup: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+            Text(AnalysisDiskCache.storageExplanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -208,6 +216,18 @@ private struct SettingsGroup: View {
                 defaultValue: ParameterRanges.Defaults.screenColor,
                 onChange: viewModel.parameterDidChange
             )
+            if viewModel.state.screenColor == .custom {
+                ColorPicker("Custom Screen Colour", selection: Binding(
+                    get: { Color(.sRGB, red: viewModel.state.video.customScreenColor.x,
+                                 green: viewModel.state.video.customScreenColor.y, blue: viewModel.state.video.customScreenColor.z) },
+                    set: { color in
+                        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                              let components = color.cgColor?.converted(to: space, intent: .relativeColorimetric, options: nil)?.components,
+                              components.count >= 3 else { return }
+                        viewModel.state.video.customScreenColor = SIMD3(Double(components[0]), Double(components[1]), Double(components[2]))
+                        viewModel.videoParameterDidChange()
+                    }), supportsOpacity: false)
+            }
             EnumPicker(
                 title: ParameterRanges.upscaleMethodName,
                 selection: $viewModel.state.upscaleMethod,
@@ -220,6 +240,15 @@ private struct SettingsGroup: View {
                 defaultValue: ParameterRanges.Defaults.outputMode,
                 onChange: viewModel.parameterDidChange
             )
+            ParameterToggle(title: VideoInferenceSettings.Labels.inputIsLinear,
+                            isOn: $viewModel.state.video.inputIsLinear, defaultValue: false,
+                            onChange: viewModel.videoParameterDidChange)
+            ParameterToggle(title: VideoInferenceSettings.Labels.linearizeOutput,
+                            isOn: $viewModel.state.video.linearizeOutput, defaultValue: false,
+                            onChange: viewModel.videoParameterDidChange)
+            ParameterToggle(title: VideoInferenceSettings.Labels.keepOriginalInSolidAreas,
+                            isOn: $viewModel.state.video.keepOriginalInSolidAreas, defaultValue: false,
+                            onChange: viewModel.videoParameterDidChange)
 
             if viewModel.state.hintMode == .manual || !viewModel.state.hintPointSet.isEmpty {
                 Text(ManualHintGuidance.explanation)
@@ -242,6 +271,59 @@ private struct SettingsGroup: View {
                 .foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+}
+
+private struct VideoTimeAwarenessGroup: View {
+    @Bindable var viewModel: EditorViewModel
+
+    var body: some View {
+        InspectorGroup(title: VideoInferenceSettings.Labels.timeAwareness) {
+            EnumPicker(title: VideoInferenceSettings.Labels.timeAwareness,
+                       selection: $viewModel.state.video.timeAwareness, defaultValue: .off,
+                       onChange: viewModel.videoParameterDidChange)
+            ParameterToggle(title: VideoInferenceSettings.Labels.lowGPUMemory,
+                            isOn: $viewModel.state.video.lowGPUMemory, defaultValue: true,
+                            onChange: viewModel.videoParameterDidChange)
+            Text("Applied during Analyse Clip. " + viewModel.videoMemoryDescription)
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct VideoAlphaHintGroup: View {
+    @Bindable var viewModel: EditorViewModel
+
+    var body: some View {
+        InspectorGroup(title: "Alpha Hint") {
+            AlphaHintPicker(asset: $viewModel.state.video.alphaHintAsset,
+                            onChange: viewModel.videoParameterDidChange,
+                            setCurrentReference: viewModel.setCurrentFrameAsHintReference)
+            ParameterToggle(title: VideoInferenceSettings.Labels.useAlphaHint,
+                            isOn: $viewModel.state.video.useAlphaHint, defaultValue: false,
+                            onChange: viewModel.videoParameterDidChange)
+            EnumPicker(title: VideoInferenceSettings.Labels.hintFrames,
+                       selection: $viewModel.state.video.hintFrames, defaultValue: .allFrames,
+                       onChange: viewModel.videoParameterDidChange)
+            ParameterIntSlider(range: .init(name: VideoInferenceSettings.Labels.referenceFrame,
+                                           defaultValue: 0, parameterMin: 0, parameterMax: Int(Int32.max),
+                                           sliderMin: 0, sliderMax: max(0, viewModel.totalFrames - 1), step: 1),
+                               value: $viewModel.state.video.referenceFrame,
+                               onChange: viewModel.videoParameterDidChange)
+                .disabled(viewModel.state.video.hintFrames != .singleFrame)
+            ParameterFloatSlider(range: .init(name: VideoInferenceSettings.Labels.alphaHintStrength,
+                                             defaultValue: 0.75, parameterMin: 0, parameterMax: 1,
+                                             sliderMin: 0, sliderMax: 1, step: 0.01),
+                                 value: $viewModel.state.video.alphaHintStrength,
+                                 onChange: viewModel.videoParameterDidChange)
+            ParameterFloatSlider(range: .init(name: VideoInferenceSettings.Labels.internalHintStrength,
+                                             defaultValue: 0.95, parameterMin: 0, parameterMax: 1,
+                                             sliderMin: 0, sliderMax: 1, step: 0.01),
+                                 value: $viewModel.state.video.internalHintStrength,
+                                 onChange: viewModel.videoParameterDidChange)
+            Text("Reference Frame is zero-based. Single Frame propagates forwards and backwards using Time Awareness.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }
@@ -447,7 +529,16 @@ struct ParameterFloatSlider: View {
                 Text(range.name)
                     .font(.callout)
                 Spacer()
-                Text(value, format: .number.precision(.fractionLength(2)))
+                TextField(range.name, value: Binding(
+                    get: { value },
+                    set: { candidate in
+                        guard candidate.isFinite else { return }
+                        value = min(range.parameterMax, max(range.parameterMin, candidate))
+                    }
+                ), format: .number.precision(.fractionLength(0...2)))
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.plain)
+                    .accessibilityLabel(range.name)
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
                 ResetToDefaultButton(
@@ -459,7 +550,10 @@ struct ParameterFloatSlider: View {
                 }
             }
             Slider(
-                value: $value,
+                value: Binding(
+                    get: { min(range.sliderMax, max(range.sliderMin, value)) },
+                    set: { value = $0 }
+                ),
                 in: range.sliderMin...range.sliderMax,
                 step: range.step
             )
@@ -487,7 +581,13 @@ struct ParameterIntSlider: View {
                 Text(range.name)
                     .font(.callout)
                 Spacer()
-                Text(value, format: .number)
+                TextField(range.name, value: Binding(
+                    get: { value },
+                    set: { value = min(range.parameterMax, max(range.parameterMin, $0)) }
+                ), format: .number)
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.plain)
+                    .accessibilityLabel(range.name)
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
                 ResetToDefaultButton(
@@ -500,7 +600,7 @@ struct ParameterIntSlider: View {
             }
             Slider(
                 value: Binding(
-                    get: { Double(value) },
+                    get: { Double(min(range.sliderMax, max(range.sliderMin, value))) },
                     set: { value = Int($0.rounded()) }
                 ),
                 in: Double(range.sliderMin)...Double(range.sliderMax),
@@ -620,6 +720,8 @@ extension OutputMode: DisplayNamed, Identifiable { public var id: Int { rawValue
 extension SpillMethod: DisplayNamed, Identifiable { public var id: Int { rawValue } }
 extension UpscaleMethod: DisplayNamed, Identifiable { public var id: Int { rawValue } }
 extension HintMode: DisplayNamed, Identifiable { public var id: Int { rawValue } }
+extension TimeAwareness: DisplayNamed, Identifiable { public var id: Int { rawValue } }
+extension AlphaHintFrames: DisplayNamed, Identifiable { public var id: Int { rawValue } }
 
 /// Formats an elapsed duration in seconds as a human-readable string
 /// for the analysis-completed badge. Replaces the earlier "187.7 s"

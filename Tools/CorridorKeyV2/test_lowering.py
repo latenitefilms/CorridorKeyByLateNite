@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import torch.nn.functional as functional
 
-from lowering import LoweredGraph, adaptive_average, array_from_torch, pad_tensor, resize_tensor
+from lowering import LoweredGraph, adaptive_average, array_from_torch, cast_floating, pad_tensor, resize_tensor
 from color import display_to_linear, linear_to_display
 
 
@@ -116,6 +116,25 @@ class LoweringTests(unittest.TestCase):
             graphs.append(LoweredGraph(exported, shared))
         for size, graph in zip((4, 8), graphs):
             np.testing.assert_array_equal(np.asarray(graph(mx.zeros(size))[0]), np.arange(size))
+
+    def testMixedPrecisionPreservesIndicesAndReductionRange(self):
+        values = {"indices": mx.array([1, 3], dtype=mx.int32), "mask": mx.array([True, False]),
+                  "nested": (mx.array([0.5]),)}
+        converted = cast_floating(values, mx.float16)
+        self.assertEqual(converted["indices"].dtype, mx.int32)
+        self.assertEqual(converted["mask"].dtype, mx.bool_)
+        self.assertEqual(converted["nested"][0].dtype, mx.float16)
+
+        class Normalized(torch.nn.Module):
+            def forward(self, source):
+                return functional.layer_norm(source, (128,)), source.mean(-1)
+        source = torch.arange(128, dtype=torch.float32).expand(2, 128) + 1000
+        exported = torch.export.export(Normalized(), (source,), strict=False).run_decompositions({})
+        graph = LoweredGraph(exported, activation_precision="mixed-float16")
+        actual = graph(array_from_torch(source))
+        for expected, output in zip(Normalized()(source), actual):
+            self.assertEqual(output.dtype, mx.float32)
+            self.assertParity(expected, output, tolerance=0.001)
 
 
 if __name__ == "__main__":

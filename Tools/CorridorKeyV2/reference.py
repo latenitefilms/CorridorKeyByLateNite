@@ -93,3 +93,70 @@ class SingleFrameReference(torch.nn.Module):
         alpha = prediction["alpha"][:, 0].clamp(0, 1).permute(0, 2, 3, 1).float()
         foreground = color_utils.asinh_to_linear(prediction["fg"][:, 0]).permute(0, 2, 3, 1).float()
         return alpha, foreground
+
+
+class FoundationReference(torch.nn.Module):
+    """One chronological frame, with an explicit persistent RVM state.
+
+    RGB is scene linear; the fourth channel is reserved for the alpha hint.
+    Keeping foundation extraction separate avoids repeating three encoders in
+    overlapping temporal windows and permits disk-backed feature storage.
+    """
+
+    def __init__(self, model):
+        super().__init__()
+        self.foundations = model.foundations
+
+    def forward(self, source, recurrent_state):
+        from corridorkey import color_utils
+        height, width = source.shape[1:3]
+        proxy = color_utils.linear_to_vfm_sdr_torch(source[..., :3].permute(0, 3, 1, 2))
+        radio = torch.nn.functional.interpolate(proxy, (height // 4, width // 4), mode="area")
+        moge = torch.nn.functional.interpolate(proxy, (height * 7 // 32, width * 7 // 32), mode="area")
+        # Match the official continuous RVM prepass's bilinear resampling.
+        rvm = torch.nn.functional.interpolate(proxy, (height // 4, width // 4),
+                                             mode="bilinear", align_corners=False).unsqueeze(1)
+        features = self.foundations(rgb_cradio=radio, rgb_moge=moge,
+                                   rgb_rvm=rvm, rvm_state=recurrent_state)
+        return features["cradio"], features["moge"], features["rvm"], features["rvm_state"]
+
+
+class TemporalStageReference(torch.nn.Module):
+    """True spatiotemporal stage one with per-frame hint confidence.
+
+    Confidence -1 requests automatic subject selection, 0 marks an unhinted
+    frame in a hinted window, and 0…1 expresses supplied hint confidence.
+    """
+
+    def __init__(self, model):
+        super().__init__()
+        self.stage1 = model.stage1
+
+    def forward(self, source, quality, radio, moge, rvm):
+        from corridorkey import color_utils
+        rgb = color_utils.linear_to_asinh(source[..., :3].permute(0, 3, 1, 2)).unsqueeze(0)
+        hint = source[..., 3:4].permute(0, 3, 1, 2).unsqueeze(0).clamp(0, 1)
+        prediction = self.stage1(rgb, hint, moge, cradio_feat=radio,
+                                 rvm_feat=rvm, hint_quality=quality.clone(), t_stride=1.0)
+        auxiliary = torch.nn.functional.interpolate(
+            prediction["aux"][0, :, :1], source.shape[1:3],
+            mode="bilinear", align_corners=False).clamp(0, 1)
+        return prediction["baton"], auxiliary.permute(0, 2, 3, 1)
+
+
+class RefinementReference(torch.nn.Module):
+    """Refine a Hann-accumulated baton at full model resolution, one frame at a time."""
+
+    def __init__(self, model):
+        super().__init__()
+        self.stage2 = model.stage2
+
+    def forward(self, source, baton, dispatch_marker):
+        from corridorkey import color_utils
+        rgb = color_utils.linear_to_asinh(source[..., :3].permute(0, 3, 1, 2)).unsqueeze(1)
+        prediction = self.stage2(rgb, baton)
+        if isinstance(prediction, tuple):
+            prediction = prediction[0]
+        alpha = prediction[:, 0, :1].clamp(0, 1).permute(0, 2, 3, 1).float()
+        foreground = color_utils.asinh_to_linear(prediction[:, 0, 1:4]).permute(0, 2, 3, 1).float()
+        return alpha, foreground

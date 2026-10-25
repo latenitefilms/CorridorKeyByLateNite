@@ -59,6 +59,22 @@ struct StandaloneRenderResult: @unchecked Sendable {
     let report: RenderReport
 }
 
+/// Serializes preview work away from the main actor. Cache reads, decompression
+/// and synchronous GPU completion must not block inspector or transport input.
+actor StandalonePreviewRenderer {
+    private let engine: StandaloneRenderEngine
+
+    init(engine: StandaloneRenderEngine) { self.engine = engine }
+
+    /// The immutable frame retains its pixel buffer until GPU work has completed.
+    /// Queued obsolete scrub requests stop before allocating or reading the cache.
+    func render(frame: ReaderFrame, state: PluginStateData, showingOriginal: Bool = false) throws -> StandaloneRenderResult {
+        try Task.checkCancellation()
+        if showingOriginal { return try engine.renderShowingOriginal(source: frame.pixelBuffer) }
+        return try engine.render(source: frame.pixelBuffer, state: state, renderTime: frame.presentationTime)
+    }
+}
+
 /// One-stop render facade for the standalone editor. Constructed once
 /// per editor session; held by `EditorViewModel` and shared across
 /// preview, analyse, and export.
@@ -81,7 +97,37 @@ final class StandaloneRenderEngine: @unchecked Sendable {
         }
     }
 
+    /// Read the decoder's actual RGB primaries; alpha is coverage in every gamut.
+    static func workingGamut(for buffer: CVPixelBuffer) -> WorkingColorGamut {
+        let value = CVBufferCopyAttachment(buffer, kCVImageBufferColorPrimariesKey, nil) as? String
+        if value == kCVImageBufferColorPrimaries_ITU_R_2020 as String { return .rec2020 }
+        if value == kCVImageBufferColorPrimaries_P3_D65 as String { return .displayP3 }
+        return .rec709
+    }
+
     // MARK: - Preview / scrub
+
+    /// Creates the same temporal session used by FxAnalyzer.
+    func makeVideoSession(state: PluginStateData, frameCount: Int, sourceSize: CGSize) throws -> VideoInferenceSession {
+        let entry = try MetalDeviceCache.shared.entry(for: device)
+        return try pipeline.makeVideoInferenceSession(sourceWidth: Int(sourceSize.width), sourceHeight: Int(sourceSize.height),
+                                                       state: state, frameCount: frameCount, entry: entry,
+                                                       readbackSource: state.temporalStabilityEnabled && state.temporalStabilityStrength > 0)
+    }
+
+    /// Decodes the optional external hint at matching source-frame timing.
+    func appendVideoFrame(source: CVPixelBuffer, state: PluginStateData, renderTime: CMTime,
+                          frameIndex: Int, session: VideoInferenceSession, hintReader: AlphaHintReader?) throws {
+        let backed = try bridge.makeTexture(for: source, usage: .shaderRead)
+        let entry = try MetalDeviceCache.shared.entry(for: device)
+        guard let queue = entry.borrowCommandQueue() else { throw MetalDeviceCacheError.queueExhausted }
+        defer { entry.returnCommandQueue(queue) }
+        let hint = try hintReader?.texture(frameIndex: frameIndex, sourceWidth: backed.metalTexture.width,
+                                           sourceHeight: backed.metalTexture.height, device: device, commandQueue: queue)
+        try pipeline.appendVideoFrame(sourceTexture: backed.metalTexture, hintTexture: hint, state: state,
+                                       workingGamut: Self.workingGamut(for: source), renderTime: renderTime, frameIndex: frameIndex,
+                                       session: session, entry: entry, commandQueue: queue)
+    }
 
     /// Renders one frame for preview. The destination uses the same
     /// pixel format as the source so the preview layer can display it
@@ -110,7 +156,7 @@ final class StandaloneRenderEngine: @unchecked Sendable {
             destination: destinationBacked.metalTexture,
             alphaHint: nil,
             state: state,
-            workingGamut: .rec709,
+            workingGamut: Self.workingGamut(for: pixelBuffer),
             renderTime: renderTime
         )
         return StandaloneRenderResult(
@@ -162,23 +208,7 @@ final class StandaloneRenderEngine: @unchecked Sendable {
         state: PluginStateData,
         renderTime: CMTime
     ) throws -> AnalysisFrameOutput {
-        let sourceBacked = try bridge.makeTexture(for: pixelBuffer, usage: .shaderRead)
-        let device = sourceBacked.metalTexture.device
-        let entry = try MetalDeviceCache.shared.entry(for: device)
-        guard let commandQueue = entry.borrowCommandQueue() else {
-            throw MetalDeviceCacheError.queueExhausted
-        }
-        defer { entry.returnCommandQueue(commandQueue) }
-        let extracted = try pipeline.extractAlphaMatteForAnalysis(
-            sourceTexture: sourceBacked.metalTexture,
-            state: state,
-            workingGamut: .rec709,
-            renderTime: renderTime,
-            device: device,
-            entry: entry,
-            commandQueue: commandQueue,
-            readbackSource: state.temporalStabilityEnabled && state.temporalStabilityStrength > 0
-        )
+        let extracted = try extractAnalysisFrame(source: pixelBuffer, state: state, renderTime: renderTime)
         let blob = try AnalysisFrameCodec.encode(
             alpha: extracted.alpha,
             foregroundHalfRGBA: extracted.foregroundHalfRGBA,
@@ -194,6 +224,32 @@ final class StandaloneRenderEngine: @unchecked Sendable {
             sourceFloats: extracted.source,
             alphaFloats: extracted.alpha,
             foregroundHalfRGBA: extracted.foregroundHalfRGBA
+        )
+    }
+
+    /// Extracts a prediction without encoding it. Sequential analysis applies
+    /// temporal stability first, then compresses the completed frame exactly once.
+    func extractAnalysisFrame(
+        source pixelBuffer: CVPixelBuffer,
+        state: PluginStateData,
+        renderTime: CMTime
+    ) throws -> RenderPipeline.AnalysisExtraction {
+        let sourceBacked = try bridge.makeTexture(for: pixelBuffer, usage: .shaderRead)
+        let device = sourceBacked.metalTexture.device
+        let entry = try MetalDeviceCache.shared.entry(for: device)
+        guard let commandQueue = entry.borrowCommandQueue() else {
+            throw MetalDeviceCacheError.queueExhausted
+        }
+        defer { entry.returnCommandQueue(commandQueue) }
+        return try pipeline.extractAlphaMatteForAnalysis(
+            sourceTexture: sourceBacked.metalTexture,
+            state: state,
+            workingGamut: Self.workingGamut(for: pixelBuffer),
+            renderTime: renderTime,
+            device: device,
+            entry: entry,
+            commandQueue: commandQueue,
+            readbackSource: state.temporalStabilityEnabled && state.temporalStabilityStrength > 0
         )
     }
 

@@ -18,6 +18,7 @@ import Testing
 import Foundation
 import AVFoundation
 import CoreMedia
+import Metal
 @testable import CorridorKeyByLateNiteApp
 
 @Suite("AnalysisRunner & ProResExporter", .serialized)
@@ -66,33 +67,41 @@ struct AnalysisAndExportTests {
         let cache = cacheCollector.snapshot()
         #expect(cache.count == 6)
         for entry in cache.values {
-            #expect(!entry.blob.isEmpty)
+            #expect(try !entry.blob.isEmpty)
             #expect(entry.inferenceResolution > 0)
         }
     }
 
-    @Test("export writes a playable ProRes 4444 .mov of the same length")
+    @Test("temporal analysis exports a playable linear ProRes 4444 movie with matching color tags")
     func exportProducesPlayableMOV() async throws {
         let inputURL = try await SyntheticVideoFixture.writeMP4(frameCount: 6, fps: 24)
         defer { try? FileManager.default.removeItem(at: inputURL.deletingLastPathComponent()) }
 
         let engine = try StandaloneRenderEngine()
         let source = try await VideoSource(url: inputURL)
+        var state = PluginStateData(qualityMode: .draft512)
+        state.video.timeAwareness = .four
+        state.video.linearizeOutput = true
+        // A synchronized movie exercises the external matte reader all the
+        // way through analysis, sandbox access, cached rendering and export.
+        state.video.useAlphaHint = true
+        state.video.alphaHintAsset = try AlphaHintAsset(url: inputURL)
 
         // Run analysis so the exporter has cached mattes to feed.
         let runner = AnalysisRunner(renderEngine: engine, videoSource: source)
         let cacheCollector = MatteCacheCollector()
-        await runner.run(state: PluginStateData(qualityMode: .draft512)) { event in
+        await runner.run(state: state) { event in
             if case let .frameProcessed(index, _, entry) = event {
                 cacheCollector.set(index: index, entry: entry)
             }
         }
         let cache = cacheCollector.snapshot()
+        try #require(cache.count == 6, "Temporal analysis with a matching external movie must produce all six frames before export")
 
         let outputURL = inputURL.deletingLastPathComponent()
             .appending(path: "Output.mov")
         let snapshot = ExportProjectSnapshot(
-            state: PluginStateData(qualityMode: .draft512),
+            state: state,
             cachedMattes: cache
         )
         let exporter = ProResExporter(
@@ -124,6 +133,55 @@ struct AnalysisAndExportTests {
         #expect(writtenTracks.count == 1)
         let writtenDuration = try await writtenAsset.load(.duration)
         #expect(writtenDuration.seconds > 0.20)
+        let writtenTrack = try #require(writtenTracks.first)
+        let descriptions = try await writtenTrack.load(.formatDescriptions)
+        let description = try #require(descriptions.first)
+        let transfer = CMFormatDescriptionGetExtension(
+            description, extensionKey: kCMFormatDescriptionExtension_TransferFunction
+        ) as? String
+        #expect(transfer == kCVImageBufferTransferFunction_Linear as String)
+    }
+
+    @Test("external hint movies reject mismatched timing and seek to the requested preview frame")
+    func hintMovieTimingAndPreview() async throws {
+        let url = try await SyntheticVideoFixture.writeMP4(frameCount: 6)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        var settings = VideoInferenceSettings()
+        settings.useAlphaHint = true
+        settings.alphaHintAsset = try AlphaHintAsset(url: url)
+        let source = try await VideoSource(url: url)
+        #expect(source.totalFrameCount() == 6)
+        await #expect(throws: VideoInferenceSettingsError.self) {
+            _ = try await AlphaHintReader(settings: settings, frameCount: 5, frameDuration: CMTime(value: 1, timescale: 24))
+        }
+        await #expect(throws: VideoInferenceSettingsError.self) {
+            _ = try await AlphaHintReader(settings: settings, frameCount: 6, frameDuration: CMTime(value: 1, timescale: 30))
+        }
+        let engine = try StandaloneRenderEngine()
+        let queue = try #require(engine.device.makeCommandQueue())
+        let sequential = try await AlphaHintReader(settings: settings, frameCount: 6, frameDuration: CMTime(value: 1, timescale: 24))
+        var expected: (any MTLTexture)?
+        for index in 0...3 {
+            expected = try sequential.texture(frameIndex: index, sourceWidth: 320, sourceHeight: 180,
+                                              device: engine.device, commandQueue: queue)
+        }
+        let preview = try await AlphaHintReader(settings: settings, frameCount: 0, frameDuration: .invalid, previewFrame: 3)
+        let actual = try #require(try preview.texture(frameIndex: 3, sourceWidth: 320, sourceHeight: 180,
+                                                    device: engine.device, commandQueue: queue))
+        let reference = try #require(expected)
+        var referenceBytes = [UInt16](repeating: 0, count: 320 * 180 * 4)
+        var actualBytes = referenceBytes
+        try referenceBytes.withUnsafeMutableBytes {
+            let address = try #require($0.baseAddress)
+            reference.getBytes(address, bytesPerRow: 320 * 8,
+                               from: MTLRegionMake2D(0, 0, 320, 180), mipmapLevel: 0)
+        }
+        try actualBytes.withUnsafeMutableBytes {
+            let address = try #require($0.baseAddress)
+            actual.getBytes(address, bytesPerRow: 320 * 8,
+                            from: MTLRegionMake2D(0, 0, 320, 180), mipmapLevel: 0)
+        }
+        #expect(actualBytes == referenceBytes)
     }
 }
 

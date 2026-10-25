@@ -34,6 +34,33 @@ using namespace metal;
 
 // MARK: - Compose vertex/fragment (writes final RGBA to the FxPlug destination)
 
+inline float3 ckDisplayToLinear(float3 value) {
+    float3 magnitude = abs(value);
+    float3 decoded = select(pow((magnitude + 0.055) / 1.055, float3(2.4)), magnitude / 12.92, magnitude <= 0.04045);
+    return select(decoded, -decoded, value < 0.0);
+}
+
+inline float3 ckLinearToDisplay(float3 value) {
+    float3 magnitude = abs(value);
+    float3 encoded = select(1.055 * pow(max(magnitude, 0.0031308), float3(1.0 / 2.4)) - 0.055,
+                            magnitude * 12.92, magnitude <= 0.0031308);
+    return select(encoded, -encoded, value < 0.0);
+}
+
+/// Gamut matrices act on scene-linear values; alpha remains coverage.
+kernel void corridorKeyColorTransformKernel(
+    texture2d<float, access::read> source [[texture(0)]],
+    texture2d<float, access::write> destination [[texture(6)]],
+    constant float3x3 &matrix [[buffer(0)]],
+    constant uint2 &transfer [[buffer(1)]], uint2 position [[thread_position_in_grid]]
+) {
+    if (position.x >= destination.get_width() || position.y >= destination.get_height()) { return; }
+    float4 pixel = source.read(position);
+    float3 linear = transfer.x != 0 ? pixel.rgb : ckDisplayToLinear(pixel.rgb);
+    float3 transformed = matrix * linear;
+    destination.write(float4(transfer.y != 0 ? transformed : ckLinearToDisplay(transformed), pixel.a), position);
+}
+
 struct ComposeRasterizerData {
     float4 clipSpacePosition [[position]];
     float2 textureCoordinate;
@@ -75,9 +102,25 @@ fragment float4 corridorKeyComposeFragment(
 ) {
     constexpr sampler bilinear(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
 
-    float3 source     = sourceTexture.sample(bilinear, in.textureCoordinate).rgb;
+    if (params.outputMode == CKOutputModeOriginal) {
+        return sourceTexture.sample(bilinear, in.textureCoordinate);
+    }
+
+    float3 rawSource  = sourceTexture.sample(bilinear, in.textureCoordinate).rgb;
+    float3 source = rawSource;
     float3 foreground = foregroundTexture.sample(bilinear, in.textureCoordinate).rgb;
     float  alpha      = saturate(matteTexture.sample(bilinear, in.textureCoordinate).r);
+    if (params.inputIsLinear != 0) { source = ckLinearToDisplay(source); }
+    if (params.keepOriginalInSolidAreas != 0 && alpha > 0.95) { foreground = source; }
+    if (params.linearizeOutput != 0) {
+        source = ckDisplayToLinear(source);
+        foreground = ckDisplayToLinear(foreground);
+    }
+
+    if (params.inputIsLinear == params.linearizeOutput) {
+        source = rawSource;
+        if (params.keepOriginalInSolidAreas != 0 && alpha > 0.95) { foreground = rawSource; }
+    }
 
     switch (params.outputMode) {
         case CKOutputModeMatteOnly:
@@ -146,14 +189,23 @@ kernel void corridorKeyNormalizeToBufferKernel(
     device float *output [[buffer(0)]],
     constant CKNormalizeParams &params [[buffer(CKBufferIndexNormalizeParams)]],
     constant uint2 &dims [[buffer(1)]],
+    constant uint4 &content [[buffer(2)]],
+    constant uint &transfer [[buffer(3)]],
     uint2 gid [[thread_position_in_grid]]
 ) {
     if (gid.x >= dims.x || gid.y >= dims.y) { return; }
     constexpr sampler areaSampler(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
-    float2 uv = (float2(gid) + 0.5) / float2(dims);
+    // Reflect around the fitted content's edge, preserving the plate's aspect.
+    // A triangular wave also handles panoramas whose padding exceeds one width.
+    float2 extent = max(float2(content.xy) - 1.0, 1.0);
+    float2 position = float2(gid) - float2(content.zw);
+    float2 reflected = extent - abs(fmod(fmod(position, 2.0 * extent) + 2.0 * extent, 2.0 * extent) - extent);
+    float2 uv = (reflected + 0.5) / float2(content.xy);
     float4 rgba = source.sample(areaSampler, uv);
     float hintValue = hint.sample(areaSampler, uv).r;
-    float3 rec709 = params.workingToRec709 * rgba.rgb;
+    float3 rgb = transfer == 1 ? ckDisplayToLinear(rgba.rgb) : rgba.rgb;
+    float3 rec709 = params.workingToRec709 * rgb;
+    if (transfer == 1) { rec709 = ckLinearToDisplay(rec709); }
     float3 normalized = (rec709 - params.mean) * params.invStdDev;
     uint pixelIndex = gid.y * dims.x + gid.x;
     uint baseOffset = pixelIndex * 4u;
@@ -253,9 +305,9 @@ kernel void corridorKeyDespillKernel(
     // logic generalises to any single-channel-dominant reference (a
     // hypothetical red-screen pack would just need the right
     // `canonicalScreenReference` and the same code below would key it).
-    const int screenIdx = (params.screenColor.b > params.screenColor.g) ? 2 : 1;
-    const int otherA = (screenIdx == 1) ? 0 : 0; // R is always one of the non-screen channels for G/B screens.
-    const int otherB = (screenIdx == 1) ? 2 : 1;
+    const int screenIdx = params.screenColor.r > max(params.screenColor.g, params.screenColor.b) ? 0 : (params.screenColor.b > params.screenColor.g ? 2 : 1);
+    const int otherA = (screenIdx + 1) % 3;
+    const int otherB = (screenIdx + 2) % 3;
 
     // Ultra method — chroma-projection despill modelled on After
     // Effects' Advanced Spill Suppressor. Works in BT.709 YCbCr: the
@@ -937,9 +989,9 @@ kernel void corridorKeyChromaHintKernel(
 
     float4 rgba = source.read(gid);
     float3 rgb = rgba.rgb;
-    const int screenIdx = (params.screenColor.b > params.screenColor.g) ? 2 : 1;
-    const int otherA = 0;
-    const int otherB = (screenIdx == 1) ? 2 : 1;
+    const int screenIdx = params.screenColor.r > max(params.screenColor.g, params.screenColor.b) ? 0 : (params.screenColor.b > params.screenColor.g ? 2 : 1);
+    const int otherA = (screenIdx + 1) % 3;
+    const int otherB = (screenIdx + 2) % 3;
     float screenBias = rgb[screenIdx] - max(rgb[otherA], rgb[otherB]);
     float matte = 1.0 - saturate(screenBias * 2.0);
     destination.write(float4(matte, 0.0, 0.0, 1.0), gid);
@@ -1020,10 +1072,10 @@ kernel void corridorKeyExtractHintKernel(
 
     float4 rgba = source.read(gid);
     float hint = 0.0;
-    // 0 = RGBA → use alpha, 1 = alpha only / R only, 2 = RGB → use red.
+    // 0 = RGBA alpha, 1/2 = red, 3 = empty prior (v2 selects its own subject).
     if (sourceLayout == 0) {
         hint = rgba.a;
-    } else {
+    } else if (sourceLayout != 3) {
         hint = rgba.r;
     }
     destination.write(float4(hint, 0.0, 0.0, 1.0), gid);
@@ -1073,8 +1125,8 @@ kernel void corridorKeyMatteRefineKernel(
 /// complementary fringe. The other two channels provide a conservative floor,
 /// so this correction cannot push the screen channel below both of them.
 inline float3 decontaminateEdgeColor(float3 foreground, float matte, float3 screen, float strength) {
-    uint screenChannel = screen.g >= screen.b ? 1u : 2u;
-    float nonScreenMaximum = screenChannel == 1u ? max(foreground.r, foreground.b) : max(foreground.r, foreground.g);
+    uint screenChannel = screen.r > max(screen.g, screen.b) ? 0u : (screen.g >= screen.b ? 1u : 2u);
+    float nonScreenMaximum = max(foreground[(screenChannel + 1) % 3], foreground[(screenChannel + 2) % 3]);
     float excess = max(foreground[screenChannel] - nonScreenMaximum, 0.0);
     foreground[screenChannel] -= excess * (1.0 - saturate(matte)) * saturate(strength);
     return foreground;

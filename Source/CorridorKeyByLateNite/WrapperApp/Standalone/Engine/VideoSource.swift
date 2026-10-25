@@ -7,7 +7,7 @@
 //  * Inspect the clip's natural size, frame rate, duration, and
 //    transform (used to build the right preview / output dimensions).
 //  * Pull a specific frame into a Metal-compatible `CVPixelBuffer` via
-//    `AVAssetImageGenerator` (used for scrubbing and analyse).
+//    the same `AVAssetReader` decode path used for analysis and export.
 //  * Stream every frame in display order via an `AsyncThrowingStream`
 //    of `(presentationTime, pixelBuffer)` (used for the export pass).
 //
@@ -139,10 +139,10 @@ final class VideoSource: EditorMediaSource, @unchecked Sendable {
         let trackID = videoTrack.trackID
 
         // Apply the preferred transform to natural size so renderSize
-        // already accounts for portrait clips. AVAssetImageGenerator and
-        // AVAssetReader (with appliesPreferredTrackTransform = true)
-        // both rotate frames in flight; lining renderSize up with that
-        // means the renderer always sees the clip right-way-up.
+        // already accounts for portrait clips. VideoFrameReader applies
+        // this transform after decoding for both scrubbing and streaming,
+        // so the reported dimensions and decoded pixel buffers agree.
+        // The renderer always receives the clip in display orientation.
         let rotated = naturalSize.applying(preferredTransform)
         let renderSize = CGSize(width: abs(rotated.width), height: abs(rotated.height))
 
@@ -202,44 +202,17 @@ final class VideoSource: EditorMediaSource, @unchecked Sendable {
     ///
     /// `preferredPixelFormat` controls the requested decode format. The
     /// renderer is happy with RGBA16Float (default) or BGRA8Unorm; the
-    /// generator may downgrade if the source can't produce the
+    /// reader may downgrade if the source can't produce the
     /// requested format.
     func makeFrame(
         atTime time: CMTime,
         preferredPixelFormat: OSType = kCVPixelFormatType_64RGBAHalf
     ) async throws -> CVPixelBuffer {
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
-        generator.maximumSize = info.renderSize
-
-        // Image generation in the Cocoa-friendly API only emits CGImage,
-        // which requires a CPU detour. We request a CVPixelBuffer
-        // directly via the lower-level callback API for zero-copy
-        // hand-off to Metal.
-        return try await withCheckedThrowingContinuation { continuation in
-            generator.generateCGImageAsynchronously(for: time) { cgImage, _, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                guard let cgImage else {
-                    continuation.resume(throwing: VideoSourceError.pixelBufferUnavailable)
-                    return
-                }
-                do {
-                    let pixelBuffer = try Self.makePixelBuffer(
-                        from: cgImage,
-                        size: self.info.renderSize,
-                        pixelFormat: preferredPixelFormat
-                    )
-                    continuation.resume(returning: pixelBuffer)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        try Task.checkCancellation()
+        let reader = try await makeFrameReader(startTime: time, preferredPixelFormat: preferredPixelFormat)
+        defer { reader.cancel() }
+        guard let frame = try reader.nextFrame() else { throw VideoSourceError.pixelBufferUnavailable }
+        return frame.pixelBuffer
     }
 
     /// Builds an `AVAssetReader` that streams every frame of the clip
@@ -290,38 +263,6 @@ final class VideoSource: EditorMediaSource, @unchecked Sendable {
         )
     }
 
-    // MARK: - Helpers
-
-    private static func makePixelBuffer(
-        from cgImage: CGImage,
-        size: CGSize,
-        pixelFormat: OSType
-    ) throws -> CVPixelBuffer {
-        let width = Int(size.width.rounded())
-        let height = Int(size.height.rounded())
-        let pixelBuffer = try PixelBufferTextureBridge.makeMetalCompatiblePixelBuffer(
-            width: width,
-            height: height,
-            pixelFormat: pixelFormat
-        )
-        // Render the CGImage into the buffer via Core Image so we get
-        // colour-managed wide-gamut conversion for free. Core Image
-        // picks the right colour space based on the buffer's IOSurface
-        // metadata; we leave that nil so the system default applies.
-        let context = CIContext(options: [.useSoftwareRenderer: false])
-        let inputImage = CIImage(cgImage: cgImage)
-        let scale = CGAffineTransform(
-            scaleX: CGFloat(width) / inputImage.extent.width,
-            y: CGFloat(height) / inputImage.extent.height
-        )
-        context.render(
-            inputImage.transformed(by: scale),
-            to: pixelBuffer,
-            bounds: CGRect(x: 0, y: 0, width: width, height: height),
-            colorSpace: CGColorSpace(name: CGColorSpace.extendedSRGB)
-        )
-        return pixelBuffer
-    }
 }
 
 /// Wraps an `AVAssetReader` plus its track output so callers don't
@@ -331,6 +272,7 @@ final class VideoFrameReader: MediaFrameReader, @unchecked Sendable {
     private let reader: AVAssetReader
     private let output: AVAssetReaderTrackOutput
     let preferredTransform: CGAffineTransform
+    private let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
 
     init(
         reader: AVAssetReader,
@@ -359,10 +301,22 @@ final class VideoFrameReader: MediaFrameReader, @unchecked Sendable {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sample) else {
             throw VideoSourceError.pixelBufferUnavailable
         }
+        let orientedBuffer: CVPixelBuffer
+        if preferredTransform.isIdentity {
+            orientedBuffer = pixelBuffer
+        } else {
+            let image = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: NSNull()]).transformed(by: preferredTransform)
+            let extent = image.extent.integral
+            orientedBuffer = try PixelBufferTextureBridge.makeMetalCompatiblePixelBuffer(
+                width: Int(extent.width), height: Int(extent.height), pixelFormat: CVPixelBufferGetPixelFormatType(pixelBuffer))
+            let positioned = image.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
+            context.render(positioned, to: orientedBuffer, bounds: positioned.extent, colorSpace: nil)
+            CVBufferPropagateAttachments(pixelBuffer, orientedBuffer)
+        }
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sample)
         let duration = CMSampleBufferGetDuration(sample)
         return ReaderFrame(
-            pixelBuffer: pixelBuffer,
+            pixelBuffer: orientedBuffer,
             presentationTime: presentationTime,
             duration: duration
         )

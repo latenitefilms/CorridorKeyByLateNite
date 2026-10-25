@@ -283,6 +283,8 @@ enum RenderStages {
         hint: any MTLTexture,
         inferenceResolution: Int,
         workingToRec709: simd_float3x3,
+        geometry: InferenceGeometry? = nil,
+        inputIsLinear: Bool? = nil,
         entry: MetalDeviceCacheEntry,
         commandBuffer: any MTLCommandBuffer
     ) throws -> any MTLBuffer {
@@ -314,6 +316,12 @@ enum RenderStages {
             length: MemoryLayout<SIMD2<UInt32>>.size,
             index: 1
         )
+        let fit = geometry ?? InferenceGeometry(sourceWidth: inferenceResolution, sourceHeight: inferenceResolution,
+                                                resolution: inferenceResolution)
+        var content = SIMD4<UInt32>(UInt32(fit.contentWidth), UInt32(fit.contentHeight), UInt32(fit.offsetX), UInt32(fit.offsetY))
+        encoder.setBytes(&content, length: MemoryLayout<SIMD4<UInt32>>.size, index: 2)
+        var transfer: UInt32 = inputIsLinear.map { $0 ? 2 : 1 } ?? 0
+        encoder.setBytes(&transfer, length: MemoryLayout<UInt32>.size, index: 3)
         dispatch(
             encoder: encoder,
             pipeline: entry.computePipelines.normalizeToBuffer,
@@ -404,6 +412,29 @@ enum RenderStages {
     }
 
     // MARK: - Resample (bilinear + Lanczos)
+
+    /// Transfers and transforms RGB in scene-linear light, preserving signed HDR values.
+    static func colorTransform(source: any MTLTexture, matrix: simd_float3x3,
+                               sourceIsLinear: Bool, outputIsLinear: Bool,
+                               entry: MetalDeviceCacheEntry, commandBuffer: any MTLCommandBuffer) throws -> PooledTexture {
+        guard let destination = entry.texturePool.acquire(width: source.width, height: source.height, pixelFormat: .rgba16Float) else {
+            throw MetalDeviceCacheError.textureAllocationFailed
+        }
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            destination.returnManually()
+            throw MetalDeviceCacheError.commandEncoderCreationFailed
+        }
+        encoder.setComputePipelineState(entry.computePipelines.colorTransform)
+        encoder.setTexture(source, index: 0)
+        encoder.setTexture(destination.texture, index: 6)
+        var transform = matrix
+        var transfer = SIMD2<UInt32>(sourceIsLinear ? 1 : 0, outputIsLinear ? 1 : 0)
+        encoder.setBytes(&transform, length: MemoryLayout<simd_float3x3>.size, index: 0)
+        encoder.setBytes(&transfer, length: MemoryLayout<SIMD2<UInt32>>.size, index: 1)
+        dispatch(encoder: encoder, pipeline: entry.computePipelines.colorTransform, width: source.width, height: source.height)
+        encoder.endEncoding()
+        return destination
+    }
 
     /// Resamples to the given dimensions using either a bilinear compute
     /// kernel (fast) or MPS Lanczos (higher quality). If the input already

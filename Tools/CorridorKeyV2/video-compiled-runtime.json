@@ -1,0 +1,98 @@
+{
+  "model_contract": "corridorkey-v2-video-1",
+  "hardware": "Apple M1 Max, 64 GB unified memory",
+  "configuration": "SwiftPM Release, MLX Swift 0.31.3",
+  "scope": "Independent T=1 adapter including Metal writeback; excludes decode, hints, cached render and export. Not a temporal sequence benchmark.",
+  "measurements": [
+    {
+      "compiled_ms": 341.655,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 1.7881393432617188e-07,
+      "reference_ms": 359.1235,
+      "resolution": 512,
+      "samples": 5,
+      "screen": "green"
+    },
+    {
+      "compiled_ms": 330.847459,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 1.7881393432617188e-07,
+      "reference_ms": 351.296625,
+      "resolution": 512,
+      "samples": 5,
+      "screen": "blue"
+    },
+    {
+      "compiled_ms": 605.230166,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 1.7881393432617188e-07,
+      "reference_ms": 633.513667,
+      "resolution": 768,
+      "samples": 5,
+      "screen": "green"
+    },
+    {
+      "compiled_ms": 619.444042,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 1.7881393432617188e-07,
+      "reference_ms": 646.49475,
+      "resolution": 768,
+      "samples": 5,
+      "screen": "blue"
+    },
+    {
+      "compiled_ms": 1021.998625,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 1.7881393432617188e-07,
+      "reference_ms": 1112.471459,
+      "resolution": 1024,
+      "samples": 5,
+      "screen": "green"
+    },
+    {
+      "compiled_ms": 1017.907459,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 1.7881393432617188e-07,
+      "reference_ms": 1092.029167,
+      "resolution": 1024,
+      "samples": 5,
+      "screen": "blue"
+    },
+    {
+      "compiled_ms": 2550.805875,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 1.7881393432617188e-07,
+      "reference_ms": 2632.3469999999998,
+      "resolution": 1536,
+      "samples": 5,
+      "screen": "green"
+    },
+    {
+      "compiled_ms": 2653.7974169999998,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 1.7881393432617188e-07,
+      "reference_ms": 2766.154666,
+      "resolution": 1536,
+      "samples": 5,
+      "screen": "blue"
+    },
+    {
+      "compiled_ms": 5222.734,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 1.7881393432617188e-07,
+      "reference_ms": 5385.859708,
+      "resolution": 2048,
+      "samples": 5,
+      "screen": "green"
+    },
+    {
+      "compiled_ms": 5266.435458,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 2.384185791015625e-07,
+      "reference_ms": 5368.678917,
+      "resolution": 2048,
+      "samples": 5,
+      "screen": "blue"
+    }
+  ]
+}

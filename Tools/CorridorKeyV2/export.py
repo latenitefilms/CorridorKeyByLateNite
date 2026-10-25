@@ -71,8 +71,11 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("Tools/CorridorKeyV2/artifacts/corridorkey_v2.mlxfn"))
     parser.add_argument("--resolutions", type=int, nargs="+", default=[512, 768, 1024, 1536, 2048])
     parser.add_argument("--weight-precision", choices=["float32", "float16"], default="float16")
+    parser.add_argument("--activation-precision", choices=["float32", "mixed-float16"], default="float32",
+                        help="Experimental mixed precision must pass the same reference gates as float32")
     parser.add_argument("--green-clip", type=Path)
     parser.add_argument("--blue-clip", type=Path)
+    parser.add_argument("--stress-clip", type=Path, help="Additional difficult green-screen plate for reference validation")
     args = parser.parse_args()
     if any(size < 128 or size % 128 for size in args.resolutions):
         parser.error("Resolutions must be positive multiples of 128")
@@ -85,7 +88,7 @@ def main():
     shared_weights = {}
     graphs = {}
     report = {"model": "CorridorKey v2", "mode": "independent-frame-1/1", "shape_quantum": 128,
-              "weight_precision": args.weight_precision, "activation_precision": "float32",
+              "weight_precision": args.weight_precision, "activation_precision": args.activation_precision,
               "input": "imagenet-normalized-display-rgb+hint-nhwc-float32",
               "output": "alpha+straight-display-rgb-nhwc-float32-y-up",
               "resolutions": args.resolutions, "validation": []}
@@ -117,13 +120,15 @@ def main():
                 print(f"Tracing {resolution}px", flush=True)
                 samples = [(screen, validation_source(resolution, screen, clip)) for screen, clip in
                            (("green", args.green_clip), ("blue", args.blue_clip))]
+                if args.stress_clip is not None:
+                    samples.append(("stress-green", validation_source(resolution, "green", args.stress_clip)))
                 # Warm shape-dependent upstream caches before torch.export.
                 expected = [tuple(value.cpu().numpy() for value in model(torch.from_numpy(source)))
                             for _, source in samples]
                 exported = torch.export.export(model, (torch.from_numpy(samples[0][1]),), strict=False)
                 exported = exported.run_decompositions({})
                 exported.graph.eliminate_dead_code()
-                lowered = LoweredGraph(exported, shared_weights, args.weight_precision)
+                lowered = LoweredGraph(exported, shared_weights, args.weight_precision, args.activation_precision)
                 graphs[resolution] = lowered
                 for (screen, source), reference in zip(samples, expected):
                     normalized = normalized_source(source)

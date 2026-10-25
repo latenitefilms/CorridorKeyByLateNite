@@ -73,7 +73,8 @@ typedef enum CorridorKeyOutputMode {
     /// 4th input channel (Vision mask, OSC overlays, or green-bias).
     /// Visualised as red on black so the user can spot misalignment
     /// between the hint and the subject before MLX touches it.
-    CKOutputModeHint = 5
+    CKOutputModeHint = 5,
+    CKOutputModeOriginal = 6
 } CorridorKeyOutputMode;
 
 // Vertex layout for the full-screen quad in pixel space.
@@ -107,6 +108,9 @@ typedef struct CKAlphaEdgeParams {
 
 typedef struct CKComposeParams {
     int outputMode; // CorridorKeyOutputMode
+    int inputIsLinear;
+    int linearizeOutput;
+    int keepOriginalInSolidAreas;
 } CKComposeParams;
 
 // Normalisation parameters for the neural input tensor. The working-space

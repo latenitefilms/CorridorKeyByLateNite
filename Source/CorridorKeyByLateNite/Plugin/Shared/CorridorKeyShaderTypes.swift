@@ -147,6 +147,9 @@ struct CKAlphaEdgeParams {
 
 struct CKComposeParams {
     var outputMode: Int32
+    var inputIsLinear: Int32 = 0
+    var linearizeOutput: Int32 = 0
+    var keepOriginalInSolidAreas: Int32 = 0
 }
 
 struct CKNormalizeParams {

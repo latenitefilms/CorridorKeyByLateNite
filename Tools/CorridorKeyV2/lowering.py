@@ -299,10 +299,26 @@ def lower_operator(target, arguments, keywords):
     raise NotImplementedError(f"Unsupported export operator: {target}")
 
 
+def cast_floating(value, dtype):
+    """Change floating tensors while preserving shape indices and Boolean masks."""
+    if isinstance(value, mx.array):
+        return value.astype(dtype) if mx.issubdtype(value.dtype, mx.floating) else value
+    if isinstance(value, tuple):
+        return tuple(cast_floating(item, dtype) for item in value)
+    if isinstance(value, list):
+        return [cast_floating(item, dtype) for item in value]
+    if isinstance(value, dict):
+        return {key: cast_floating(item, dtype) for key, item in value.items()}
+    return value
+
+
 class LoweredGraph:
     """An export-time callable whose only runtime operations are MLX primitives."""
 
-    def __init__(self, exported, shared_weights=None, weight_precision="float32"):
+    def __init__(self, exported, shared_weights=None, weight_precision="float32", activation_precision="float32"):
+        if activation_precision not in ("float32", "mixed-float16"):
+            raise ValueError(f"Unsupported activation precision: {activation_precision}")
+        self.mixed_precision = activation_precision == "mixed-float16"
         self.graph = exported.graph
         self.constants = {}
         self.constant_dtypes = {}
@@ -310,7 +326,8 @@ class LoweredGraph:
         self.output_names = [spec.arg.name for spec in exported.graph_signature.output_specs
                              if spec.kind.name == "USER_OUTPUT"]
         if len(self.output_names) != len(exported.graph_signature.output_specs):
-            raise ValueError("Exported graph mutates persistent state")
+            mutations = [str(spec) for spec in exported.graph_signature.output_specs if spec.kind.name != "USER_OUTPUT"]
+            raise ValueError(f"Exported graph mutates persistent state: {mutations}")
         shared_weights = {} if shared_weights is None else shared_weights
         for spec in exported.graph_signature.input_specs:
             if spec.kind.name == "USER_INPUT":
@@ -338,17 +355,30 @@ class LoweredGraph:
         # the cast in self.constants would serialize full-size float32 weights.
         values = {name: value.astype(self.constant_dtypes[name]) for name, value in self.constants.items()}
         values.update(zip(self.inputs, inputs))
+        if self.mixed_precision:
+            values = cast_floating(values, mx.float16)
         for node in self.graph.nodes:
             if node.op == "placeholder":
                 continue
             if node.op == "output":
-                return tuple(values[name] for name in self.output_names)
+                outputs = tuple(values[name] for name in self.output_names)
+                return cast_floating(outputs, mx.float32) if self.mixed_precision else outputs
             if node.op != "call_function":
                 raise NotImplementedError(f"Unsupported graph node {node.op}")
             arguments = map_arg(node.args, lambda argument: values[argument.name])
             keywords = map_arg(node.kwargs, lambda argument: values[argument.name])
             try:
-                values[node.name] = lower_operator(node.target, arguments, keywords)
+                # Reductions, variances and exponential transforms need float32
+                # accumulation. Keep the public renderer/color boundary float32.
+                operation = node.target._schema.name.split("::")[-1] if hasattr(node.target, "_schema") else None
+                if self.mixed_precision and operation in (
+                    "sum", "mean", "layer_norm", "native_layer_norm", "rms_norm",
+                    "softmax", "_softmax", "exp", "pow", "sinh", "asinh",
+                ):
+                    arguments = cast_floating(arguments, mx.float32)
+                    keywords = cast_floating(keywords, mx.float32)
+                result = lower_operator(node.target, arguments, keywords)
+                values[node.name] = cast_floating(result, mx.float16) if self.mixed_precision else result
             except Exception as error:
                 raise RuntimeError(f"Cannot lower {node.name}: {node.target}") from error
         raise ValueError("Graph has no output")

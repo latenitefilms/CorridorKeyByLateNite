@@ -215,6 +215,7 @@ final class EditorViewModel {
 
     @ObservationIgnored
     let renderEngine: StandaloneRenderEngine
+    private let previewRenderer: StandalonePreviewRenderer
 
     var phase: EditorPhase = .noClipLoaded
     /// All user-editable parameters. Bound directly to the inspector
@@ -226,7 +227,11 @@ final class EditorViewModel {
     /// `PluginStateData()`.
     var state: PluginStateData = EditorPreferences.makeInitialState() {
         didSet {
-            guard oldValue.hintMode != state.hintMode || oldValue.hintPointSet != state.hintPointSet else { return }
+            guard oldValue.hintMode != state.hintMode || oldValue.hintPointSet != state.hintPointSet
+                    || oldValue.video.analysisIdentity != state.video.analysisIdentity
+                    || oldValue.screenColor != state.screenColor || oldValue.qualityMode != state.qualityMode
+                    || oldValue.temporalStabilityEnabled != state.temporalStabilityEnabled
+                    || oldValue.temporalStabilityStrength != state.temporalStabilityStrength else { return }
             // An in-flight run owns the old annotations. Cancel it before
             // clearing, so queued results cannot repopulate a stale cache.
             cancelAnalysis()
@@ -401,6 +406,7 @@ final class EditorViewModel {
 
     init(renderEngine: StandaloneRenderEngine) {
         self.renderEngine = renderEngine
+        self.previewRenderer = StandalonePreviewRenderer(engine: renderEngine)
         self.customBackdropColor = BackdropPreferences.loadCustomColor() ?? .default
 
         let savedSelection = BackdropPreferences.loadSelected()
@@ -637,7 +643,6 @@ final class EditorViewModel {
             self.exportStatus = .idle
             self.playheadTime = .zero
             self.latestPreview = nil
-            await autoDetectScreenColor(source: source, loadIdentifier: identifier)
             guard loadIdentifier == identifier, !Task.isCancelled else { return }
             self.phase = .ready
             beginWarmupForCurrentQuality()
@@ -668,7 +673,7 @@ final class EditorViewModel {
                 firstFrame: pixelBuffer,
                 fallback: state.screenColor
             )
-            if detected != state.screenColor {
+            if state.screenColor == .automatic, detected != state.screenColor {
                 state.screenColor = detected
             }
         } catch {
@@ -784,7 +789,7 @@ final class EditorViewModel {
                 try await performRender(at: target)
             } catch {
                 if !Task.isCancelled {
-                    self.phase = .loadFailed(error.localizedDescription)
+                    handlePreviewFailure(error)
                 }
                 isPlaying = false
                 break
@@ -825,23 +830,30 @@ final class EditorViewModel {
         let frameIndex = currentFrameIndex(at: frameTime)
         var stateForFrame = state
         if let cached = matteCache[frameIndex] {
-            stateForFrame.cachedMatteBlob = cached.blob
+            stateForFrame.cachedMatteBlob = cached.inlineBlob
+            stateForFrame.cachedFrameReference = cached.reference
             stateForFrame.cachedMatteInferenceResolution = cached.inferenceResolution
+            if let reference = cached.reference { AnalysisDiskCache.shared.prefetch(reference) }
         }
+        stateForFrame.sourceFrameIndex = frameIndex
         stateForFrame.destinationLongEdgePixels = max(
             Int(renderSize.width.rounded()),
             Int(renderSize.height.rounded())
         )
         let pixelBuffer = try await source.makeFrame(atTime: frameTime)
-        let result = try renderEngine.render(
-            source: pixelBuffer,
-            state: stateForFrame,
-            renderTime: frameTime
+        let result = try await previewRenderer.render(
+            frame: ReaderFrame(pixelBuffer: pixelBuffer, presentationTime: frameTime, duration: .invalid),
+            state: stateForFrame
         )
+        try Task.checkCancellation()
+        if let next = matteCache[frameIndex + 1]?.reference { AnalysisDiskCache.shared.prefetch(next) }
         self.latestPreview = PreviewFrame(
             texture: result.destinationTexture,
             pixelBuffer: result.destinationPixelBuffer,
-            presentationTime: frameTime
+            presentationTime: frameTime,
+            isLinear: result.report.effectiveInferenceResolution == 0 ? stateForFrame.video.inputIsLinear : stateForFrame.outputIsLinear,
+            isPremultiplied: stateForFrame.outputMode != .foregroundPlusMatte,
+            gamut: StandaloneRenderEngine.workingGamut(for: pixelBuffer)
         )
         self.renderBackendDescription = result.report.backendDescription
         self.lastEngineDescription = result.report.guideSourceDescription
@@ -916,14 +928,17 @@ final class EditorViewModel {
         let frameIndex = currentFrameIndex(at: frameTime)
         var stateForFrame = state
         if let cached = matteCache[frameIndex] {
-            stateForFrame.cachedMatteBlob = cached.blob
+            stateForFrame.cachedMatteBlob = cached.inlineBlob
+            stateForFrame.cachedFrameReference = cached.reference
             stateForFrame.cachedMatteInferenceResolution = cached.inferenceResolution
+            if let reference = cached.reference { AnalysisDiskCache.shared.prefetch(reference) }
         }
+        stateForFrame.sourceFrameIndex = frameIndex
         stateForFrame.destinationLongEdgePixels = max(
             Int(renderSize.width.rounded()),
             Int(renderSize.height.rounded())
         )
-        let renderEngine = renderEngine
+        let previewRenderer = previewRenderer
         let showingOriginal = isShowingOriginal
 
         pendingPreviewTask?.cancel()
@@ -939,34 +954,36 @@ final class EditorViewModel {
             }
             if Task.isCancelled { return }
             do {
-                let result: StandaloneRenderResult
-                if showingOriginal {
-                    // Press-and-hold "Show Original" — bypass the
-                    // pipeline entirely so the comparison frame is
-                    // pixel-identical to the source bytes the
-                    // decoder produced. Pre-inference + MLX + post
-                    // can introduce subtle gamma / colour-management
-                    // shifts that would muddy the A/B comparison.
-                    result = try renderEngine.renderShowingOriginal(source: pixelBuffer)
-                } else {
-                    result = try renderEngine.render(
-                        source: pixelBuffer,
-                        state: stateForFrame,
-                        renderTime: frameTime
-                    )
-                }
+                let result = try await previewRenderer.render(
+                    frame: ReaderFrame(pixelBuffer: pixelBuffer, presentationTime: frameTime, duration: .invalid),
+                    state: stateForFrame, showingOriginal: showingOriginal
+                )
                 if Task.isCancelled { return }
                 self.latestPreview = PreviewFrame(
                     texture: result.destinationTexture,
                     pixelBuffer: result.destinationPixelBuffer,
-                    presentationTime: frameTime
+                    presentationTime: frameTime,
+                    isLinear: (showingOriginal || result.report.effectiveInferenceResolution == 0) ? stateForFrame.video.inputIsLinear : stateForFrame.outputIsLinear,
+                    isPremultiplied: showingOriginal || stateForFrame.outputMode != .foregroundPlusMatte,
+                    gamut: StandaloneRenderEngine.workingGamut(for: pixelBuffer)
                 )
                 self.renderBackendDescription = result.report.backendDescription
                 self.lastEngineDescription = result.report.guideSourceDescription
             } catch {
                 if Task.isCancelled { return }
-                self.phase = .loadFailed(error.localizedDescription)
+                self.handlePreviewFailure(error)
             }
+        }
+    }
+
+    /// Keep Analyse Clip available after disposable-cache loss. Retain the
+    /// references so export also fails explicitly until the user analyses again.
+    private func handlePreviewFailure(_ error: any Error) {
+        if error is AnalysisDiskCacheError {
+            latestPreview = nil
+            analysisStatus = .failed(error.localizedDescription)
+        } else {
+            phase = .loadFailed(error.localizedDescription)
         }
     }
 
@@ -996,6 +1013,27 @@ final class EditorViewModel {
         EditorPreferences.qualityMode = state.qualityMode
         EditorPreferences.hintMode = state.hintMode
         EditorPreferences.upscaleMethod = state.upscaleMethod
+    }
+
+    /// Same estimate as the analysis preflight and FxPlug inspector.
+    var videoMemoryDescription: String {
+        let longEdge = max(Int(clipInfo?.renderSize.width ?? 1920), Int(clipInfo?.renderSize.height ?? 1080))
+        let resolution = state.qualityMode.resolvedInferenceResolution(forLongEdge: longEdge, deviceRegistryID: renderEngine.device.registryID)
+        let frameCount = max(1, Int((clipInfo?.duration.seconds ?? 1) * Double(clipInfo?.nominalFrameRate ?? 1)))
+        return state.video.memoryDescription(resolution: resolution, frameCount: frameCount,
+                                            deviceBudget: renderEngine.device.recommendedMaxWorkingSetSize)
+    }
+
+    /// V2 settings affecting the model invalidate predictions; output controls reuse them.
+    func videoParameterDidChange() {
+        parameterDidChange()
+    }
+
+    /// Assigns the visible source frame to the selected single-frame matte.
+    func setCurrentFrameAsHintReference() {
+        guard let clipInfo else { return }
+        state.video.referenceFrame = max(0, Int((playheadTime.seconds * Double(clipInfo.nominalFrameRate)).rounded()))
+        videoParameterDidChange()
     }
 
     // MARK: - On-screen control (OSC)
@@ -1159,6 +1197,8 @@ final class EditorViewModel {
         fallbackTotalFrames: Int
     ) {
         switch event {
+        case .framePrepared(let frameIndex):
+            renderBackendDescription = "Preparing frame \(frameIndex + 1) for Time Awareness"
         case .totalFramesResolved(let total):
             self.totalFrames = max(total, 1)
             self.analysisStatus = .running(processed: 0, total: max(total, 1))
@@ -1171,7 +1211,7 @@ final class EditorViewModel {
             } else {
                 total = fallbackTotalFrames
             }
-            self.analysisStatus = .running(processed: frameIndex + 1, total: total)
+            self.analysisStatus = .running(processed: matteCache.count, total: total)
             // If the analyser just produced the matte for the frame
             // the user is currently looking at, push a re-render so
             // they see the keyed result the moment it's available
@@ -1474,6 +1514,9 @@ struct PreviewFrame {
     let texture: any MTLTexture
     let pixelBuffer: CVPixelBuffer
     let presentationTime: CMTime
+    var isLinear = false
+    var isPremultiplied = true
+    var gamut: WorkingColorGamut = .rec709
 }
 
 /// Tracks live standalone editor view models so app termination can

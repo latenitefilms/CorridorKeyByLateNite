@@ -4,9 +4,9 @@
 //
 //  Implements the `FxAnalyzer` protocol so the plug-in can run MLX inference
 //  for every frame of the source clip before the user expects real-time
-//  playback. Results are persisted through the hidden "Analysis Data" custom
-//  parameter, which lives inside the Final Cut Pro Library — moving a project
-//  between machines carries the analysis along with it.
+//  playback. Compact frame references persist in the Library custom parameter;
+//  complete predictions live in the bounded local sandbox cache. Moving a
+//  library to another Mac requires Analyse Clip again.
 //
 
 import Foundation
@@ -34,7 +34,11 @@ final class AnalysisSessionState: @unchecked Sendable {
     var inferenceResolution: Int = 0
     var matteWidth: Int = 0
     var matteHeight: Int = 0
-    var mattes: [Int: Data] = [:]
+    var frameReferences: [Int: AnalysisFrameReference] = [:]
+    var cacheSession: AnalysisDiskCache.Session?
+    var videoSettings = VideoInferenceSettings()
+    var videoSession: VideoInferenceSession?
+    var hintReader: DeferredAlphaHintReader?
 
     /// Previous-frame buffers used by the Phase 1 temporal-stability blend.
     /// These are the last frame's *blended* alpha (so the EMA accumulates
@@ -77,10 +81,13 @@ final class AnalysisSessionState: @unchecked Sendable {
             inferenceResolution: inferenceResolution,
             matteWidth: matteWidth,
             matteHeight: matteHeight,
-            mattes: mattes,
+            mattes: [:],
             hintConfiguration: AnalysisHintConfiguration(
-                mode: HintMode(rawValue: hintModeRaw) ?? .appleVision, points: hintPointSet
-            )
+                mode: HintMode(rawValue: hintModeRaw) ?? .appleVision, points: hintPointSet,
+                video: videoSettings.analysisIdentity, temporalStabilityEnabled: temporalStabilityEnabled,
+                temporalStabilityStrength: temporalStabilityEnabled ? temporalStabilityStrength : 0
+            ),
+            frameReferences: frameReferences
         )
     }
 
@@ -94,7 +101,11 @@ final class AnalysisSessionState: @unchecked Sendable {
         inferenceResolution = 0
         matteWidth = 0
         matteHeight = 0
-        mattes.removeAll(keepingCapacity: false)
+        frameReferences.removeAll(keepingCapacity: false)
+        cacheSession = nil
+        videoSession = nil
+        hintReader = nil
+        videoSettings = VideoInferenceSettings()
         temporalHistory = TemporalBlender.History()
         temporalStabilityEnabled = false
         temporalStabilityStrength = 0.5
@@ -291,9 +302,17 @@ extension CorridorKeyToolboxPlugIn {
         let hintPoints = loadHintPointSet(using: retrieval)
 
         let frameCount = Self.frameCount(in: analysisRange, frameDuration: frameDuration)
+        let videoConfiguration = videoSettings(using: retrieval, at: analysisRange.start)
+        try videoConfiguration.validate(frameCount: frameCount)
+        let hintReader = videoConfiguration.useAlphaHint
+            ? DeferredAlphaHintReader(settings: videoConfiguration, frameCount: frameCount, frameDuration: frameDuration) : nil
         let session = analysisSession
+        let cacheSession = try AnalysisDiskCache.shared.beginSession()
         session.lock.lock()
         session.resetLocked()
+        session.cacheSession = cacheSession
+        session.videoSettings = videoConfiguration
+        session.hintReader = hintReader
         session.frameDuration = frameDuration
         session.firstFrameTime = analysisRange.start
         session.frameCount = frameCount
@@ -326,15 +345,19 @@ extension CorridorKeyToolboxPlugIn {
         let firstFrameTime = session.firstFrameTime
         let frameCount = session.frameCount
         let screenColorRaw = session.screenColorRaw
-        let storedInferenceResolution = session.inferenceResolution
         let temporalEnabled = session.temporalStabilityEnabled
         let temporalStrength = session.temporalStabilityStrength
         let hintModeRaw = session.hintModeRaw
         let hintPointSet = session.hintPointSet
+        let videoConfiguration = session.videoSettings
+        let deferredHint = session.hintReader
+        let existingVideoSession = session.videoSession
+        let qualityModeRaw = session.qualityModeRaw
+        let cacheSession = session.cacheSession
         var temporalHistory = session.temporalHistory
         session.lock.unlock()
 
-        guard frameCount > 0 else {
+        guard frameCount > 0, let cacheSession else {
             throw NSError(
                 domain: FxPlugErrorDomain,
                 code: kFxError_AnalysisError,
@@ -394,13 +417,13 @@ extension CorridorKeyToolboxPlugIn {
         // wrap, etc.) only kick in at *render* time when the cached
         // matte is being composited, so they don't need to thread
         // through the analyse path.
-        let analyseState = PluginStateData(
+        var analyseState = PluginStateData(
             screenColor: ScreenColor(rawValue: screenColorRaw) ?? .green,
-            qualityMode: QualityMode.allCases.first(where: { $0.resolvedInferenceResolution(forLongEdge: 1920) == storedInferenceResolution })
-                ?? .automatic,
+            qualityMode: QualityMode(rawValue: qualityModeRaw) ?? .automatic,
             hintMode: HintMode(rawValue: hintModeRaw) ?? .appleVision,
             hintPointSet: hintPointSet
         )
+        analyseState.video = videoConfiguration
 
         let workingGamut: WorkingColorGamut
         if let gamutAPI = apiManager.api(for: (any FxColorGamutAPI_v2).self) as? any FxColorGamutAPI_v2 {
@@ -409,81 +432,50 @@ extension CorridorKeyToolboxPlugIn {
             workingGamut = .rec709
         }
 
-        // Request a source readback only when temporal stability is armed
-        // and we either already have a previous frame (immediate blend) or
-        // might need one on the next frame. The readback adds a
-        // `.shared`-storage blit + 64 MB (Maximum rung) hand-off; skipping
-        // it when the user has disabled the feature removes that cost.
-        let needsTemporalReadback = temporalEnabled && temporalStrength > 0
-        let extractStart = ContinuousClock.now
-        let extracted = try renderPipeline.extractAlphaMatteForAnalysis(
-            sourceTexture: sourceTexture,
-            state: analyseState,
-            workingGamut: workingGamut,
-            renderTime: frameTime,
-            device: device,
-            entry: entry,
-            commandQueue: commandQueue,
-            readbackSource: needsTemporalReadback,
-            sourceRowOrder: ImageRowOrder(imageOrigin: frame.imageOrigin)
-        )
-        let extractElapsed = ContinuousClock.now - extractStart
-        let extractDurationSeconds = Double(extractElapsed.components.seconds)
-            + Double(extractElapsed.components.attoseconds) / 1e18
-
-        // Apply the temporal blend when we have a valid previous frame at
-        // the same resolution. A change of inference resolution (user flipped
-        // Quality mid-pass) invalidates the prior state — drop it silently
-        // and let the next frame seed the EMA afresh.
-        var currentAlpha = extracted.alpha
-        temporalHistory.apply(
-            alpha: &currentAlpha, source: extracted.source,
-            width: extracted.width, height: extracted.height, frameIndex: frameIndex,
-            configuration: TemporalBlender.Configuration(
-                strength: temporalEnabled ? Float(temporalStrength) : 0,
-                motionThreshold: 0.05
-            )
-        )
-
-        let encoded = try AnalysisFrameCodec.encode(
-            alpha: currentAlpha,
-            foregroundHalfRGBA: extracted.foregroundHalfRGBA,
-            width: extracted.width,
-            height: extracted.height
-        )
-
-        session.lock.lock()
-        session.inferenceResolution = extracted.inferenceResolution
-        session.matteWidth = extracted.width
-        session.matteHeight = extracted.height
-        session.mattes[frameIndex] = encoded
-        session.analyzedCount = session.mattes.count
-        session.temporalHistory = temporalHistory
-        let shouldFlush = (session.analyzedCount % 10) == 0 || session.analyzedCount == session.frameCount
-        let snapshot = shouldFlush ? session.snapshotLocked() : nil
-        let analyzedCountSnapshot = session.analyzedCount
-        let totalFramesSnapshot = session.frameCount
-        session.lock.unlock()
-
-        // One line per frame so a hanging analyse shows up clearly in the
-        // log — we lost a diagnosis session without this and it was not a
-        // fun investigation. Includes extract time so an MLX stall is
-        // immediately obvious in the timeline.
-        // Use the engine description that came back with this frame's
-        // inference, NOT the coordinator's "current" backend — which can
-        // be the warm MLX engine even when this particular frame was
-        // served by the rough-matte fallback while MLX was warming up.
-        let engineDescription = extracted.engineDescription
-        let extractSecondsText = extractDurationSeconds
-            .formatted(.number.precision(.fractionLength(3)))
-        PluginLog.notice(
-            "Analyse frame \(analyzedCountSnapshot)/\(totalFramesSnapshot) cached in "
-            + "\(extractSecondsText)s "
-            + "(temporal=\(needsTemporalReadback ? "on" : "off"), engine=\(engineDescription))."
-        )
-
-        if let snapshot {
-            persist(snapshot: snapshot)
+        let videoSession: VideoInferenceSession
+        if let existingVideoSession {
+            videoSession = existingVideoSession
+        } else {
+            videoSession = try renderPipeline.makeVideoInferenceSession(
+                sourceWidth: sourceTexture.width, sourceHeight: sourceTexture.height,
+                state: analyseState, frameCount: frameCount, entry: entry,
+                readbackSource: temporalEnabled && temporalStrength > 0)
+            session.lock.withLock { session.videoSession = videoSession }
+        }
+        let hintReader = try deferredHint?.waitForReader()
+        let hintTexture = try hintReader?.texture(frameIndex: frameIndex, sourceWidth: sourceTexture.width,
+                                                 sourceHeight: sourceTexture.height, device: device, commandQueue: commandQueue)
+        try renderPipeline.appendVideoFrame(sourceTexture: sourceTexture, hintTexture: hintTexture,
+                                             state: analyseState, workingGamut: workingGamut, renderTime: frameTime,
+                                             frameIndex: frameIndex, session: videoSession, entry: entry,
+                                             commandQueue: commandQueue, sourceRowOrder: ImageRowOrder(imageOrigin: frame.imageOrigin))
+        PluginLog.notice("Prepared frame \(frameIndex + 1)/\(frameCount) for v2 temporal inference.")
+        guard frameIndex == frameCount - 1 else { return }
+        try videoSession.finish(checkCancellation: {
+            try Task.checkCancellation()
+            if let api = self.apiManager.api(for: (any FxAnalysisAPI_v2).self) as? any FxAnalysisAPI_v2,
+               api.analysisStateForEffect() == kFxAnalysisState_AnalysisInterrupted { throw CancellationError() }
+        }) { result in
+            var alpha = result.alpha
+            temporalHistory.apply(alpha: &alpha, source: result.source,
+                                  width: result.geometry.contentWidth, height: result.geometry.contentHeight,
+                                  frameIndex: result.index,
+                                  configuration: TemporalBlender.Configuration(strength: temporalEnabled ? Float(temporalStrength) : 0,
+                                                                               motionThreshold: 0.05))
+            let blob = try AnalysisFrameCodec.encode(alpha: alpha, foregroundHalfRGBA: result.foregroundHalfRGBA,
+                                                     width: result.geometry.contentWidth, height: result.geometry.contentHeight)
+            let reference = try AnalysisDiskCache.shared.store(blob, in: cacheSession)
+            let snapshot: AnalysisData? = session.lock.withLock {
+                session.inferenceResolution = result.geometry.resolution
+                session.matteWidth = result.geometry.contentWidth
+                session.matteHeight = result.geometry.contentHeight
+                session.frameReferences[result.index] = reference
+                session.analyzedCount = session.frameReferences.count
+                session.temporalHistory = temporalHistory
+                return session.analyzedCount % 10 == 0 || session.analyzedCount == frameCount ? session.snapshotLocked() : nil
+            }
+            if let snapshot { persist(snapshot: snapshot) }
+            PluginLog.notice("Refined source frame \(result.index + 1)/\(frameCount) with v2 Time Awareness.")
         }
     }
 
@@ -499,8 +491,8 @@ extension CorridorKeyToolboxPlugIn {
         // progress bar in our custom UI even when Final Cut Pro itself
         // cancelled the pass via its global progress bar (in which case
         // the user never touched our Cancel button). The persisted
-        // matte cache lives in the Library blob, so this drop only
-        // affects in-memory state.
+        // frame references live in the Library, and pixels remain on disk.
+        // This releases session state and its active-pass eviction lease.
         session.lock.lock()
         session.resetLocked()
         session.lock.unlock()
@@ -542,7 +534,7 @@ extension CorridorKeyToolboxPlugIn {
 
     // MARK: - Persistence + lookup helpers
 
-    /// Writes the current in-memory cache into the published header custom
+    /// Writes the current frame-reference metadata into the published header custom
     /// parameter so Final Cut Pro's Motion Template wrapper persists it on
     /// the same channel as the inspector header.
     private func persist(snapshot: AnalysisData) {
@@ -559,8 +551,8 @@ extension CorridorKeyToolboxPlugIn {
         PluginLog.error("Persist analysis: header custom parameter write failed.")
     }
 
-    /// Loads the persisted cache for a render call. Used by `pluginState` to
-    /// surface the current frame's compressed matte into the render blob.
+    /// Loads persisted metadata so `pluginState` can attach the current frame's
+    /// local cache reference without moving complete image payloads through IPC.
     func loadAnalysisData(using retrieval: any FxParameterRetrievalAPI_v6) -> AnalysisData? {
         let headerDictionary = HeaderCustomParameterStorage.dictionaryValue(
             for: HeaderStorageKey.analysisData,

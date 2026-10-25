@@ -30,6 +30,7 @@ extension CorridorKeyToolboxPlugIn {
 
         try addHeaderParameter(create: create)
         try addSettingsGroup(create: create)
+        addVideoGroups(create: create)
         try addInteriorDetailGroup(create: create)
         try addMatteGroup(create: create)
         try addEdgeAndSpillGroup(create: create)
@@ -80,6 +81,24 @@ extension CorridorKeyToolboxPlugIn {
 
     // MARK: - Visible groups
 
+
+    /// V2 controls use one set of labels and defaults in both hosts.
+    private func addVideoGroups(create: any FxParameterCreationAPI_v5) {
+        let defaults = VideoInferenceSettings()
+        let flags = CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
+        create.startParameterSubGroup("Time Awareness", parameterID: ParameterIdentifier.timeAwarenessGroup, parameterFlags: CorridorKeyParameterFlags.default.fxFlags)
+        create.addPopupMenu(withName: VideoInferenceSettings.Labels.timeAwareness, parameterID: ParameterIdentifier.timeAwareness, defaultValue: UInt32(defaults.timeAwareness.rawValue), menuEntries: TimeAwareness.allCases.map(\.displayName), parameterFlags: flags)
+        create.addToggleButton(withName: VideoInferenceSettings.Labels.lowGPUMemory, parameterID: ParameterIdentifier.lowGPUMemory, defaultValue: defaults.lowGPUMemory, parameterFlags: flags)
+        create.endParameterSubGroup()
+        create.startParameterSubGroup("Alpha Hint", parameterID: ParameterIdentifier.alphaHintGroup, parameterFlags: CorridorKeyParameterFlags.default.fxFlags)
+        create.addToggleButton(withName: VideoInferenceSettings.Labels.useAlphaHint, parameterID: ParameterIdentifier.useAlphaHint, defaultValue: defaults.useAlphaHint, parameterFlags: flags)
+        create.addPopupMenu(withName: VideoInferenceSettings.Labels.hintFrames, parameterID: ParameterIdentifier.hintFrames, defaultValue: UInt32(defaults.hintFrames.rawValue), menuEntries: AlphaHintFrames.allCases.map(\.displayName), parameterFlags: flags)
+        create.addIntSlider(withName: VideoInferenceSettings.Labels.referenceFrame, parameterID: ParameterIdentifier.referenceFrame, defaultValue: 0, parameterMin: 0, parameterMax: Int32.max, sliderMin: 0, sliderMax: 1000, delta: 1, parameterFlags: flags)
+        create.addFloatSlider(withName: VideoInferenceSettings.Labels.alphaHintStrength, parameterID: ParameterIdentifier.alphaHintStrength, defaultValue: defaults.alphaHintStrength, parameterMin: 0, parameterMax: 1, sliderMin: 0, sliderMax: 1, delta: 0.01, parameterFlags: flags)
+        create.addFloatSlider(withName: VideoInferenceSettings.Labels.internalHintStrength, parameterID: ParameterIdentifier.internalHintStrength, defaultValue: defaults.internalHintStrength, parameterMin: 0, parameterMax: 1, sliderMin: 0, sliderMax: 1, delta: 0.01, parameterFlags: flags)
+        create.endParameterSubGroup()
+    }
+
     private func addSettingsGroup(create: any FxParameterCreationAPI_v5) throws {
         create.startParameterSubGroup(
             "Settings",
@@ -98,10 +117,14 @@ extension CorridorKeyToolboxPlugIn {
         create.addPopupMenu(
             withName: "Screen Colour",
             parameterID: ParameterIdentifier.screenColor,
-            defaultValue: UInt32(ScreenColor.green.rawValue),
+            defaultValue: UInt32(ScreenColor.automatic.rawValue),
             menuEntries: ScreenColor.allCases.map(\.displayName),
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
+        create.addColorParameter(withName: "Custom Screen Colour", parameterID: ParameterIdentifier.customScreenColor,
+            defaultRed: 0.08, defaultGreen: 0.84, defaultBlue: 0.08,
+            parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags)
+
 
         create.addPopupMenu(
             withName: "Upscale Method",
@@ -138,6 +161,10 @@ extension CorridorKeyToolboxPlugIn {
             menuEntries: HintMode.allCases.map(\.displayName),
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
+
+        create.addToggleButton(withName: VideoInferenceSettings.Labels.inputIsLinear, parameterID: ParameterIdentifier.inputIsLinear, defaultValue: VideoInferenceSettings().inputIsLinear, parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags)
+        create.addToggleButton(withName: VideoInferenceSettings.Labels.linearizeOutput, parameterID: ParameterIdentifier.linearizeOutput, defaultValue: VideoInferenceSettings().linearizeOutput, parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags)
+        create.addToggleButton(withName: VideoInferenceSettings.Labels.keepOriginalInSolidAreas, parameterID: ParameterIdentifier.keepOriginalInSolidAreas, defaultValue: VideoInferenceSettings().keepOriginalInSolidAreas, parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags)
 
         // Subject Marker: a draggable on-screen point that lets the
         // user mark the centre of the foreground subject. Provides
@@ -339,7 +366,7 @@ extension CorridorKeyToolboxPlugIn {
         create.addFloatSlider(
             withName: "Despill Strength",
             parameterID: ParameterIdentifier.despillStrength,
-            defaultValue: 0.5,
+            defaultValue: 0,
             parameterMin: 0,
             parameterMax: 5,
             sliderMin: 0,

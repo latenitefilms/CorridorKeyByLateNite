@@ -160,6 +160,18 @@ actor ProResExporter {
         options: ExportOptions,
         eventHandler: @Sendable (ExportRunnerEvent) -> Void
     ) async {
+        let cacheSessions: [AnalysisDiskCache.Session]
+        do {
+            try Task.checkCancellation()
+            cacheSessions = try project.pinAnalysisCache(frameCount: videoSource.totalFrameCount())
+        } catch is CancellationError {
+            eventHandler(.cancelled)
+            return
+        } catch {
+            eventHandler(.failed(error.localizedDescription))
+            return
+        }
+        defer { withExtendedLifetime(cacheSessions) {} }
         let info = videoSource.info
         let frameCount = videoSource.totalFrameCount()
         let renderSize = info.renderSize
@@ -190,7 +202,7 @@ actor ProResExporter {
             AVVideoCodecKey: options.codec.avFoundationCodec.rawValue,
             AVVideoWidthKey: Int(renderSize.width.rounded()),
             AVVideoHeightKey: Int(renderSize.height.rounded()),
-            AVVideoColorPropertiesKey: Self.colorProperties(for: info)
+            AVVideoColorPropertiesKey: Self.colorProperties(for: info, state: project.state)
         ]
         // HEVC needs a quality target; ProRes is fixed-rate so this
         // dictionary is left absent for those codecs.
@@ -320,9 +332,11 @@ actor ProResExporter {
     /// what keeps HDR / Rec.2020 / DCI-P3 sources looking correct
     /// downstream — silently re-tagging them BT.709 made wide-gamut
     /// clips appear desaturated when reopened in pro tools.
-    private static func colorProperties(for info: MediaSourceInfo) -> [String: Any] {
+    private static func colorProperties(for info: MediaSourceInfo, state: PluginStateData) -> [String: Any] {
         let primaries = info.colorPrimaries ?? AVVideoColorPrimaries_ITU_R_709_2
-        let transfer = info.transferFunction ?? AVVideoTransferFunction_ITU_R_709_2
+        let transfer = state.outputMode == .original
+            ? (info.transferFunction ?? AVVideoTransferFunction_ITU_R_709_2)
+            : (state.outputIsLinear ? AVVideoTransferFunction_Linear : kCVImageBufferTransferFunction_sRGB as String)
         let matrix = info.yCbCrMatrix ?? AVVideoYCbCrMatrix_ITU_R_709_2
         return [
             AVVideoColorPrimariesKey: primaries,
@@ -368,11 +382,25 @@ struct ExportProjectSnapshot: @unchecked Sendable {
         cachedMattes[index]
     }
 
+    /// Requires complete predictions before touching a keyed export destination,
+    /// then prevents quota eviction throughout the export. Diagnostic and Original
+    /// outputs do not consume predictions and can be exported without analysis.
+    func pinAnalysisCache(frameCount: Int) throws -> [AnalysisDiskCache.Session] {
+        guard state.outputMode != .original, state.outputMode != .hint else { return [] }
+        guard frameCount > 0, (0..<frameCount).allSatisfy({ cachedMattes[$0] != nil }) else {
+            throw AnalysisDiskCacheError.missingFrame
+        }
+        return try AnalysisDiskCache.shared.pinSessions(for: cachedMattes.values.compactMap(\.reference))
+    }
+
     /// Resolves identical frame parameters for movie and still-image export.
     func renderState(forFrameIndex index: Int, renderSize: CGSize) -> PluginStateData {
         var resolved = state
+        resolved.sourceFrameIndex = index
         let cached = cachedMattes[index]
-        resolved.cachedMatteBlob = cached?.blob
+        resolved.cachedMatteBlob = cached?.inlineBlob
+        resolved.cachedFrameReference = cached?.reference
+        if let next = cachedMattes[index + 1]?.reference { AnalysisDiskCache.shared.prefetch(next) }
         resolved.cachedMatteInferenceResolution = cached?.inferenceResolution ?? 0
         resolved.destinationLongEdgePixels = max(Int(renderSize.width.rounded()), Int(renderSize.height.rounded()))
         return resolved

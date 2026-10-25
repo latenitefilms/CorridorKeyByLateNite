@@ -32,7 +32,8 @@ enum StillImageSourceError: Error, LocalizedError {
 final class StillImageSource: EditorMediaSource, @unchecked Sendable {
     let info: MediaSourceInfo
     private let pixelBuffer: CVPixelBuffer
-    private static let context = CIContext(options: [.useSoftwareRenderer: false, .cacheIntermediates: false])
+    private static let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
+    private static let managedContext = CIContext(options: [.cacheIntermediates: false])
 
     /// Decodes at native resolution off the caller's actor. Sandbox access ends
     /// after the eager render, so no lazy file reads outlive the permission scope.
@@ -60,7 +61,12 @@ final class StillImageSource: EditorMediaSource, @unchecked Sendable {
             throw StillImageSourceError.cannotDecode(url)
         }
         let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.int32Value ?? 1
-        let oriented = CIImage(cgImage: decoded).oriented(forExifOrientation: orientation)
+        let profileName = decoded.colorSpace?.name as String? ?? ""
+        let preservesEncoding = profileName.contains("sRGB") || profileName.contains("P3") || profileName.contains("2020")
+        // Known working gamuts retain their stored transfer for Input is Linear.
+        // Other ICC profiles still receive Core Image's color-managed conversion.
+        let decodedImage = preservesEncoding ? CIImage(cgImage: decoded, options: [.colorSpace: NSNull()]) : CIImage(cgImage: decoded)
+        let oriented = decodedImage.oriented(forExifOrientation: orientation)
         let image = oriented.transformed(by: CGAffineTransform(
             translationX: -oriented.extent.minX, y: -oriented.extent.minY
         ))
@@ -68,8 +74,15 @@ final class StillImageSource: EditorMediaSource, @unchecked Sendable {
             width: Int(image.extent.width), height: Int(image.extent.height),
             pixelFormat: kCVPixelFormatType_64RGBAHalf
         )
-        Self.context.render(image, to: buffer, bounds: image.extent,
-                            colorSpace: CGColorSpace(name: CGColorSpace.extendedSRGB))
+        if preservesEncoding {
+            Self.context.render(image, to: buffer, bounds: image.extent, colorSpace: nil)
+        } else {
+            let outputProfile = profileName.contains("Linear") ? CGColorSpace.extendedLinearSRGB : CGColorSpace.extendedSRGB
+            Self.managedContext.render(image, to: buffer, bounds: image.extent, colorSpace: CGColorSpace(name: outputProfile))
+        }
+        let primaries = profileName.contains("P3") ? kCVImageBufferColorPrimaries_P3_D65
+            : (profileName.contains("2020") ? kCVImageBufferColorPrimaries_ITU_R_2020 : kCVImageBufferColorPrimaries_ITU_R_709_2)
+        CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, primaries, .shouldPropagate)
         try Task.checkCancellation()
         self.pixelBuffer = buffer
         self.info = MediaSourceInfo(
@@ -79,7 +92,7 @@ final class StillImageSource: EditorMediaSource, @unchecked Sendable {
             nominalFrameRate: 1, duration: CMTime(value: 1, timescale: 1),
             nativePixelFormat: kCVPixelFormatType_64RGBAHalf, timescale: 1,
             videoTrackID: kCMPersistentTrackID_Invalid, preferredTransform: .identity,
-            colorPrimaries: nil, transferFunction: nil, yCbCrMatrix: nil,
+            colorPrimaries: primaries as String, transferFunction: nil, yCbCrMatrix: nil,
             imageColorSpace: decoded.colorSpace?.model == .rgb ? decoded.colorSpace : nil
         )
     }
@@ -94,9 +107,9 @@ final class StillImageSource: EditorMediaSource, @unchecked Sendable {
         let converted = try PixelBufferTextureBridge.makeMetalCompatiblePixelBuffer(
             width: Int(info.renderSize.width), height: Int(info.renderSize.height), pixelFormat: preferredPixelFormat
         )
-        let colorSpace = CGColorSpace(name: CGColorSpace.extendedSRGB) ?? CGColorSpaceCreateDeviceRGB()
-        let image = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: colorSpace])
-        Self.context.render(image, to: converted, bounds: image.extent, colorSpace: colorSpace)
+        let image = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: NSNull()])
+        Self.context.render(image, to: converted, bounds: image.extent, colorSpace: nil)
+        CVBufferPropagateAttachments(pixelBuffer, converted)
         return converted
     }
 

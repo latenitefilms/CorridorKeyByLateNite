@@ -44,7 +44,10 @@ extension CorridorKeyToolboxPlugIn {
             let bridge = CorridorKeyInspectorBridge(apiManager: apiManagerRef, plugin: pluginRef)
             let view = CorridorKeyHostingView(rootView: CorridorKeyHeaderView(bridge: bridge))
             view.retainedBridge = bridge
-            view.frame = NSRect(x: 0, y: 0, width: 320, height: 176)
+            view.sizingOptions = [.intrinsicContentSize]
+            view.frame = NSRect(x: 0, y: 0, width: 320, height: 360)
+            view.layoutSubtreeIfNeeded()
+            view.setFrameSize(NSSize(width: 320, height: view.fittingSize.height))
             view.autoresizingMask = [.width]
             return view
         }

@@ -83,13 +83,14 @@ extension CorridorKeyToolboxPlugIn {
     ) {
         // Use the immutable parameters supplied for this render. A fallback
         // snapshot must match them before it can supply a cached matte.
-        let hints = AnalysisHintConfiguration(mode: state.hintMode, points: state.hintPointSet)
+        let hints = state.analysisHintConfiguration
         if let cachedMatte = analysisSnapshotStore.cachedMatte(
             at: renderTime,
             screenColorRaw: state.screenColor.rawValue,
             hintConfiguration: hints
         ) {
             state.cachedMatteBlob = cachedMatte.blob
+            state.cachedFrameReference = cachedMatte.reference
             state.cachedMatteInferenceResolution = cachedMatte.inferenceResolution
             return
         }
@@ -103,6 +104,7 @@ extension CorridorKeyToolboxPlugIn {
                   hintConfiguration: hints
               ) else { return }
         state.cachedMatteBlob = cachedMatte.blob
+        state.cachedFrameReference = cachedMatte.reference
         state.cachedMatteInferenceResolution = cachedMatte.inferenceResolution
     }
 }

@@ -77,11 +77,14 @@ let package = Package(
                 "Inference/InferenceCoordinator.swift",
                 "Inference/KeyingInferenceEngine.swift",
                 "Inference/MLXKeyingEngine.swift",
+                "Inference/VideoInferenceSession.swift",
+                "Inference/AlphaHintReader.swift",
                 "Inference/SharedMLXBridgeRegistry.swift",
                 "Inference/VisionHintEngine.swift",
                 "Inspector/CorridorKeyByLateNitePlugIn+CustomViews.swift",
                 "Inspector/CorridorKeyInspectorBridge.swift",
                 "Inspector/CorridorKeyHeaderView.swift",
+                "Inspector/AlphaHintPicker.swift",
                 "Inspector/CorridorKeyHintOSC.swift",
                 "Render",
                 "Metal",
@@ -98,6 +101,8 @@ let package = Package(
                 "Inference/DeviceCapabilityCache.swift",
                 "Inference/MatteCodec.swift",
                 "Inference/AnalysisFrameCodec.swift",
+                "Inference/AnalysisDiskCache.swift",
+                "Inference/VideoInferenceSettings.swift",
                 "Inspector/CorridorKeyAnalysisSnapshot.swift",
                 "Inspector/HintPointSet.swift",
                 "Inspector/WarmupStatus.swift"
@@ -141,7 +146,9 @@ let package = Package(
                 "Inference/AnalysisData.swift",
                 "Inference/DeviceCapabilityCache.swift",
                 "Inference/MatteCodec.swift",
-                "Inference/AnalysisFrameCodec.swift"
+                "Inference/AnalysisFrameCodec.swift",
+                "Inference/AnalysisDiskCache.swift",
+                "Inference/VideoInferenceSettings.swift"
             ],
             sources: [
                 "PluginLog.swift",
@@ -153,6 +160,8 @@ let package = Package(
                 "Render/RenderStages.swift",
                 "Inference/KeyingInferenceEngine.swift",
                 "Inference/MLXKeyingEngine.swift",
+                "Inference/VideoInferenceSession.swift",
+                "Inference/AlphaHintReader.swift",
                 "Inference/InferenceCoordinator.swift",
                 "Inference/SharedMLXBridgeRegistry.swift",
                 "Inference/VisionHintEngine.swift"

@@ -674,7 +674,7 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
     /// region" tile in identical green / blue.
     private static func linearScreenColour(for screenColor: ScreenColor) -> SIMD3<Float> {
         switch screenColor {
-        case .green:
+        case .green, .automatic, .custom:
             return SIMD3<Float>(0.20, 0.78, 0.30)
         case .blue:
             return SIMD3<Float>(0.20, 0.42, 0.95)

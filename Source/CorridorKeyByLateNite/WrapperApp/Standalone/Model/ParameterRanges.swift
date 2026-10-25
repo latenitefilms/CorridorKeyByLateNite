@@ -104,7 +104,7 @@ enum ParameterRanges {
     // the slider up themselves.
     static let despillStrength = FloatParameterRange(
         name: "Despill Strength",
-        defaultValue: 0.5, parameterMin: 0, parameterMax: 5,
+        defaultValue: 0, parameterMin: 0, parameterMax: 5,
         sliderMin: 0, sliderMax: 5, step: 0.01
     )
     static let spillMethodName = "Spill Method"
@@ -144,7 +144,7 @@ enum ParameterRanges {
     enum Defaults {
         static let qualityMode: QualityMode = .automatic
         static let hintMode: HintMode = .appleVision
-        static let screenColor: ScreenColor = .green
+        static let screenColor: ScreenColor = .automatic
         static let upscaleMethod: UpscaleMethod = .lanczos
         static let outputMode: OutputMode = .processed
         static let spillMethod: SpillMethod = .ultra

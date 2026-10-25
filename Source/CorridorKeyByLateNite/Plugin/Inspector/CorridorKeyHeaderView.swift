@@ -57,6 +57,14 @@ struct CorridorKeyHeaderView: View {
 
                 analyseControls
 
+                AlphaHintPicker(asset: $bridge.alphaHintAsset,
+                                onChange: bridge.saveAlphaHintAsset,
+                                setCurrentReference: bridge.setCurrentFrameAsHintReference)
+                    .disabled(isAnalysisInFlight)
+                if let message = bridge.hintSelectionError {
+                    Text(message).font(.caption).foregroundStyle(.red)
+                }
+
                 analysisProgressLine
 
                 neuralModelStatusRow
@@ -64,6 +72,11 @@ struct CorridorKeyHeaderView: View {
                 backendStatusRow
 
                 cachedMattesStatusRow
+                Text(bridge.videoMemoryDescription).font(.caption).foregroundStyle(.secondary)
+                Text(AnalysisDiskCache.storageExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(.horizontal, 10)

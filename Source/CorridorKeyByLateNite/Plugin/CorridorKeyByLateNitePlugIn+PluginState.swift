@@ -63,6 +63,33 @@ enum HeaderCustomParameterStorage {
 
 extension CorridorKeyToolboxPlugIn {
 
+
+    /// Captures native v2 parameters and the sandboxed hint asset for either analysis or rendering.
+    func videoSettings(using retrieval: any FxParameterRetrievalAPI_v6, at time: CMTime) -> VideoInferenceSettings {
+        var value = VideoInferenceSettings()
+        value.inputIsLinear = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.inputIsLinear, time: time, default: value.inputIsLinear)
+        value.linearizeOutput = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.linearizeOutput, time: time, default: value.linearizeOutput)
+        value.keepOriginalInSolidAreas = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.keepOriginalInSolidAreas, time: time, default: value.keepOriginalInSolidAreas)
+        value.timeAwareness = popupValue(retrieval: retrieval, parameterID: ParameterIdentifier.timeAwareness, time: time, default: value.timeAwareness)
+        value.lowGPUMemory = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.lowGPUMemory, time: time, default: value.lowGPUMemory)
+        value.useAlphaHint = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.useAlphaHint, time: time, default: value.useAlphaHint)
+        value.hintFrames = popupValue(retrieval: retrieval, parameterID: ParameterIdentifier.hintFrames, time: time, default: value.hintFrames)
+        value.referenceFrame = intValue(retrieval: retrieval, parameterID: ParameterIdentifier.referenceFrame, time: time, default: value.referenceFrame)
+        value.alphaHintStrength = floatValue(retrieval: retrieval, parameterID: ParameterIdentifier.alphaHintStrength, time: time, default: value.alphaHintStrength)
+        value.internalHintStrength = floatValue(retrieval: retrieval, parameterID: ParameterIdentifier.internalHintStrength, time: time, default: value.internalHintStrength)
+        if let dictionary = HeaderCustomParameterStorage.dictionaryValue(for: HeaderStorageKey.alphaHintAsset, using: retrieval),
+           let data = dictionary["asset"] as? Data {
+            value.alphaHintAsset = try? PropertyListDecoder().decode(AlphaHintAsset.self, from: data)
+        }
+        var red = value.customScreenColor.x
+        var green = value.customScreenColor.y
+        var blue = value.customScreenColor.z
+        retrieval.getRedValue(&red, greenValue: &green, blueValue: &blue,
+                              fromParameter: ParameterIdentifier.customScreenColor, at: time)
+        value.customScreenColor = SIMD3(red, green, blue)
+        return value
+    }
+
     @objc(pluginState:atTime:quality:error:)
     func pluginState(
         _ pluginState: AutoreleasingUnsafeMutablePointer<NSData>?,
@@ -79,6 +106,15 @@ extension CorridorKeyToolboxPlugIn {
 
         var state = PluginStateData()
         state.renderQualityLevel = Int(qualityLevel)
+        state.video = videoSettings(using: retrieval, at: renderTime)
+        if let timing = apiManager.api(for: (any FxTimingAPI_v4).self) as? any FxTimingAPI_v4 {
+            var duration = CMTime.invalid
+            var start = CMTime.invalid
+            timing.frameDuration(&duration)
+            timing.startTimeOfInput(toFilter: &start)
+            let position = CMTimeSubtract(renderTime, start).seconds / duration.seconds
+            if position.isFinite, position >= 0, position <= Double(Int32.max) { state.sourceFrameIndex = Int(position.rounded()) }
+        }
 
         // Key setup
         state.screenColor = popupValue(
@@ -243,7 +279,7 @@ extension CorridorKeyToolboxPlugIn {
             retrieval: retrieval,
             parameterID: ParameterIdentifier.despillStrength,
             time: renderTime,
-            default: 0.5
+            default: 0
         )
         state.spillMethod = popupValue(
             retrieval: retrieval,
@@ -278,9 +314,10 @@ extension CorridorKeyToolboxPlugIn {
            let cachedMatte = analysis.cachedMatte(
                 at: renderTime,
                 screenColorRaw: state.screenColor.rawValue,
-                hintConfiguration: AnalysisHintConfiguration(mode: state.hintMode, points: state.hintPointSet)
+                hintConfiguration: state.analysisHintConfiguration
            ) {
             state.cachedMatteBlob = cachedMatte.blob
+            state.cachedFrameReference = cachedMatte.reference
             state.cachedMatteInferenceResolution = cachedMatte.inferenceResolution
         }
 

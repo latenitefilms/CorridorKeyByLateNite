@@ -1,0 +1,68 @@
+{
+  "date": "2026-10-25",
+  "model_contract": "corridorkey-v2-video-1",
+  "artifact_sha256": "ea19b82bd259ac91a751c2976368c0931cfa1f7b853d4ee5e17a437ae0872574",
+  "hardware": "Apple M1 Max, 64 GB unified memory",
+  "headless_regression": {
+    "configuration": "Debug",
+    "reported_tests": 187,
+    "suites": 32,
+    "seconds": 313.546,
+    "result": "passed",
+    "release_only_checks_skipped": ["compiledGraphParity", "compiledTemporalProfiles"],
+    "separately_passed_sweep": "All five model qualities and all four screen selections"
+  },
+  "optimized_validation": {
+    "reference_compilation_and_image_tests": 12,
+    "reference_compilation_and_image_seconds": 304.714,
+    "long_profile_tests": 1,
+    "long_profile_seconds": 30.360,
+    "long_profile_resolution": 512,
+    "long_profile_windows": [8, 24, 48, 80],
+    "result": "passed",
+    "limitation": "Long profiles check dispatch, finite outputs and graph ownership; they are not numerical reference comparisons."
+  },
+  "host_validation": {
+    "video_source_tests": 7,
+    "four_frame_user_flow_tests": 9,
+    "analysis_export_and_hint_movie_tests": 4,
+    "result": "passed across the integration run and the corrected four-test analysis/export rerun",
+    "coverage": "Signed sandboxed app tests; not a live Final Cut Pro session"
+  },
+  "python_lowering_tests": {"tests": 12, "result": "passed"},
+  "builds": {
+    "debug_app_renderer_and_test_bundle": "passed",
+    "release_app_and_renderer": "passed",
+    "release_deep_strict_signature_verification": "passed with development signing",
+    "motion_xml_and_entitlements": "valid"
+  },
+  "headless_application_line_coverage": {
+    "covered": 6673,
+    "count": 8594,
+    "percent": 77.64719571794275,
+    "requested_target_met": false,
+    "scope": "Application sources compiled into SwiftPM; excludes Xcode-only UI and FxPlug sources"
+  },
+  "memory_regression": {
+    "calls": 30,
+    "active_min_mib": 4642,
+    "active_max_mib": 4642,
+    "cached_before_clear_mib": 1024,
+    "cached_after_clear_mib": 0,
+    "note": "The test process retains two loaded model engines; MLX allocation statistics exclude other process memory."
+  },
+  "leaks_capture": {
+    "duration_seconds": 30,
+    "unattributed_findings": [{"type": "NSArray", "bytes": 16, "count": 1}],
+    "complete_application_leak_free": false
+  },
+  "remaining_release_checks": [
+    "Live Final Cut Pro interaction and cancellation",
+    "Full application coverage and the 80 percent target",
+    "Attribution of the bounded capture's 16-byte leak finding",
+    "SwiftLint strict mode (not installed)",
+    "Accessibility and sustained profiling",
+    "Smaller-memory Apple Silicon hardware",
+    "TestFlight and Mac App Store distribution"
+  ]
+}

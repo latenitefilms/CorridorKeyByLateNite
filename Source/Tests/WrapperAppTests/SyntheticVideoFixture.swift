@@ -29,7 +29,8 @@ enum SyntheticVideoFixture {
         width: Int = 320,
         height: Int = 180,
         frameCount: Int = 12,
-        fps: Int = 24
+        fps: Int = 24,
+        transform: CGAffineTransform = .identity
     ) async throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "CorridorKeyTests", directoryHint: .isDirectory)
@@ -45,6 +46,7 @@ enum SyntheticVideoFixture {
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         input.expectsMediaDataInRealTime = false
+        input.transform = transform
         let pixelBufferAttrs: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferWidthKey as String: width,
