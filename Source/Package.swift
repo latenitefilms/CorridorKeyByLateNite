@@ -256,6 +256,7 @@ let package = Package(
                 "CorridorKeyByLateNite/WrapperApp/WrapperApp.entitlements", "CorridorKeyByLateNite/WrapperApp/WrapperApp-Bridging-Header.h",
                 "CorridorKeyByLateNite/WrapperApp/WelcomeView.swift", "CorridorKeyByLateNite/WrapperApp/Credits.rtf",
                 "CorridorKeyByLateNite/WrapperApp/CorridorKeyByLateNiteApp.swift", "CorridorKeyByLateNite/WrapperApp/MotionTemplateInstaller.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/BatchExportRunner.swift",
                 "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/ScreenColorAutoDetector.swift",
                 "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/BackdropImageLoader.swift"
             ],

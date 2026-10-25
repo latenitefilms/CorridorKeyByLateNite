@@ -44,7 +44,7 @@ public struct HintFrame: Hashable, Sendable, Codable {
 /// Identical guidance in the standalone and Final Cut Pro inspectors.
 public enum ManualHintGuidance {
     /// Describes the local influence and analysis workflow without promising tracking.
-    public static let explanation = "Hints guide small areas on the frame where you place them; they do not outline or track a subject. In Manual Hint, unmarked frames use the automatic chroma hint. Choose Analyse Clip after editing hints."
+    public static let explanation = "Choose Foreground to keep a small area, or Background to remove it, then click the image. Erase removes a point. Points belong to the displayed frame and do not outline or track a subject; unmarked frames in Manual Points use Chroma. Choose Alpha Hint (Diagnostic) to inspect the guide, then Analyse Clip to update the result."
     /// Explains how to migrate annotations whose original frame was never recorded.
     public static let legacyExplanation = "Hints saved in earlier versions apply to every frame. Clear them and add new hints to make them frame-specific."
 }

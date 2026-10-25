@@ -44,6 +44,10 @@ public enum ScreenColor: Int, Sendable, CaseIterable, Codable {
 /// V2 receives these as automated hints with quality 0.75; none changes the
 /// model weights. User points augment the selected prior in every mode.
 public enum HintMode: Int, Sendable, CaseIterable, Codable {
+    /// Shared label distinguishes an optional generated mask from an imported alpha hint.
+    public static let controlName = "Generated Hint"
+    /// Shared help for both hosts; imported masks take precedence over local guidance.
+    public static let explanation = "None lets CorridorKey find the subject itself. Chroma uses the screen colour; Apple Vision adds subject detection. Manual Points starts with Chroma and adds the foreground and background points you place. An enabled Alpha Hint file replaces generated hints and points."
     /// Green/blue chroma prior computed by Metal, without a Vision request.
     case automatic = 0
     /// Unions Vision's foreground-instance mask with the chroma prior.
@@ -58,9 +62,9 @@ public enum HintMode: Int, Sendable, CaseIterable, Codable {
 
     public var displayName: String {
         switch self {
-        case .automatic: return "Automatic"
-        case .appleVision: return "Apple Vision Framework"
-        case .manual: return "Manual Hint"
+        case .automatic: return "Chroma"
+        case .appleVision: return "Apple Vision"
+        case .manual: return "Manual Points"
         case .none: return "None"
         }
     }
@@ -255,7 +259,7 @@ public enum OutputMode: Int, Sendable, CaseIterable, Codable {
         case .foregroundOnly: return "Foreground Only"
         case .sourcePlusMatte: return "Source + Matte"
         case .foregroundPlusMatte: return "Foreground + Matte"
-        case .hint: return "Hint (Diagnostic)"
+        case .hint: return "Alpha Hint (Diagnostic)"
         case .original: return "Original"
         }
     }

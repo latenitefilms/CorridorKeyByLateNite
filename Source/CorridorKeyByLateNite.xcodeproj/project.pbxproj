@@ -146,6 +146,10 @@
 		SI0100000000000000000002 /* StillImageSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000002 /* StillImageSource.swift */; };
 		SI0100000000000000000003 /* StillImageExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000003 /* StillImageExporter.swift */; };
 		SI0100000000000000000004 /* StillImageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000004 /* StillImageTests.swift */; };
+		BE0100000000000000000001 /* BatchExportRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000001 /* BatchExportRunner.swift */; };
+		BE0100000000000000000002 /* BatchExportModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000002 /* BatchExportModel.swift */; };
+		BE0100000000000000000003 /* BatchExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000003 /* BatchExportSheet.swift */; };
+		BE0100000000000000000004 /* EditorWorkflowRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000004 /* EditorWorkflowRegressionTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -300,6 +304,10 @@
 		SI0300000000000000000002 /* StillImageSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageSource.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageSource.swift; sourceTree = "<group>"; };
 		SI0300000000000000000003 /* StillImageExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageExporter.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageExporter.swift; sourceTree = "<group>"; };
 		SI0300000000000000000004 /* StillImageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageTests.swift; path = Tests/CorridorKeyByLateNiteInferenceTests/StillImageTests.swift; sourceTree = "<group>"; };
+		BE0200000000000000000001 /* BatchExportRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BatchExportRunner.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/BatchExportRunner.swift; sourceTree = "<group>"; };
+		BE0200000000000000000002 /* BatchExportModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BatchExportModel.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Model/BatchExportModel.swift; sourceTree = "<group>"; };
+		BE0200000000000000000003 /* BatchExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BatchExportSheet.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Views/BatchExportSheet.swift; sourceTree = "<group>"; };
+		BE0200000000000000000004 /* EditorWorkflowRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/WrapperAppTests/EditorWorkflowRegressionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -550,6 +558,7 @@
 			isa = PBXGroup;
 			children = (
 				SR0000000000000000000004 /* AnalysisRunner.swift */,
+				BE0200000000000000000001 /* BatchExportRunner.swift */,
 				SR000000000000000000000D /* BackdropImageLoader.swift */,
 				SR0000000000000000000001 /* PixelBufferTextureBridge.swift */,
 				SR0000000000000000000005 /* ProResExporter.swift */,
@@ -568,6 +577,7 @@
 			children = (
 				SR000000000000000000000F /* EditorPreferences.swift */,
 				SR0000000000000000000007 /* EditorViewModel.swift */,
+				BE0200000000000000000002 /* BatchExportModel.swift */,
 				SR0000000000000000000006 /* ParameterRanges.swift */,
 			);
 			name = Model;
@@ -578,6 +588,7 @@
 			children = (
 				SR000000000000000000000C /* EditorView.swift */,
 				SR000000000000000000000B /* ExportSheet.swift */,
+				BE0200000000000000000003 /* BatchExportSheet.swift */,
 				SR0000000000000000000009 /* InspectorView.swift */,
 				SR0000000000000000000008 /* MetalPreviewView.swift */,
 				OS0300000000000000000001 /* OnScreenControlOverlay.swift */,
@@ -612,6 +623,7 @@
 				WR0000000000000000000005 /* StandaloneRenderEngineTests.swift */,
 				WR0000000000000000000006 /* AnalysisAndExportTests.swift */,
 				WR0000000000000000000007 /* EditorViewModelTests.swift */,
+				BE0200000000000000000004 /* EditorWorkflowRegressionTests.swift */,
 			);
 			name = WrapperAppTests;
 			sourceTree = "<group>";
@@ -785,16 +797,19 @@
 				SB0000000000000000000002 /* VideoSource.swift in Sources */,
 				SB0000000000000000000003 /* StandaloneRenderEngine.swift in Sources */,
 				SB0000000000000000000004 /* AnalysisRunner.swift in Sources */,
+				BE0100000000000000000001 /* BatchExportRunner.swift in Sources */,
 				SB0000000000000000000030 /* BackdropImageLoader.swift in Sources */,
 				SB0000000000000000000031 /* ScreenColorAutoDetector.swift in Sources */,
 				SB0000000000000000000005 /* ProResExporter.swift in Sources */,
 				SB0000000000000000000006 /* ParameterRanges.swift in Sources */,
 				SB0000000000000000000032 /* EditorPreferences.swift in Sources */,
 				SB0000000000000000000007 /* EditorViewModel.swift in Sources */,
+				BE0100000000000000000002 /* BatchExportModel.swift in Sources */,
 				SB0000000000000000000008 /* MetalPreviewView.swift in Sources */,
 				SB0000000000000000000009 /* InspectorView.swift in Sources */,
 				SB000000000000000000000A /* TransportBar.swift in Sources */,
 				SB000000000000000000000B /* ExportSheet.swift in Sources */,
+				BE0100000000000000000003 /* BatchExportSheet.swift in Sources */,
 				SB000000000000000000000C /* EditorView.swift in Sources */,
 				SB000000000000000000000D /* RenderPipeline.swift in Sources */,
 				SB000000000000000000000E /* RenderStages.swift in Sources */,
@@ -898,6 +913,7 @@
 				WB0000000000000000000005 /* StandaloneRenderEngineTests.swift in Sources */,
 				WB0000000000000000000006 /* AnalysisAndExportTests.swift in Sources */,
 				WB0000000000000000000007 /* EditorViewModelTests.swift in Sources */,
+				BE0100000000000000000004 /* EditorWorkflowRegressionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

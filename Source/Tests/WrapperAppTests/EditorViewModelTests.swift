@@ -196,6 +196,7 @@ struct EditorViewModelTests {
         viewModel.matteCache[0] = MatteCacheEntry(blob: Data([1]), width: 1, height: 1, inferenceResolution: 512)
         viewModel.analysisStatus = .completed(elapsedSeconds: 1, totalFrames: 1)
         viewModel.oscTool = .foregroundHint
+        viewModel.phase = .ready
         undo.beginUndoGrouping()
         viewModel.handleOSCClick(atNormalizedPoint: CGPoint(x: 0.5, y: 0.5))
         undo.endUndoGrouping()

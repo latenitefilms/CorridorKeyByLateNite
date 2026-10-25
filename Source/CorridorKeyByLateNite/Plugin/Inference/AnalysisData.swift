@@ -242,4 +242,13 @@ struct AnalysisHintConfiguration: Equatable, Sendable, Codable {
     var video: VideoInferenceSettings = VideoInferenceSettings()
     var temporalStabilityEnabled = false
     var temporalStabilityStrength: Double = 0
+
+    /// Compare prediction inputs, including caches written before defaults changed.
+    /// Resource strategy and disabled controls do not change the cached pixels.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.mode == rhs.mode && lhs.points == rhs.points
+            && lhs.video.analysisIdentity == rhs.video.analysisIdentity
+            && lhs.temporalStabilityEnabled == rhs.temporalStabilityEnabled
+            && (!lhs.temporalStabilityEnabled || lhs.temporalStabilityStrength == rhs.temporalStabilityStrength)
+    }
 }

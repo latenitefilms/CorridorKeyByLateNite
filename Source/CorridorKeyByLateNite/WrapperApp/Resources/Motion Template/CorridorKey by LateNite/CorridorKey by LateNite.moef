@@ -282,7 +282,7 @@
 					</parameter>
 					<parameter name="Upscale Method" id="6002" flags="12901679120" default="1" value="1"/>
 					<parameter name="Output" id="5001" flags="12901679120" default="0" value="0"/>
-					<parameter name="Hint" id="1007" flags="12901679120" default="1" value="1"/>
+					<parameter name="Generated Hint" id="1007" flags="12901679120" default="3" value="3"/>
 					<parameter name="Input is Linear" id="9001" flags="12901679120" default="0" value="0"/>
 					<parameter name="Linearize Output" id="9002" flags="12901679120" default="0" value="0"/>
 					<parameter name="Keep Original in Solid Areas" id="9003" flags="12901679120" default="0" value="0"/>
@@ -290,7 +290,7 @@
 				</parameter>
 				<parameter name="Time Awareness" id="160" flags="8589938704">
 					<parameter name="Time Awareness" id="9004" flags="12901679120" default="0" value="0"/>
-					<parameter name="Low GPU Memory" id="9005" flags="12901679120" default="1" value="1"/>
+					<parameter name="Low GPU Memory" id="9005" flags="12901679120" default="0" value="0"/>
 				</parameter>
 				<parameter name="Alpha Hint" id="170" flags="8589938704">
 					<parameter name="Use Alpha Hint" id="9006" flags="12901679120" default="0" value="0"/>
@@ -310,7 +310,7 @@
 					<parameter name="Matte Erode" id="3003" flags="12901679120" default="0" value="0"/>
 					<parameter name="Softness" id="3004" flags="12901679120" default="0" value="0"/>
 					<parameter name="Gamma" id="3005" flags="12901679120" default="1" value="1"/>
-					<parameter name="Auto Despeckle" id="3006" flags="12901679120" default="1" value="1"/>
+					<parameter name="Auto Despeckle" id="3006" flags="12901679120" default="0" value="0"/>
 					<parameter name="Despeckle Size" id="3007" flags="12901679120" default="100" value="100"/>
 					<parameter name="Refiner Strength" id="3008" flags="12901679120" default="1" value="1"/>
 				</parameter>
@@ -319,14 +319,14 @@
 					<parameter name="Spill Method" id="4002" flags="12901679120" default="4" value="4"/>
 				</parameter>
 				<parameter name="Edge Refinement" id="140" flags="8589938704">
-					<parameter name="Light Wrap" id="8001" flags="12901679120" default="1" value="1"/>
+					<parameter name="Light Wrap" id="8001" flags="12901679120" default="0" value="0"/>
 					<parameter name="Wrap Strength" id="8002" flags="12901679120" default="0.25" value="0.25"/>
 					<parameter name="Wrap Radius" id="8003" flags="12901679120" default="10" value="10"/>
 					<parameter name="Edge Decontaminate" id="8004" flags="12901679120" default="0" value="0"/>
 					<parameter name="Decontam. Strength" id="8005" flags="12901679120" default="0.5" value="0.5"/>
 				</parameter>
 				<parameter name="Temporal Stability" id="150" flags="8589938704">
-					<parameter name="Reduce Edge Flicker" id="8006" flags="12901679120" default="1" value="1"/>
+					<parameter name="Reduce Edge Flicker" id="8006" flags="12901679120" default="0" value="0"/>
 					<parameter name="Stability Strength" id="8007" flags="12901679120" default="0.5" value="0.5"/>
 				</parameter>
 				<parameter name="Mix" id="10001" flags="12901679104" default="1" value="1"/>

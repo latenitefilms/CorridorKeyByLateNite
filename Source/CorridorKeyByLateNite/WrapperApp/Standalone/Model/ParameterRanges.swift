@@ -39,7 +39,7 @@ enum ParameterRanges {
 
     // Settings
     static let qualityModeName = "Quality"
-    static let hintModeName = "Hint"
+    static let hintModeName = HintMode.controlName
     static let screenColorName = "Screen Colour"
     static let upscaleMethodName = "Upscale Method"
     static let outputModeName = "Output"
@@ -142,16 +142,16 @@ enum ParameterRanges {
     /// state; the `PluginStateData` initialiser uses the same values
     /// so loading a fresh project lands on identical defaults.
     enum Defaults {
-        static let qualityMode: QualityMode = .automatic
-        static let hintMode: HintMode = .appleVision
-        static let screenColor: ScreenColor = .automatic
-        static let upscaleMethod: UpscaleMethod = .lanczos
-        static let outputMode: OutputMode = .processed
-        static let spillMethod: SpillMethod = .ultra
-        static let sourcePassthroughEnabled: Bool = false
-        static let autoDespeckleEnabled: Bool = true
-        static let lightWrapEnabled: Bool = true
-        static let edgeDecontaminateEnabled: Bool = false
-        static let temporalStabilityEnabled: Bool = true
+        static let qualityMode: QualityMode = PluginStateData().qualityMode
+        static let hintMode: HintMode = PluginStateData().hintMode
+        static let screenColor: ScreenColor = PluginStateData().screenColor
+        static let upscaleMethod: UpscaleMethod = PluginStateData().upscaleMethod
+        static let outputMode: OutputMode = PluginStateData().outputMode
+        static let spillMethod: SpillMethod = PluginStateData().spillMethod
+        static let sourcePassthroughEnabled: Bool = PluginStateData().sourcePassthroughEnabled
+        static let autoDespeckleEnabled: Bool = PluginStateData().autoDespeckleEnabled
+        static let lightWrapEnabled: Bool = PluginStateData().lightWrapEnabled
+        static let edgeDecontaminateEnabled: Bool = PluginStateData().edgeDecontaminateEnabled
+        static let temporalStabilityEnabled: Bool = PluginStateData().temporalStabilityEnabled
     }
 }

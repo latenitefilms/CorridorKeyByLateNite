@@ -54,6 +54,8 @@ struct ExportOptions: Sendable, Equatable {
     /// alpha (ProRes 4444 or HEVC with Alpha); silently ignored
     /// otherwise.
     let preserveAlpha: Bool
+    /// Single-file save panels authorize replacement; batch jobs never do.
+    var overwriteExisting: Bool = true
 
     enum ExportCodec: String, Sendable, CaseIterable, Identifiable {
         case proRes4444
@@ -182,6 +184,10 @@ actor ProResExporter {
         // refuses to overwrite, and the user already confirmed via the
         // save sheet that this URL is OK to replace.
         if FileManager.default.fileExists(atPath: options.destination.path) {
+            guard options.overwriteExisting else {
+                eventHandler(.failed("An output named \(options.destination.lastPathComponent) already exists. Start the batch again to choose a new name."))
+                return
+            }
             do {
                 try FileManager.default.removeItem(at: options.destination)
             } catch {
@@ -236,6 +242,12 @@ actor ProResExporter {
             eventHandler(.failed(writer.error?.localizedDescription ?? "Writer failed to start."))
             return
         }
+        defer {
+            if writer.status != .completed {
+                if writer.status == .writing { writer.cancelWriting() }
+                try? FileManager.default.removeItem(at: options.destination)
+            }
+        }
         writer.startSession(atSourceTime: .zero)
         eventHandler(.started(totalFrames: frameCount))
 
@@ -266,6 +278,10 @@ actor ProResExporter {
             // push too quickly it stalls instead of dropping.
             while !videoInput.isReadyForMoreMediaData {
                 if Task.isCancelled { break }
+                guard writer.status == .writing else {
+                    eventHandler(.failed(writer.error?.localizedDescription ?? "The encoder stopped accepting frames."))
+                    return
+                }
                 try? await Task.sleep(for: .milliseconds(2))
             }
             if Task.isCancelled { break }

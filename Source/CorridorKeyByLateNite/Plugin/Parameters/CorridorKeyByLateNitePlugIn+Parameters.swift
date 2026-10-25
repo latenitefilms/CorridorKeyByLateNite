@@ -142,22 +142,11 @@ extension CorridorKeyToolboxPlugIn {
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 
-        // Hint mode defaults to Apple Vision in v1.0 — empirically it
-        // beats the green-bias chroma prior on most footage because
-        // it segments by subject saliency rather than green-channel
-        // dominance. Users with edge-case footage (heavy motion blur,
-        // partial occlusion, tricky transparency) can fall back to
-        // Automatic or pick Manual to feed only their hint dots.
-        //
-        // Hint Mode popup replaces the earlier "Auto Subject Hint"
-        // toggle with an explicit three-way choice. Sits second in
-        // the Settings group (right under Quality) because hint
-        // generation is the second-biggest decision driver for the
-        // resulting matte.
+        // Generated guidance is optional; the v2 model can key without it.
         create.addPopupMenu(
-            withName: "Hint",
+            withName: HintMode.controlName,
             parameterID: ParameterIdentifier.hintMode,
-            defaultValue: UInt32(HintMode.appleVision.rawValue),
+            defaultValue: UInt32(PluginStateData().hintMode.rawValue),
             menuEntries: HintMode.allCases.map(\.displayName),
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
@@ -299,16 +288,12 @@ extension CorridorKeyToolboxPlugIn {
             parameterFlags: CorridorKeyParameterFlags.default.fxFlags
         )
 
-        // Auto Despeckle defaults ON in v1.0 — the connected-components
-        // filter sweeps tracking dots, birds, and lens-flare specks
-        // out of the background without manual roto. The default
-        // 100-pixel size threshold is small enough to leave hair, fur,
-        // and feathered edges intact; users who hit edge cases (very
-        // wispy hair on noisy plates) can flip it off per clip.
+        // Connected-component cleanup is opt-in; small foreground details
+        // can otherwise be mistaken for isolated background specks.
         create.addToggleButton(
             withName: "Auto Despeckle",
             parameterID: ParameterIdentifier.autoDespeckle,
-            defaultValue: true,
+            defaultValue: PluginStateData().autoDespeckleEnabled,
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 
@@ -346,7 +331,7 @@ extension CorridorKeyToolboxPlugIn {
             parameterFlags: CorridorKeyParameterFlags.default.fxFlags
         )
 
-        // Strength stays at 0.5 (the Build 2 default). The method
+        // Strength starts at zero, matching the v2 manual. The method
         // defaults to Ultra (Chroma Project) — its YCbCr-projection
         // path removes the soft chroma fringe the older Average /
         // Double Limit kernels leave on hair and feathered edges,
@@ -404,7 +389,7 @@ extension CorridorKeyToolboxPlugIn {
         create.addToggleButton(
             withName: "Light Wrap",
             parameterID: ParameterIdentifier.lightWrapEnabled,
-            defaultValue: true,
+            defaultValue: PluginStateData().lightWrapEnabled,
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 
@@ -454,14 +439,8 @@ extension CorridorKeyToolboxPlugIn {
         create.endParameterSubGroup()
     }
 
-    /// Phase 1 addition: temporal stability. Applied during the Analyse
-    /// Clip pass so the cached matte already reflects the blend — zero
-    /// hot-path cost at playback. Defaults to enabled so new projects
-    /// benefit immediately; saved projects from before this build fall
-    /// back to enabled via `PluginStateData.temporalStabilityEnabled`'s
-    /// `decodeIfPresent` default, preserving previous output on first
-    /// open (there is no cached matte yet, so the first analyse pass
-    /// writes a stabilised one).
+    /// Optional motion-gated blend, baked into analysis. Off by default to
+    /// preserve v2 detail and avoid trails where the motion gate misses an edge.
     private func addTemporalStabilityGroup(create: any FxParameterCreationAPI_v5) throws {
         create.startParameterSubGroup(
             "Temporal Stability",
@@ -469,16 +448,10 @@ extension CorridorKeyToolboxPlugIn {
             parameterFlags: CorridorKeyParameterFlags.default.fxFlags
         )
 
-        // Temporal Stability defaults ON in v1.0 — the motion-gated
-        // EMA blend damps the edge-band flicker the model leaves on
-        // hair / feather edges. The motion gate keeps fast-moving
-        // subjects sharp by skipping the blend wherever source RGB
-        // changed more than the gate threshold; users who still see
-        // softening can flip it off or pull the strength slider down.
         create.addToggleButton(
             withName: "Reduce Edge Flicker",
             parameterID: ParameterIdentifier.temporalStabilityEnabled,
-            defaultValue: true,
+            defaultValue: PluginStateData().temporalStabilityEnabled,
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 
@@ -517,14 +490,10 @@ extension CorridorKeyToolboxPlugIn {
             let setter = apiManager.api(for: (any FxParameterSettingAPI_v5).self) as? any FxParameterSettingAPI_v5
         else { return }
 
-        // Fallback values mirror the v1.0 product defaults — if the
-        // retrieval API ever fails, we'd rather assume the slider is
-        // live (matching the moef defaults FCP applies to a fresh
-        // effect) than greyed-out, which made the inspector look
-        // broken when the API briefly stalled.
-        let lightWrapOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.lightWrapEnabled, at: time, default: true)
+        // Missing host values use the same defaults as the editor and template.
+        let lightWrapOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.lightWrapEnabled, at: time, default: PluginStateData().lightWrapEnabled)
         let decontamOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.edgeDecontaminateEnabled, at: time, default: false)
-        let temporalOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.temporalStabilityEnabled, at: time, default: true)
+        let temporalOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.temporalStabilityEnabled, at: time, default: PluginStateData().temporalStabilityEnabled)
 
         setEnabled(setter: setter, parameterID: ParameterIdentifier.lightWrapStrength, enabled: lightWrapOn)
         setEnabled(setter: setter, parameterID: ParameterIdentifier.lightWrapRadius, enabled: lightWrapOn)

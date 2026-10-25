@@ -63,7 +63,7 @@ final class AnalysisSessionState: @unchecked Sendable {
     /// and an empty hint set, which made the cached matte diverge from
     /// the Standalone Editor's output the moment the user picked a
     /// different mode or placed any subject hints.
-    var hintModeRaw: Int = HintMode.appleVision.rawValue
+    var hintModeRaw: Int = PluginStateData().hintMode.rawValue
     var hintPointSet: HintPointSet = HintPointSet()
 
     /// Snapshot for lock-free packing into an `AnalysisData` value. Callers are
@@ -83,7 +83,7 @@ final class AnalysisSessionState: @unchecked Sendable {
             matteHeight: matteHeight,
             mattes: [:],
             hintConfiguration: AnalysisHintConfiguration(
-                mode: HintMode(rawValue: hintModeRaw) ?? .appleVision, points: hintPointSet,
+                mode: HintMode(rawValue: hintModeRaw) ?? PluginStateData().hintMode, points: hintPointSet,
                 video: videoSettings.analysisIdentity, temporalStabilityEnabled: temporalStabilityEnabled,
                 temporalStabilityStrength: temporalStabilityEnabled ? temporalStabilityStrength : 0
             ),
@@ -109,7 +109,7 @@ final class AnalysisSessionState: @unchecked Sendable {
         temporalHistory = TemporalBlender.History()
         temporalStabilityEnabled = false
         temporalStabilityStrength = 0.5
-        hintModeRaw = HintMode.appleVision.rawValue
+        hintModeRaw = PluginStateData().hintMode.rawValue
         hintPointSet = HintPointSet()
     }
 }
@@ -295,9 +295,9 @@ extension CorridorKeyToolboxPlugIn {
         // analyse always ran with `.appleVision` + empty hints and
         // ignored whatever the user picked in the inspector / OSC.
         let hintModeValue: HintMode = {
-            var raw: Int32 = Int32(HintMode.appleVision.rawValue)
+            var raw: Int32 = Int32(PluginStateData().hintMode.rawValue)
             retrieval.getIntValue(&raw, fromParameter: ParameterIdentifier.hintMode, at: analysisRange.start)
-            return HintMode(rawValue: Int(raw)) ?? .appleVision
+            return HintMode(rawValue: Int(raw)) ?? PluginStateData().hintMode
         }()
         let hintPoints = loadHintPointSet(using: retrieval)
 
@@ -420,7 +420,7 @@ extension CorridorKeyToolboxPlugIn {
         var analyseState = PluginStateData(
             screenColor: ScreenColor(rawValue: screenColorRaw) ?? .green,
             qualityMode: QualityMode(rawValue: qualityModeRaw) ?? .automatic,
-            hintMode: HintMode(rawValue: hintModeRaw) ?? .appleVision,
+            hintMode: HintMode(rawValue: hintModeRaw) ?? PluginStateData().hintMode,
             hintPointSet: hintPointSet
         )
         analyseState.video = videoConfiguration
@@ -449,13 +449,7 @@ extension CorridorKeyToolboxPlugIn {
                                              state: analyseState, workingGamut: workingGamut, renderTime: frameTime,
                                              frameIndex: frameIndex, session: videoSession, entry: entry,
                                              commandQueue: commandQueue, sourceRowOrder: ImageRowOrder(imageOrigin: frame.imageOrigin))
-        PluginLog.notice("Prepared frame \(frameIndex + 1)/\(frameCount) for v2 temporal inference.")
-        guard frameIndex == frameCount - 1 else { return }
-        try videoSession.finish(checkCancellation: {
-            try Task.checkCancellation()
-            if let api = self.apiManager.api(for: (any FxAnalysisAPI_v2).self) as? any FxAnalysisAPI_v2,
-               api.analysisStateForEffect() == kFxAnalysisState_AnalysisInterrupted { throw CancellationError() }
-        }) { result in
+        func storeFrame(_ result: VideoInferenceFrame) throws {
             var alpha = result.alpha
             temporalHistory.apply(alpha: &alpha, source: result.source,
                                   width: result.geometry.contentWidth, height: result.geometry.contentHeight,
@@ -475,8 +469,19 @@ extension CorridorKeyToolboxPlugIn {
                 return session.analyzedCount % 10 == 0 || session.analyzedCount == frameCount ? session.snapshotLocked() : nil
             }
             if let snapshot { persist(snapshot: snapshot) }
-            PluginLog.notice("Refined source frame \(result.index + 1)/\(frameCount) with v2 Time Awareness.")
+            PluginLog.notice("Refined source frame \(result.index + 1)/\(frameCount); Time Awareness: \(videoConfiguration.timeAwareness.displayName).")
         }
+        if videoConfiguration.timeAwareness == .off {
+            try videoSession.finishPreparedFrame(onFrame: storeFrame)
+        } else {
+            PluginLog.notice("Prepared frame \(frameIndex + 1)/\(frameCount) for v2 Time Awareness.")
+        }
+        guard frameIndex == frameCount - 1 else { return }
+        try videoSession.finish(checkCancellation: {
+            try Task.checkCancellation()
+            if let api = self.apiManager.api(for: (any FxAnalysisAPI_v2).self) as? any FxAnalysisAPI_v2,
+               api.analysisStateForEffect() == kFxAnalysisState_AnalysisInterrupted { throw CancellationError() }
+        }, onFrame: storeFrame)
     }
 
     @objc(cleanupAnalysis:)

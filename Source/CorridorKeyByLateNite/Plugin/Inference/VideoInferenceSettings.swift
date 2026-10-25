@@ -19,7 +19,7 @@ public struct VideoInferenceSettings: Codable, Equatable, Sendable {
     /// Number of frames jointly evaluated by the spatiotemporal network.
     public var timeAwareness: TimeAwareness = .off
     /// Keep intermediate features on disk instead of retaining a window in GPU memory.
-    public var lowGPUMemory = true
+    public var lowGPUMemory = false
     /// Source RGB is already scene linear; no display transfer is decoded.
     public var inputIsLinear = false
     /// Write scene-linear foreground RGB. Alpha is never gamma transformed.
@@ -50,7 +50,12 @@ public struct VideoInferenceSettings: Codable, Equatable, Sendable {
         identity.lowGPUMemory = true
         identity.linearizeOutput = false
         identity.keepOriginalInSolidAreas = false
-        if !identity.useAlphaHint { identity.alphaHintAsset = nil }
+        if !identity.useAlphaHint {
+            identity.alphaHintAsset = nil
+            identity.hintFrames = .allFrames
+        }
+        if identity.hintFrames == .allFrames { identity.referenceFrame = 0 }
+        if identity.timeAwareness == .off { identity.internalHintStrength = 0.95 }
         return identity
     }
 

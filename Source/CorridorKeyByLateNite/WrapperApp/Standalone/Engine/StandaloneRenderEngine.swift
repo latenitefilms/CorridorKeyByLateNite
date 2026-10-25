@@ -71,6 +71,13 @@ actor StandalonePreviewRenderer {
     func render(frame: ReaderFrame, state: PluginStateData, showingOriginal: Bool = false) throws -> StandaloneRenderResult {
         try Task.checkCancellation()
         if showingOriginal { return try engine.renderShowingOriginal(source: frame.pixelBuffer) }
+        if state.outputMode == .original || (state.outputMode != .hint
+            && state.cachedMatteBlob == nil && state.cachedFrameReference == nil) {
+            return try engine.renderShowingOriginal(
+                source: frame.pixelBuffer,
+                description: state.outputMode == .original ? "Original" : "Source Pass-Through — Analyse Clip to Key"
+            )
+        }
         return try engine.render(source: frame.pixelBuffer, state: state, renderTime: frame.presentationTime)
     }
 }
@@ -174,14 +181,15 @@ final class StandaloneRenderEngine: @unchecked Sendable {
     /// `MTLTexture` share memory — the preview layer is reading the
     /// same bytes the decoder produced, not a copy.
     func renderShowingOriginal(
-        source pixelBuffer: CVPixelBuffer
+        source pixelBuffer: CVPixelBuffer,
+        description: String = "Show Original (Press-and-Hold)"
     ) throws -> StandaloneRenderResult {
         let sourceBacked = try bridge.makeTexture(for: pixelBuffer, usage: .shaderRead)
         return StandaloneRenderResult(
             destinationPixelBuffer: pixelBuffer,
             destinationTexture: sourceBacked.metalTexture,
             report: RenderReport(
-                backendDescription: "Show Original (Press-and-Hold)",
+                backendDescription: description,
                 guideSourceDescription: "—",
                 effectiveInferenceResolution: 0,
                 deviceName: device.name

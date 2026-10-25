@@ -62,6 +62,7 @@ final class VideoInferenceSession: @unchecked Sendable {
     private let scratch: URL
     private var scratchBytes: Int64 = 0
     private var ingestedCount = 0
+    private var emittedCount = 0
     private var recurrentState: MLXArray
     private var retainedFeatures: [Int: [String: MLXArray]] = [:]
     private var finished = false
@@ -135,6 +136,20 @@ final class VideoInferenceSession: @unchecked Sendable {
         }
     }
 
+    /// With Time Awareness off, finish the newly ingested frame immediately.
+    /// Both hosts use this path so no whole-clip feature spill or second pass is
+    /// needed. The common stage-one/stage-two implementation preserves quality.
+    func finishPreparedFrame(onFrame: (VideoInferenceFrame) throws -> Void) throws {
+        try lock.withLock {
+            guard settings.timeAwareness == .off, !finished else { return }
+            while emittedCount < ingestedCount {
+                try process(indices: [emittedCount], reverseRVM: false, skipReference: false,
+                            checkCancellation: { try Task.checkCancellation() }, onFrame: onFrame)
+                emittedCount += 1
+            }
+        }
+    }
+
     /// Completes bidirectional hint propagation and Hann baton accumulation.
     /// Emitted indices can run backwards for a single-frame reference; hosts
     /// key their output cache by source index rather than delivery order.
@@ -145,6 +160,14 @@ final class VideoInferenceSession: @unchecked Sendable {
                 finished = true
                 retainedFeatures.removeAll()
                 try? FileManager.default.removeItem(at: scratch)
+            }
+            if settings.timeAwareness == .off {
+                while emittedCount < ingestedCount {
+                    try process(indices: [emittedCount], reverseRVM: false, skipReference: false,
+                                checkCancellation: checkCancellation, onFrame: onFrame)
+                    emittedCount += 1
+                }
+                return
             }
             if settings.useAlphaHint, settings.hintFrames == .singleFrame {
                 let reference = settings.referenceFrame
@@ -302,7 +325,7 @@ final class VideoInferenceSession: @unchecked Sendable {
     private func store(_ arrays: [String: MLXArray], index: Int) throws {
         // A still has no overlap or clip history to spill to disk. Materialize
         // its one input before the caller can reuse the normalized Metal buffer.
-        if frameCount == 1 {
+        if frameCount == 1 || settings.timeAwareness == .off {
             try checkedEval(Array(arrays.values))
             retainedFeatures[index] = arrays
             return

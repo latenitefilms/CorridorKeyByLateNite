@@ -21,6 +21,7 @@ struct EditorView: View {
     @State private var viewModel: EditorViewModel
     @State private var isImporting = false
     @State private var isExporting = false
+    @State private var isBatchExporting = false
     @State private var loadFailureMessage: String?
     @State private var isDropTargeted = false
     @State private var isImportingBackdropImage = false
@@ -61,6 +62,15 @@ struct EditorView: View {
             )
         }
         .navigationTitle(toolbarTitle)
+        .toolbar {
+            Button("Batch Export…", systemImage: "square.stack.3d.up", action: presentBatchExport)
+                .disabled(viewModel.analysisStatus.inProgress || viewModel.exportStatus.inProgress)
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !viewModel.batchExport.isRunning, !urls.isEmpty else { return false }
+            handleImportedURLs(urls)
+            return true
+        } isTargeted: { isDropTargeted = $0 }
         .inspector(isPresented: .constant(true)) {
             InspectorView(viewModel: viewModel)
                 .inspectorColumnWidth(min: 300, ideal: 340, max: 400)
@@ -68,7 +78,7 @@ struct EditorView: View {
         .fileImporter(
             isPresented: $isImporting,
             allowedContentTypes: MediaSourceLoader.supportedContentTypes,
-            allowsMultipleSelection: false
+            allowsMultipleSelection: true
         ) { result in
             handleImportResult(result)
         }
@@ -76,6 +86,9 @@ struct EditorView: View {
             ExportSheet(viewModel: viewModel) {
                 isExporting = false
             }
+        }
+        .sheet(isPresented: $isBatchExporting) {
+            BatchExportSheet(model: viewModel.batchExport, state: viewModel.state)
         }
         .onChange(of: viewModel.phase) { _, phase in
             if case .loadFailed(let message) = phase {
@@ -109,8 +122,7 @@ struct EditorView: View {
         case .noClipLoaded:
             EditorEmptyState(
                 isDropTargeted: $isDropTargeted,
-                onPickFile: { isImporting = true },
-                onDrop: handleDrop(providers:)
+                onPickFile: { isImporting = true }
             )
         case .loadingClip(let url):
             VStack(spacing: 12) {
@@ -187,26 +199,29 @@ struct EditorView: View {
     private func handleImportResult(_ result: Result<[URL], any Error>) {
         switch result {
         case .success(let urls):
-            guard let url = urls.first else { return }
-            loadClip(at: url)
+            handleImportedURLs(urls)
         case .failure(let error):
             loadFailureMessage = error.localizedDescription
         }
     }
 
-    private func handleDrop(providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
-        _ = provider.loadObject(ofClass: URL.self) { url, _ in
-            guard let url else { return }
-            // The provider callback fires off the main actor; bounce
-            // back via structured concurrency rather than GCD so the
-            // task is cancellable alongside the rest of the editor's
-            // in-flight work.
-            Task { @MainActor in
-                self.loadClip(at: url)
-            }
+    private func handleImportedURLs(_ urls: [URL]) {
+        if urls.count > 1 {
+            viewModel.batchExport.add(urls)
+            presentBatchExport()
+        } else if let url = urls.first {
+            loadClip(at: url)
         }
-        return true
+    }
+
+    private func presentBatchExport() {
+        Task {
+            viewModel.cancelAnalysis()
+            viewModel.cancelExport()
+            for task in viewModel.cancelWorkForEditorShutdown() { await task.value }
+            if case .loadingClip = viewModel.phase { viewModel.closeClip() }
+            isBatchExporting = true
+        }
     }
 
     private func loadClip(at url: URL) {
@@ -238,7 +253,6 @@ struct EditorView: View {
 private struct EditorEmptyState: View {
     @Binding var isDropTargeted: Bool
     let onPickFile: () -> Void
-    let onDrop: ([NSItemProvider]) -> Bool
 
     var body: some View {
         ZStack {
@@ -247,7 +261,7 @@ private struct EditorEmptyState: View {
                 Image(systemName: "photo.on.rectangle")
                     .font(.system(size: 64, weight: .light))
                     .foregroundStyle(.secondary)
-                Text("Drop a video or still image here, or import one to begin.")
+                Text("Drop a video or still image to begin. Drop multiple videos to batch export.")
                     .font(.title3)
                     .foregroundStyle(.secondary)
                 Text("Supports ProRes, HEVC, H.264, PNG, TIFF, JPEG, HEIC, and more.")
@@ -270,6 +284,5 @@ private struct EditorEmptyState: View {
                     .padding(28)
             )
         }
-        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted, perform: onDrop)
     }
 }

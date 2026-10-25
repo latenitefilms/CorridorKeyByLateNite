@@ -146,6 +146,18 @@ actor AnalysisRunner {
             strength: state.temporalStabilityEnabled ? Float(state.temporalStabilityStrength) : 0,
             motionThreshold: 0.05
         )
+        func storeFrame(_ frame: VideoInferenceFrame) throws {
+            var alpha = frame.alpha
+            temporalHistory.apply(alpha: &alpha, source: frame.source,
+                                  width: frame.geometry.contentWidth, height: frame.geometry.contentHeight,
+                                  frameIndex: frame.index, configuration: temporalConfiguration)
+            let blob = try AnalysisFrameCodec.encode(alpha: alpha, foregroundHalfRGBA: frame.foregroundHalfRGBA,
+                                                     width: frame.geometry.contentWidth, height: frame.geometry.contentHeight)
+            let reference = try AnalysisDiskCache.shared.store(blob, in: cacheSession)
+            let entry = MatteCacheEntry(reference: reference, width: frame.geometry.contentWidth,
+                                        height: frame.geometry.contentHeight, inferenceResolution: frame.geometry.resolution)
+            eventHandler(.frameProcessed(frameIndex: frame.index, engineDescription: "CorridorKey v2 · MLX", entry: entry))
+        }
         while !Task.isCancelled {
             let frame: ReaderFrame?
             do {
@@ -169,7 +181,14 @@ actor AnalysisRunner {
             do {
                 try renderEngine.appendVideoFrame(source: frame.pixelBuffer, state: state, renderTime: renderTime,
                                                    frameIndex: frameIndex, session: videoSession, hintReader: hintReader)
-                eventHandler(.framePrepared(frameIndex: frameIndex))
+                if state.video.timeAwareness == .off {
+                    try videoSession.finishPreparedFrame(onFrame: storeFrame)
+                } else {
+                    eventHandler(.framePrepared(frameIndex: frameIndex))
+                }
+            } catch is CancellationError {
+                eventHandler(.cancelled)
+                return
             } catch {
                 eventHandler(.failed(error.localizedDescription))
                 return
@@ -185,18 +204,7 @@ actor AnalysisRunner {
             return
         }
         do {
-            try videoSession.finish { frame in
-                var alpha = frame.alpha
-                temporalHistory.apply(alpha: &alpha, source: frame.source,
-                                      width: frame.geometry.contentWidth, height: frame.geometry.contentHeight,
-                                      frameIndex: frame.index, configuration: temporalConfiguration)
-                let blob = try AnalysisFrameCodec.encode(alpha: alpha, foregroundHalfRGBA: frame.foregroundHalfRGBA,
-                                                         width: frame.geometry.contentWidth, height: frame.geometry.contentHeight)
-                let reference = try AnalysisDiskCache.shared.store(blob, in: cacheSession)
-                let entry = MatteCacheEntry(reference: reference, width: frame.geometry.contentWidth,
-                                            height: frame.geometry.contentHeight, inferenceResolution: frame.geometry.resolution)
-                eventHandler(.frameProcessed(frameIndex: frame.index, engineDescription: "CorridorKey v2 · MLX", entry: entry))
-            }
+            try videoSession.finish(onFrame: storeFrame)
         } catch is CancellationError {
             eventHandler(.cancelled)
             return

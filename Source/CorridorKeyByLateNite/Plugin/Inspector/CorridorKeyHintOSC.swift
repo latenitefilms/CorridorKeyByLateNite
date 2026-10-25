@@ -272,6 +272,11 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
         forceUpdate: UnsafeMutablePointer<ObjCBool>,
         at time: CMTime
     ) {
+        if let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6 {
+            var externalHint = ObjCBool(false)
+            retrieval.getBoolValue(&externalHint, fromParameter: ParameterIdentifier.useAlphaHint, at: time)
+            if externalHint.boolValue { return }
+        }
         if activePart == HitPart.subjectMarker.rawValue, subjectMarkerVisible(at: time) {
             // Begin a drag on the subject marker. We don't write
             // anything yet — the actual position update happens in
@@ -311,6 +316,15 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
             if !removed {
                 forceUpdate.pointee = ObjCBool(false)
                 return
+            }
+        }
+        if !hints.isEmpty,
+           let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6,
+           let setter = apiManager.api(for: (any FxParameterSettingAPI_v5).self) as? any FxParameterSettingAPI_v5 {
+            var mode = Int32(PluginStateData().hintMode.rawValue)
+            retrieval.getIntValue(&mode, fromParameter: ParameterIdentifier.hintMode, at: time)
+            if mode == HintMode.none.rawValue {
+                setter.setIntValue(Int32(HintMode.manual.rawValue), toParameter: ParameterIdentifier.hintMode, at: time)
             }
         }
         writeHintSet(hints)

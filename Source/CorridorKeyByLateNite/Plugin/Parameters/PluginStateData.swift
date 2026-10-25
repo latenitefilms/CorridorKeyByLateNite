@@ -13,7 +13,7 @@ import CoreMedia
 
 /// A fully resolved render state. Contains everything the renderer and analyser
 /// need so that no parameter API calls happen off of the main FxPlug thread.
-struct PluginStateData: Codable, Sendable {
+struct PluginStateData: Codable, Equatable, Sendable {
     /// Shared v2 video, hint and color controls.
     var video = VideoInferenceSettings()
     /// Zero-based source position for external hint diagnostics, not an analysis setting.
@@ -120,10 +120,9 @@ struct PluginStateData: Codable, Sendable {
     init(
         screenColor: ScreenColor = .automatic,
         qualityMode: QualityMode = .automatic,
-        // Apple Vision, despeckle, light wrap and temporal stability provide
-        // the initial key. Additional edge colour correction is opt-in because
-        // the neural foreground already reconstructs clean edge RGB.
-        hintMode: HintMode = .appleVision,
+        // Start with the v2 model prediction. Generated hints and additional
+        // matte, edge, and temporal corrections are explicit creative choices.
+        hintMode: HintMode = .none,
         showSubjectMarker: Bool = false,
         subjectPositionX: Double = 0.5,
         subjectPositionY: Double = 0.5,
@@ -142,7 +141,7 @@ struct PluginStateData: Codable, Sendable {
         alphaErodeNormalized: Double = 0.0,
         alphaSoftnessNormalized: Double = 0.0,
         alphaGamma: Double = 1.0,
-        autoDespeckleEnabled: Bool = true,
+        autoDespeckleEnabled: Bool = false,
         despeckleSize: Int = 100,
         refinerStrength: Double = 1.0,
         despillStrength: Double = 0,
@@ -154,12 +153,12 @@ struct PluginStateData: Codable, Sendable {
         // better to one of the legacy methods can flip it down via
         // the inspector.
         spillMethod: SpillMethod = .ultra,
-        lightWrapEnabled: Bool = true,
+        lightWrapEnabled: Bool = false,
         lightWrapStrength: Double = 0.25,
         lightWrapRadius: Double = 10.0,
         edgeDecontaminateEnabled: Bool = false,
         edgeDecontaminateStrength: Double = 0.5,
-        temporalStabilityEnabled: Bool = true,
+        temporalStabilityEnabled: Bool = false,
         temporalStabilityStrength: Double = 0.5,
         outputMode: OutputMode = .processed,
         upscaleMethod: UpscaleMethod = .lanczos,
@@ -257,7 +256,7 @@ struct PluginStateData: Codable, Sendable {
         self.video = try container.decodeIfPresent(VideoInferenceSettings.self, forKey: .video) ?? VideoInferenceSettings()
         self.screenColor = try container.decodeIfPresent(ScreenColor.self, forKey: .screenColor) ?? .automatic
         self.qualityMode = try container.decodeIfPresent(QualityMode.self, forKey: .qualityMode) ?? .automatic
-        self.hintMode = try container.decodeIfPresent(HintMode.self, forKey: .hintMode) ?? .appleVision
+        self.hintMode = try container.decodeIfPresent(HintMode.self, forKey: .hintMode) ?? .none
         self.showSubjectMarker = try container.decodeIfPresent(Bool.self, forKey: .showSubjectMarker) ?? false
         self.subjectPositionX = try container.decodeIfPresent(Double.self, forKey: .subjectPositionX) ?? 0.5
         self.subjectPositionY = try container.decodeIfPresent(Double.self, forKey: .subjectPositionY) ?? 0.5
@@ -276,17 +275,17 @@ struct PluginStateData: Codable, Sendable {
         self.alphaErodeNormalized = try container.decodeIfPresent(Double.self, forKey: .alphaErodeNormalized) ?? 0.0
         self.alphaSoftnessNormalized = try container.decodeIfPresent(Double.self, forKey: .alphaSoftnessNormalized) ?? 0.0
         self.alphaGamma = try container.decodeIfPresent(Double.self, forKey: .alphaGamma) ?? 1.0
-        self.autoDespeckleEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoDespeckleEnabled) ?? true
+        self.autoDespeckleEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoDespeckleEnabled) ?? false
         self.despeckleSize = try container.decodeIfPresent(Int.self, forKey: .despeckleSize) ?? 100
         self.refinerStrength = try container.decodeIfPresent(Double.self, forKey: .refinerStrength) ?? 1.0
         self.despillStrength = try container.decodeIfPresent(Double.self, forKey: .despillStrength) ?? 0
         self.spillMethod = try container.decodeIfPresent(SpillMethod.self, forKey: .spillMethod) ?? .ultra
-        self.lightWrapEnabled = try container.decodeIfPresent(Bool.self, forKey: .lightWrapEnabled) ?? true
+        self.lightWrapEnabled = try container.decodeIfPresent(Bool.self, forKey: .lightWrapEnabled) ?? false
         self.lightWrapStrength = try container.decodeIfPresent(Double.self, forKey: .lightWrapStrength) ?? 0.25
         self.lightWrapRadius = try container.decodeIfPresent(Double.self, forKey: .lightWrapRadius) ?? 10.0
         self.edgeDecontaminateEnabled = try container.decodeIfPresent(Bool.self, forKey: .edgeDecontaminateEnabled) ?? false
         self.edgeDecontaminateStrength = try container.decodeIfPresent(Double.self, forKey: .edgeDecontaminateStrength) ?? 0.5
-        self.temporalStabilityEnabled = try container.decodeIfPresent(Bool.self, forKey: .temporalStabilityEnabled) ?? true
+        self.temporalStabilityEnabled = try container.decodeIfPresent(Bool.self, forKey: .temporalStabilityEnabled) ?? false
         self.temporalStabilityStrength = try container.decodeIfPresent(Double.self, forKey: .temporalStabilityStrength) ?? 0.5
         self.outputMode = try container.decodeIfPresent(OutputMode.self, forKey: .outputMode) ?? .processed
         self.upscaleMethod = try container.decodeIfPresent(UpscaleMethod.self, forKey: .upscaleMethod) ?? .lanczos

@@ -207,6 +207,14 @@ enum OnScreenControlTool: Hashable, Sendable, CaseIterable, Identifiable {
     }
 }
 
+/// One reversible edit retains its exact analysis and its disk-cache leases.
+private struct EditorEditSnapshot {
+    let state: PluginStateData
+    let mattes: [Int: MatteCacheEntry]
+    let status: EditorAnalysisStatus
+    let leases: [AnalysisDiskCache.Session]
+}
+
 @MainActor
 @Observable
 final class EditorViewModel {
@@ -215,6 +223,8 @@ final class EditorViewModel {
 
     @ObservationIgnored
     let renderEngine: StandaloneRenderEngine
+    /// The queue belongs to the editor so permissions survive dismissing its sheet.
+    let batchExport: BatchExportModel
     private let previewRenderer: StandalonePreviewRenderer
 
     var phase: EditorPhase = .noClipLoaded
@@ -227,15 +237,18 @@ final class EditorViewModel {
     /// `PluginStateData()`.
     var state: PluginStateData = EditorPreferences.makeInitialState() {
         didSet {
-            guard oldValue.hintMode != state.hintMode || oldValue.hintPointSet != state.hintPointSet
-                    || oldValue.video.analysisIdentity != state.video.analysisIdentity
-                    || oldValue.screenColor != state.screenColor || oldValue.qualityMode != state.qualityMode
-                    || oldValue.temporalStabilityEnabled != state.temporalStabilityEnabled
-                    || oldValue.temporalStabilityStrength != state.temporalStabilityStrength else { return }
+            guard !isRestoringEdit, oldValue != state else { return }
+            if phase.isReady && (!isEditingParameter || !didRegisterParameterEdit) {
+                registerUndo(state: oldValue, actionName: pendingEditName ?? "Change Keying Settings")
+                didRegisterParameterEdit = isEditingParameter
+            }
+            guard oldValue.analysisHintConfiguration != state.analysisHintConfiguration
+                    || oldValue.screenColor != state.screenColor || oldValue.qualityMode != state.qualityMode else { return }
             // An in-flight run owns the old annotations. Cancel it before
             // clearing, so queued results cannot repopulate a stale cache.
             cancelAnalysis()
             matteCache.removeAll()
+            restoredAnalysisLeases = []
             analysisStatus = .idle
         }
     }
@@ -379,6 +392,8 @@ final class EditorViewModel {
     /// caught up to the playhead.
     @ObservationIgnored
     private var playbackTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var playbackRunIdentifier = UUID()
     /// Polls the shared MLX bridge registry while the rung is warming
     /// up so the inspector badge tracks `cold → warming → ready` in
     /// real time. Cancelled when the engine becomes `.ready` /
@@ -403,9 +418,61 @@ final class EditorViewModel {
     /// lifetime.
     @ObservationIgnored
     weak var undoManager: UndoManager?
+    @ObservationIgnored
+    private var isRestoringEdit = false
+    @ObservationIgnored
+    private var pendingEditName: String?
+    @ObservationIgnored
+    private var restoredAnalysisLeases: [AnalysisDiskCache.Session] = []
+    @ObservationIgnored
+    private var isEditingParameter = false
+    @ObservationIgnored
+    private var didRegisterParameterEdit = false
+
+    /// A continuous slider drag is one undo operation, including its initial cache.
+    func parameterEditingChanged(_ editing: Bool) {
+        isEditingParameter = editing
+        didRegisterParameterEdit = false
+    }
+
+    /// Captures values and small disk references, never a decoded clip. Leases
+    /// protect the referenced predictions from eviction until this undo expires.
+    private func registerUndo(state previousState: PluginStateData, actionName: String) {
+        guard let undoManager, undoManager.isUndoRegistrationEnabled else { return }
+        let needsGroup = !undoManager.groupsByEvent && undoManager.groupingLevel == 0
+            && !undoManager.isUndoing && !undoManager.isRedoing
+        if needsGroup { undoManager.beginUndoGrouping() }
+        defer { if needsGroup { undoManager.endUndoGrouping() } }
+        let snapshot = EditorEditSnapshot(
+            state: previousState, mattes: matteCache,
+            status: analysisStatus.inProgress ? .cancelled : analysisStatus,
+            leases: (try? AnalysisDiskCache.shared.pinSessions(for: matteCache.values.compactMap(\.reference))) ?? []
+        )
+        undoManager.registerUndo(withTarget: self) { target in
+            target.restoreEdit(snapshot, actionName: actionName)
+        }
+        undoManager.setActionName(actionName)
+    }
+
+    private func restoreEdit(_ snapshot: EditorEditSnapshot, actionName: String) {
+        let canReuseAnalysis = state.analysisHintConfiguration == snapshot.state.analysisHintConfiguration
+            && state.screenColor == snapshot.state.screenColor && state.qualityMode == snapshot.state.qualityMode
+        registerUndo(state: state, actionName: actionName)
+        if !canReuseAnalysis { cancelAnalysis() }
+        isRestoringEdit = true
+        state = snapshot.state
+        isRestoringEdit = false
+        if !canReuseAnalysis {
+            matteCache = snapshot.mattes
+            analysisStatus = snapshot.status
+            restoredAnalysisLeases = snapshot.leases
+        }
+        parameterDidChange()
+    }
 
     init(renderEngine: StandaloneRenderEngine) {
         self.renderEngine = renderEngine
+        self.batchExport = BatchExportModel(engine: renderEngine)
         self.previewRenderer = StandalonePreviewRenderer(engine: renderEngine)
         self.customBackdropColor = BackdropPreferences.loadCustomColor() ?? .default
 
@@ -639,13 +706,14 @@ final class EditorViewModel {
             self.totalFrames = source.totalFrameCount()
             self.renderSize = info.renderSize
             self.matteCache.removeAll(keepingCapacity: true)
+            self.restoredAnalysisLeases = []
             self.analysisStatus = .idle
             self.exportStatus = .idle
             self.playheadTime = .zero
             self.latestPreview = nil
             guard loadIdentifier == identifier, !Task.isCancelled else { return }
             self.phase = .ready
-            beginWarmupForCurrentQuality()
+            warmupStatus = .cold
             renderPreview(at: .zero)
         } catch {
             guard loadIdentifier == identifier, !Task.isCancelled else { return }
@@ -685,6 +753,7 @@ final class EditorViewModel {
     /// Closes the current clip and returns the editor to the empty
     /// state. Cancels any in-flight analyse / export work.
     func closeClip() {
+        phase = .noClipLoaded
         loadIdentifier = UUID()
         cancelInflightWork()
         stopPlayback()
@@ -692,6 +761,7 @@ final class EditorViewModel {
         clipInfo = nil
         latestPreview = nil
         matteCache.removeAll()
+        restoredAnalysisLeases = []
         analysisStatus = .idle
         exportStatus = .idle
         playheadTime = .zero
@@ -721,13 +791,18 @@ final class EditorViewModel {
         targetPlaybackFPS = max(Double(clipInfo.nominalFrameRate), 0)
         measuredPlaybackFPS = 0
         isPlaying = true
+        pendingPreviewTask?.cancel()
+        pendingPreviewTask = nil
         playbackTask?.cancel()
+        let identifier = UUID()
+        playbackRunIdentifier = identifier
         playbackTask = Task { @MainActor [weak self] in
-            await self?.runPlaybackLoop()
+            await self?.runPlaybackLoop(identifier: identifier)
         }
     }
 
     private func stopPlayback() {
+        playbackRunIdentifier = UUID()
         playbackTask?.cancel()
         playbackTask = nil
         isPlaying = false
@@ -739,7 +814,7 @@ final class EditorViewModel {
     /// 1. Picks the next frame index (wrapping when `loopEnabled`).
     /// 2. Moves the playhead so the slider/time label track in real
     ///    time as the user expects.
-    /// 3. **Awaits** `performRender(at:)` for that frame so the
+    /// 3. **Awaits** `performRender(frame:)` for that frame so the
     ///    user actually sees every frame land — the legacy timer-
     ///    based path fired ticks at the nominal frame rate even
     ///    when the GPU couldn't keep up, which on a short looping
@@ -750,8 +825,11 @@ final class EditorViewModel {
     /// 5. Updates `measuredPlaybackFPS` from the wall-clock interval
     ///    so the transport bar's badge can colour itself green
     ///    (≥ 95% of target) or orange (below).
-    private func runPlaybackLoop() async {
-        guard let clipInfo else { return }
+    private func runPlaybackLoop(identifier: UUID) async {
+        guard let clipInfo, let source = videoSource else { return }
+        var reader: PlaybackFrameReader?
+        let clock = ContinuousClock()
+        var deadline = clock.now
         let frameRate = max(Double(clipInfo.nominalFrameRate), 0.001)
         let frameIntervalSeconds = 1.0 / frameRate
         // Window of recent samples used to smooth the displayed fps
@@ -763,7 +841,7 @@ final class EditorViewModel {
         var fpsSamples: [Double] = []
 
         while isPlaying && !Task.isCancelled {
-            let tickStart = Date()
+            let tickStart = clock.now
 
             let currentFrame = currentFrameIndex(at: playheadTime)
             let lastFrame = max(totalFrames - 1, 0)
@@ -771,6 +849,7 @@ final class EditorViewModel {
             if currentFrame >= lastFrame {
                 if loopEnabled {
                     nextFrame = 0
+                    reader = nil
                 } else {
                     isPlaying = false
                     break
@@ -786,24 +865,33 @@ final class EditorViewModel {
             playheadTime = target
 
             do {
-                try await performRender(at: target)
+                if reader == nil {
+                    reader = try await PlaybackFrameReader(source: source, startTime: target)
+                }
+                guard let frame = try await reader?.nextFrame() else { break }
+                try Task.checkCancellation()
+                playheadTime = frame.presentationTime
+                try await performRender(frame: frame)
             } catch {
                 if !Task.isCancelled {
                     handlePreviewFailure(error)
                 }
-                isPlaying = false
+                if playbackRunIdentifier == identifier { isPlaying = false }
                 break
             }
             if Task.isCancelled { break }
 
-            let renderSeconds = Date().timeIntervalSince(tickStart)
-            if renderSeconds < frameIntervalSeconds {
-                let throttle = frameIntervalSeconds - renderSeconds
-                try? await Task.sleep(for: .seconds(throttle))
+            deadline += .seconds(frameIntervalSeconds)
+            if clock.now < deadline {
+                try? await clock.sleep(until: deadline)
+            } else {
+                // Never race through frames to catch up after a slow render.
+                deadline = clock.now
             }
             if Task.isCancelled { break }
 
-            let tickSeconds = Date().timeIntervalSince(tickStart)
+            let elapsed = tickStart.duration(to: clock.now).components
+            let tickSeconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
             let achievedFPS = 1.0 / max(tickSeconds, 0.001)
             fpsSamples.append(achievedFPS)
             while fpsSamples.count > fpsSampleCap {
@@ -811,6 +899,8 @@ final class EditorViewModel {
             }
             measuredPlaybackFPS = fpsSamples.reduce(0, +) / Double(fpsSamples.count)
         }
+        guard playbackRunIdentifier == identifier else { return }
+        playbackTask = nil
         isPlaying = false
         measuredPlaybackFPS = 0
     }
@@ -824,9 +914,8 @@ final class EditorViewModel {
     /// fights with because the playback task owns the rendering
     /// schedule end-to-end.
     @MainActor
-    private func performRender(at time: CMTime) async throws {
-        guard let source = videoSource else { return }
-        let frameTime = time
+    private func performRender(frame: ReaderFrame) async throws {
+        let frameTime = frame.presentationTime
         let frameIndex = currentFrameIndex(at: frameTime)
         var stateForFrame = state
         if let cached = matteCache[frameIndex] {
@@ -840,10 +929,10 @@ final class EditorViewModel {
             Int(renderSize.width.rounded()),
             Int(renderSize.height.rounded())
         )
-        let pixelBuffer = try await source.makeFrame(atTime: frameTime)
+        let pixelBuffer = frame.pixelBuffer
+        let showingOriginal = isShowingOriginal
         let result = try await previewRenderer.render(
-            frame: ReaderFrame(pixelBuffer: pixelBuffer, presentationTime: frameTime, duration: .invalid),
-            state: stateForFrame
+            frame: frame, state: stateForFrame, showingOriginal: showingOriginal
         )
         try Task.checkCancellation()
         if let next = matteCache[frameIndex + 1]?.reference { AnalysisDiskCache.shared.prefetch(next) }
@@ -851,8 +940,8 @@ final class EditorViewModel {
             texture: result.destinationTexture,
             pixelBuffer: result.destinationPixelBuffer,
             presentationTime: frameTime,
-            isLinear: result.report.effectiveInferenceResolution == 0 ? stateForFrame.video.inputIsLinear : stateForFrame.outputIsLinear,
-            isPremultiplied: stateForFrame.outputMode != .foregroundPlusMatte,
+            isLinear: (showingOriginal || result.report.effectiveInferenceResolution == 0) ? stateForFrame.video.inputIsLinear : stateForFrame.outputIsLinear,
+            isPremultiplied: showingOriginal || result.report.effectiveInferenceResolution == 0 || stateForFrame.outputMode != .foregroundPlusMatte,
             gamut: StandaloneRenderEngine.workingGamut(for: pixelBuffer)
         )
         self.renderBackendDescription = result.report.backendDescription
@@ -923,6 +1012,7 @@ final class EditorViewModel {
     /// Schedules a preview render for the given source time. Cancels
     /// any pending render so the latest parameter edit always wins.
     func renderPreview(at time: CMTime) {
+        guard !isPlaying else { return }
         guard let source = videoSource else { return }
         let frameTime = time
         let frameIndex = currentFrameIndex(at: frameTime)
@@ -964,7 +1054,7 @@ final class EditorViewModel {
                     pixelBuffer: result.destinationPixelBuffer,
                     presentationTime: frameTime,
                     isLinear: (showingOriginal || result.report.effectiveInferenceResolution == 0) ? stateForFrame.video.inputIsLinear : stateForFrame.outputIsLinear,
-                    isPremultiplied: showingOriginal || stateForFrame.outputMode != .foregroundPlusMatte,
+                    isPremultiplied: showingOriginal || result.report.effectiveInferenceResolution == 0 || stateForFrame.outputMode != .foregroundPlusMatte,
                     gamut: StandaloneRenderEngine.workingGamut(for: pixelBuffer)
                 )
                 self.renderBackendDescription = result.report.backendDescription
@@ -987,29 +1077,13 @@ final class EditorViewModel {
         }
     }
 
-    /// Re-renders the current preview frame. Called whenever the user
-    /// edits a parameter so the change is reflected immediately.
-    /// Also:
-    ///
-    /// * Re-kicks the MLX warm-up when the user flips the Screen
-    ///   Colour picker — Green and Blue ship as separate `.mlxfn`
-    ///   bridges, so a colour change has to swap which engine the
-    ///   inspector badge tracks and which bridge the next preview
-    ///   render will land on.
-    /// * Persists the three "session-level" choices (Quality, Hint,
-    ///   Upscale Method) via `EditorPreferences`. Sliders, toggles,
-    ///   and the screen-colour pick stay per-clip; the Reset to
-    ///   Default button covers factory-recovery for those.
-    ///
-    /// Other parameter edits hit the no-op fast path inside
-    /// `beginWarmupForCurrentQuality` because the cached
-    /// `(resolution, colour)` already matches.
+    /// Refreshes a paused preview and persists session-level choices. Playback
+    /// consumes the next frame with the latest settings. Model loading starts
+    /// only when analysis is requested, so importing and playing ProRes remains
+    /// independent of model initialization and GPU inference.
     func parameterDidChange() {
         renderPreview(at: playheadTime)
-        if activeWarmupResolution == nil
-            || activeWarmupScreenColor != state.screenColor {
-            beginWarmupForCurrentQuality()
-        }
+        if analysisStatus.inProgress { beginWarmupForCurrentQuality() }
         EditorPreferences.qualityMode = state.qualityMode
         EditorPreferences.hintMode = state.hintMode
         EditorPreferences.upscaleMethod = state.upscaleMethod
@@ -1044,7 +1118,7 @@ final class EditorViewModel {
     /// the FxPlug OSC writes into the `HintPointSet` parameter.
     /// No-op when the tool is `.disabled`.
     func handleOSCClick(atNormalizedPoint point: CGPoint) {
-        guard let clipInfo, !isPlaying,
+        guard let clipInfo, !isPlaying, !state.video.useAlphaHint,
               let frame = HintFrame(
                   time: playheadTime,
                   duration: CMTime(seconds: 1 / Double(clipInfo.nominalFrameRate), preferredTimescale: clipInfo.timescale)
@@ -1102,14 +1176,12 @@ final class EditorViewModel {
     /// registers a redo via this same code path — that's the
     /// standard `UndoManager` snapshot pattern.
     private func applyHintPointSet(_ newSet: HintPointSet, actionName: String) {
-        let previous = state.hintPointSet
-        if let undoManager {
-            undoManager.registerUndo(withTarget: self) { target in
-                target.applyHintPointSet(previous, actionName: actionName)
-            }
-            undoManager.setActionName(actionName)
-        }
-        state.hintPointSet = newSet
+        pendingEditName = actionName
+        defer { pendingEditName = nil }
+        var editedState = state
+        editedState.hintPointSet = newSet
+        if editedState.hintMode == .none, !newSet.isEmpty { editedState.hintMode = .manual }
+        state = editedState
         // Hints feed the MLX bridge at analysis time. Re-render the
         // preview now so the dots appear immediately; the user can
         // re-analyse to see the matte respond to the new hints.
@@ -1122,6 +1194,7 @@ final class EditorViewModel {
     /// scratch — the editor never blends partial caches into a result.
     func runAnalysis() {
         guard let source = videoSource else { return }
+        stopPlayback()
         cancelAnalysis()
         analysisRunIdentifier += 1
         let runIdentifier = analysisRunIdentifier
@@ -1414,7 +1487,9 @@ final class EditorViewModel {
     /// cooperative cancellation without keeping the view model alive.
     @discardableResult
     func cancelWorkForEditorShutdown() -> [Task<Void, Never>] {
-        cancelInflightWork()
+        var tasks = cancelInflightWork()
+        if let batchTask = batchExport.cancel() { tasks.append(batchTask) }
+        return tasks
     }
 
     var hasInflightEditorWork: Bool {
@@ -1426,6 +1501,7 @@ final class EditorViewModel {
             || analysisRunnerTask != nil
             || exportTask != nil
             || exportRunnerTask != nil
+            || batchExport.isRunning
     }
 
     @discardableResult

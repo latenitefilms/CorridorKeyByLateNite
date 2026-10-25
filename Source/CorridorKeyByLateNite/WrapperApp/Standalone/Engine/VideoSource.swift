@@ -335,3 +335,23 @@ struct ReaderFrame: @unchecked Sendable {
     let presentationTime: CMTime
     let duration: CMTime
 }
+
+/// Owns one sequential decoder per playback traversal. Blocking sample reads
+/// stay off the main actor; seeks and loop boundaries create a fresh reader.
+actor PlaybackFrameReader {
+    private let source: any EditorMediaSource
+    private let reader: any MediaFrameReader
+
+    init(source: any EditorMediaSource, startTime: CMTime) async throws {
+        self.source = source
+        self.reader = try await source.makeFrameReader(startTime: startTime)
+    }
+
+    deinit { reader.cancel() }
+
+    /// Returns the decoder's timestamp and full-precision IOSurface without copying.
+    func nextFrame() throws -> ReaderFrame? {
+        try Task.checkCancellation()
+        return try autoreleasepool { try reader.nextFrame() }
+    }
+}

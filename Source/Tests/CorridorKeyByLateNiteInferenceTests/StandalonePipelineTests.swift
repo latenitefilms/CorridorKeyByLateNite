@@ -16,6 +16,42 @@ extension MLXInferenceTests {
     /// A direct model test cannot detect a second flip introduced by a host.
     @Suite("Standalone pipeline", .serialized)
     struct StandalonePipelineTests {
+        @Test("Time Awareness Off emits each frame immediately and matches deferred single-frame inference")
+        func singleFrameStreamingMatchesDeferred() async throws {
+            let engine = try StandaloneRenderEngine()
+            defer { engine.releaseAnalysisCache() }
+            var state = PluginStateData(qualityMode: .draft512, hintMode: .none)
+            state.video.timeAwareness = .off
+            let buffer = try Self.makeSource(width: 128, height: 80) { column, _ in
+                column < 64 ? SIMD4<UInt8>(200, 30, 80, 255) : SIMD4<UInt8>(20, 200, 30, 255)
+            }
+            let streamed = try engine.makeVideoSession(state: state, frameCount: 2, sourceSize: CGSize(width: 128, height: 80))
+            var immediate: [VideoInferenceFrame] = []
+            for index in 0..<2 {
+                try engine.appendVideoFrame(source: buffer, state: state, renderTime: CMTime(value: Int64(index), timescale: 24),
+                                            frameIndex: index, session: streamed, hintReader: nil)
+                try streamed.finishPreparedFrame { immediate.append($0) }
+                #expect(immediate.count == index + 1)
+                #expect(immediate.last?.index == index)
+            }
+            try streamed.finish { _ in Issue.record("Streaming completion emitted a duplicate frame") }
+            let deferred = try engine.makeVideoSession(state: state, frameCount: 2, sourceSize: CGSize(width: 128, height: 80))
+            for index in 0..<2 {
+                try engine.appendVideoFrame(source: buffer, state: state, renderTime: CMTime(value: Int64(index), timescale: 24),
+                                            frameIndex: index, session: deferred, hintReader: nil)
+            }
+            var count = 0
+            try deferred.finish { result in
+                let expected = immediate[result.index]
+                #expect(result.alpha.count == expected.alpha.count)
+                let maximumError = zip(result.alpha, expected.alpha).map { abs($0 - $1) }.max() ?? 0
+                #expect(maximumError < 0.00001)
+                #expect(result.foregroundHalfRGBA == expected.foregroundHalfRGBA)
+                count += 1
+            }
+            #expect(count == 2)
+        }
+
         @Test("Linear output preserves signed source RGB in solid regions and never transforms alpha")
         func linearOutputControls() throws {
             let engine = try StandaloneRenderEngine()

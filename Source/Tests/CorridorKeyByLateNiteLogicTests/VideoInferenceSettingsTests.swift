@@ -71,6 +71,10 @@ struct VideoInferenceSettingsTests {
         settings.keepOriginalInSolidAreas = true
         settings.lowGPUMemory = false
         #expect(settings.analysisIdentity == original)
+        settings.hintFrames = .singleFrame
+        settings.referenceFrame = 12
+        settings.internalHintStrength = 0.4
+        #expect(settings.analysisIdentity == original)
         settings.timeAwareness = .four
         #expect(settings.analysisIdentity != original)
         var state = PluginStateData()
@@ -79,6 +83,29 @@ struct VideoInferenceSettingsTests {
         #expect(restored.video == settings)
         let legacy = try PropertyListEncoder().encode(["alphaGamma": 1.0])
         #expect(try PropertyListDecoder().decode(PluginStateData.self, from: legacy).video == VideoInferenceSettings())
+    }
+
+    @Test("Motion template defaults match the shared initial settings")
+    func motionTemplateDefaults() throws {
+        let source = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let url = source.appending(path: "CorridorKeyByLateNite/WrapperApp/Resources/Motion Template/CorridorKey by LateNite/CorridorKey by LateNite.moef")
+        let template = try String(contentsOf: url, encoding: .utf8)
+        let state = PluginStateData()
+        for (label, identifier, value) in [
+            (HintMode.controlName, 1007, state.hintMode.rawValue),
+            ("Low GPU Memory", 9005, state.video.lowGPUMemory ? 1 : 0),
+            ("Auto Despeckle", 3006, state.autoDespeckleEnabled ? 1 : 0),
+            ("Light Wrap", 8001, state.lightWrapEnabled ? 1 : 0),
+            ("Reduce Edge Flicker", 8006, state.temporalStabilityEnabled ? 1 : 0)
+        ] {
+            #expect(template.contains("name=\"\(label)\" id=\"\(identifier)\" flags=\"12901679120\" default=\"\(value)\" value=\"\(value)\""))
+        }
+        var saved = state
+        saved.hintMode = .appleVision
+        saved.temporalStabilityEnabled = true
+        saved.lightWrapEnabled = true
+        saved.autoDespeckleEnabled = true
+        #expect(PluginStateData.decoded(from: try saved.encodedForHost()) == saved)
     }
 
     @Test("Invalid confidence and missing files fail before GPU work")

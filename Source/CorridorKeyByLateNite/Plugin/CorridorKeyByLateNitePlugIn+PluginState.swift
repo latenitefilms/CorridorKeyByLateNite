@@ -129,21 +129,18 @@ extension CorridorKeyToolboxPlugIn {
             time: renderTime,
             default: .automatic
         )
-        // Read the new Hint Mode popup. The popup's default is
-        // `.appleVision`, matching what the legacy "Auto Subject
-        // Hint = on" toggle did, so projects opening for the first
-        // time after this change keep their hint behaviour.
+        // Explicit host values win; missing controls use the shared factory defaults.
         state.hintMode = popupValue(
             retrieval: retrieval,
             parameterID: ParameterIdentifier.hintMode,
             time: renderTime,
-            default: HintMode.appleVision
+            default: PluginStateData().hintMode
         )
         state.showSubjectMarker = boolValue(
             retrieval: retrieval,
             parameterID: ParameterIdentifier.showSubjectMarker,
             time: renderTime,
-            default: true
+            default: PluginStateData().showSubjectMarker
         )
         let (subjectX, subjectY) = pointValue(
             retrieval: retrieval,
@@ -213,7 +210,7 @@ extension CorridorKeyToolboxPlugIn {
             retrieval: retrieval,
             parameterID: ParameterIdentifier.autoDespeckle,
             time: renderTime,
-            default: true
+            default: PluginStateData().autoDespeckleEnabled
         )
         state.despeckleSize = intValue(
             retrieval: retrieval,
@@ -233,7 +230,7 @@ extension CorridorKeyToolboxPlugIn {
             retrieval: retrieval,
             parameterID: ParameterIdentifier.lightWrapEnabled,
             time: renderTime,
-            default: true
+            default: PluginStateData().lightWrapEnabled
         )
         state.lightWrapStrength = floatValue(
             retrieval: retrieval,
@@ -265,7 +262,7 @@ extension CorridorKeyToolboxPlugIn {
             retrieval: retrieval,
             parameterID: ParameterIdentifier.temporalStabilityEnabled,
             time: renderTime,
-            default: true
+            default: PluginStateData().temporalStabilityEnabled
         )
         state.temporalStabilityStrength = floatValue(
             retrieval: retrieval,

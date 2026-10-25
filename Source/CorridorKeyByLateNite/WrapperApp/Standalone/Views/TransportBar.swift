@@ -63,7 +63,8 @@ struct TransportBar: View {
                 )
 
                 SubjectHintsMenu(viewModel: viewModel)
-                    .disabled(!viewModel.phase.isReady)
+                    .disabled(!viewModel.phase.isReady || viewModel.state.video.useAlphaHint)
+                    .help(viewModel.state.video.useAlphaHint ? "Disable Use Alpha Hint to edit manual points." : ManualHintGuidance.explanation)
 
                 Button("Export…", systemImage: "square.and.arrow.up", action: onExport)
                     .disabled(!viewModel.phase.isReady || viewModel.exportStatus.inProgress)

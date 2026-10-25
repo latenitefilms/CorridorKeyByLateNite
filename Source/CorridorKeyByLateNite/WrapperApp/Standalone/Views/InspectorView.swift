@@ -210,6 +210,10 @@ private struct SettingsGroup: View {
                 defaultValue: ParameterRanges.Defaults.hintMode,
                 onChange: viewModel.parameterDidChange
             )
+            .disabled(viewModel.state.video.useAlphaHint)
+            Text(HintMode.explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             EnumPicker(
                 title: ParameterRanges.screenColorName,
                 selection: $viewModel.state.screenColor,
@@ -264,7 +268,7 @@ private struct SettingsGroup: View {
             }
             if viewModel.state.hintMode == .manual && viewModel.state.hintPointSet.isEmpty {
                 Label(
-                    "Add a foreground or background hint using the Subject Hints menu, then choose Analyse Clip.",
+                    "Use Subject Hints to mark a foreground or background area, then choose Analyse Clip.",
                     systemImage: "exclamationmark.triangle.fill"
                 )
                 .font(.caption)
@@ -284,7 +288,7 @@ private struct VideoTimeAwarenessGroup: View {
                        selection: $viewModel.state.video.timeAwareness, defaultValue: .off,
                        onChange: viewModel.videoParameterDidChange)
             ParameterToggle(title: VideoInferenceSettings.Labels.lowGPUMemory,
-                            isOn: $viewModel.state.video.lowGPUMemory, defaultValue: true,
+                            isOn: $viewModel.state.video.lowGPUMemory, defaultValue: VideoInferenceSettings().lowGPUMemory,
                             onChange: viewModel.videoParameterDidChange)
             Text("Applied during Analyse Clip. " + viewModel.videoMemoryDescription)
                 .font(.caption).foregroundStyle(.secondary)
@@ -300,6 +304,8 @@ private struct VideoAlphaHintGroup: View {
             AlphaHintPicker(asset: $viewModel.state.video.alphaHintAsset,
                             onChange: viewModel.videoParameterDidChange,
                             setCurrentReference: viewModel.setCurrentFrameAsHintReference)
+            Text("Import a black-and-white mask: white keeps the subject and black removes the background. Use Alpha Hint enables this file in place of Generated Hint and manual points.")
+                .font(.caption).foregroundStyle(.secondary)
             ParameterToggle(title: VideoInferenceSettings.Labels.useAlphaHint,
                             isOn: $viewModel.state.video.useAlphaHint, defaultValue: false,
                             onChange: viewModel.videoParameterDidChange)
@@ -310,18 +316,21 @@ private struct VideoAlphaHintGroup: View {
                                            defaultValue: 0, parameterMin: 0, parameterMax: Int(Int32.max),
                                            sliderMin: 0, sliderMax: max(0, viewModel.totalFrames - 1), step: 1),
                                value: $viewModel.state.video.referenceFrame,
-                               onChange: viewModel.videoParameterDidChange)
+                               onChange: viewModel.videoParameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged)
                 .disabled(viewModel.state.video.hintFrames != .singleFrame)
             ParameterFloatSlider(range: .init(name: VideoInferenceSettings.Labels.alphaHintStrength,
                                              defaultValue: 0.75, parameterMin: 0, parameterMax: 1,
                                              sliderMin: 0, sliderMax: 1, step: 0.01),
                                  value: $viewModel.state.video.alphaHintStrength,
-                                 onChange: viewModel.videoParameterDidChange)
+                                 onChange: viewModel.videoParameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged)
             ParameterFloatSlider(range: .init(name: VideoInferenceSettings.Labels.internalHintStrength,
                                              defaultValue: 0.95, parameterMin: 0, parameterMax: 1,
                                              sliderMin: 0, sliderMax: 1, step: 0.01),
                                  value: $viewModel.state.video.internalHintStrength,
-                                 onChange: viewModel.videoParameterDidChange)
+                                 onChange: viewModel.videoParameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged)
             Text("Reference Frame is zero-based. Single Frame propagates forwards and backwards using Time Awareness.")
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -342,12 +351,14 @@ private struct InteriorDetailGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.passthroughErode,
                 value: $viewModel.state.passthroughErodeNormalized,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterFloatSlider(
                 range: ParameterRanges.passthroughBlur,
                 value: $viewModel.state.passthroughBlurNormalized,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
         }
     }
@@ -361,27 +372,32 @@ private struct MatteGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.alphaBlackPoint,
                 value: $viewModel.state.alphaBlackPoint,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterFloatSlider(
                 range: ParameterRanges.alphaWhitePoint,
                 value: $viewModel.state.alphaWhitePoint,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterFloatSlider(
                 range: ParameterRanges.alphaErode,
                 value: $viewModel.state.alphaErodeNormalized,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterFloatSlider(
                 range: ParameterRanges.alphaSoftness,
                 value: $viewModel.state.alphaSoftnessNormalized,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterFloatSlider(
                 range: ParameterRanges.alphaGamma,
                 value: $viewModel.state.alphaGamma,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterToggle(
                 title: ParameterRanges.autoDespeckleName,
@@ -392,13 +408,15 @@ private struct MatteGroup: View {
             ParameterIntSlider(
                 range: ParameterRanges.despeckleSize,
                 value: $viewModel.state.despeckleSize,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             .disabled(!viewModel.state.autoDespeckleEnabled)
             ParameterFloatSlider(
                 range: ParameterRanges.refinerStrength,
                 value: $viewModel.state.refinerStrength,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
         }
     }
@@ -412,7 +430,8 @@ private struct EdgeAndSpillGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.despillStrength,
                 value: $viewModel.state.despillStrength,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             EnumPicker(
                 title: ParameterRanges.spillMethodName,
@@ -438,13 +457,15 @@ private struct EdgeRefinementGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.lightWrapStrength,
                 value: $viewModel.state.lightWrapStrength,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             .disabled(!viewModel.state.lightWrapEnabled)
             ParameterFloatSlider(
                 range: ParameterRanges.lightWrapRadius,
                 value: $viewModel.state.lightWrapRadius,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             .disabled(!viewModel.state.lightWrapEnabled)
 
@@ -457,7 +478,8 @@ private struct EdgeRefinementGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.edgeDecontaminateStrength,
                 value: $viewModel.state.edgeDecontaminateStrength,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             .disabled(!viewModel.state.edgeDecontaminateEnabled)
         }
@@ -469,6 +491,8 @@ private struct TemporalStabilityGroup: View {
 
     var body: some View {
         InspectorGroup(title: "Temporal Stability") {
+            Text("Optional smoothing after the v2 key. It can soften detail or leave trails on moving edges. Start with it off; try Time Awareness first for flicker.")
+                .font(.caption).foregroundStyle(.secondary)
             ParameterToggle(
                 title: ParameterRanges.temporalStabilityName,
                 isOn: $viewModel.state.temporalStabilityEnabled,
@@ -478,7 +502,8 @@ private struct TemporalStabilityGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.temporalStabilityStrength,
                 value: $viewModel.state.temporalStabilityStrength,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             .disabled(!viewModel.state.temporalStabilityEnabled)
         }
@@ -514,6 +539,7 @@ struct ParameterFloatSlider: View {
     let range: FloatParameterRange
     @Binding var value: Double
     var onChange: () -> Void = {}
+    var onEditingChanged: (Bool) -> Void = { _ in }
 
     /// True when the current value sits within half a step of the
     /// factory default. Used to show / hide the reset affordance — a
@@ -555,7 +581,8 @@ struct ParameterFloatSlider: View {
                     set: { value = $0 }
                 ),
                 in: range.sliderMin...range.sliderMax,
-                step: range.step
+                step: range.step,
+                onEditingChanged: onEditingChanged
             )
             .onChange(of: value) {
                 onChange()
@@ -572,6 +599,7 @@ struct ParameterIntSlider: View {
     let range: IntParameterRange
     @Binding var value: Int
     var onChange: () -> Void = {}
+    var onEditingChanged: (Bool) -> Void = { _ in }
 
     private var isAtDefault: Bool { value == range.defaultValue }
 
@@ -606,7 +634,8 @@ struct ParameterIntSlider: View {
                             set: { value = Int($0.rounded()) }
                         ),
                         in: Double(range.sliderMin)...Double(range.sliderMax),
-                        step: Double(range.step)
+                        step: Double(range.step),
+                        onEditingChanged: onEditingChanged
                     )
                 } else {
                     // A stepped Slider traps on a zero-width range, even when

@@ -73,20 +73,17 @@ struct PluginStateDataTests {
         #expect(decoded.cachedMatteInferenceResolution == 1024)
     }
 
-    @Test("Temporal stability defaults preserve backward compatibility")
+    @Test("Temporal smoothing is opt-in and explicit saved values survive")
     func temporalStabilityDefaults() {
         let defaults = PluginStateData()
-        // Default ON in v1.0 — alongside Light Wrap,
-        // Auto Despeckle, and Apple Vision hinting, this lands users on
-        // a comp-ready key on first frame. Users tuning a tricky shot
-        // can flip it off via the inspector.
-        #expect(defaults.temporalStabilityEnabled == true)
+        #expect(defaults.temporalStabilityEnabled == false)
         #expect(defaults.temporalStabilityStrength == 0.5)
+        #expect(defaults.autoDespeckleEnabled == false)
+        #expect(defaults.lightWrapEnabled == false)
+        #expect(defaults.video.lowGPUMemory == false)
 
-        // Empty blobs hit the default branch which now returns an
-        // enabled stabiliser, matching the new product default.
         let decoded = PluginStateData.decoded(from: NSData())
-        #expect(decoded.temporalStabilityEnabled == true)
+        #expect(decoded.temporalStabilityEnabled == false)
         #expect(decoded.temporalStabilityStrength == 0.5)
     }
 
@@ -119,18 +116,14 @@ struct PluginStateDataTests {
         #expect(decoded.cachedMatteInferenceResolution == 0)
     }
 
-    @Test("Hint mode defaults to Apple Vision and survives round-trip")
+    @Test("Hint mode defaults to None and explicit modes survive round-trip")
     func hintModeDefaultsAndRoundTrip() throws {
         let defaults = PluginStateData()
-        // Default in v1.0: Vision's foreground prior beats the
-        // chroma prior on most footage, and the MLX network handles
-        // the harder boundaries Vision produces well enough that
-        // shipping it as the default is the right call.
-        #expect(defaults.hintMode == .appleVision)
+        #expect(defaults.hintMode == .none)
 
         // Empty blob falls back to the default mode.
         let legacyDecoded = PluginStateData.decoded(from: NSData())
-        #expect(legacyDecoded.hintMode == .appleVision)
+        #expect(legacyDecoded.hintMode == .none)
 
         // Manual should round-trip.
         let manual = PluginStateData(screenColor: .green, qualityMode: .high1024, hintMode: .manual)

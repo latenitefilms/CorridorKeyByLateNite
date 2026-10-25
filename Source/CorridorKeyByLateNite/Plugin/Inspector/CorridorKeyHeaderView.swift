@@ -61,6 +61,10 @@ struct CorridorKeyHeaderView: View {
                                 onChange: bridge.saveAlphaHintAsset,
                                 setCurrentReference: bridge.setCurrentFrameAsHintReference)
                     .disabled(isAnalysisInFlight)
+                    .help("Alpha Hint imports a black-and-white mask: white keeps the subject; black removes the background. Enable Use Alpha Hint to replace generated hints and manual points.")
+                Text(HintMode.explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 if let message = bridge.hintSelectionError {
                     Text(message).font(.caption).foregroundStyle(.red)
                 }
