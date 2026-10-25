@@ -10,6 +10,7 @@
 //
 
 import Testing
+import SwiftUI
 import Foundation
 import CoreMedia
 @testable import CorridorKeyByLateNiteApp
@@ -17,6 +18,24 @@ import CoreMedia
 @Suite("EditorViewModel", .serialized)
 @MainActor
 struct EditorViewModelTests {
+
+    @Test("Inspector renders empty, single-frame and multi-frame reference sliders", arguments: [0, 1, 2, 120])
+    func inspectorRendersReferenceFrameSlider(totalFrames: Int) throws {
+        let viewModel = EditorViewModel(renderEngine: try StandaloneRenderEngine())
+        viewModel.totalFrames = totalFrames
+
+        // Exercise both the initially disabled control and Single Frame mode.
+        // Disabling a stepped Slider does not prevent its range validation.
+        for hintFrames in [AlphaHintFrames.allFrames, .singleFrame] {
+            viewModel.state.video.hintFrames = hintFrames
+            let renderer = ImageRenderer(content: InspectorView(viewModel: viewModel)
+                .frame(width: 400, height: 900))
+            let image = try #require(renderer.cgImage)
+            #expect(image.width > 0)
+            #expect(image.height > 0)
+            #expect(viewModel.state.video.referenceFrame == 0)
+        }
+    }
 
     @Test("Missing local analysis keeps Analyse Clip available and retains failing export references")
     func missingCacheCanBeAnalysedAgain() async throws {

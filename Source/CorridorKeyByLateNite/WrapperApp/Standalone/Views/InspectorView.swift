@@ -598,14 +598,24 @@ struct ParameterIntSlider: View {
                     onChange()
                 }
             }
-            Slider(
-                value: Binding(
-                    get: { Double(min(range.sliderMax, max(range.sliderMin, value))) },
-                    set: { value = Int($0.rounded()) }
-                ),
-                in: Double(range.sliderMin)...Double(range.sliderMax),
-                step: Double(range.step)
-            )
+            Group {
+                if range.sliderMin < range.sliderMax {
+                    Slider(
+                        value: Binding(
+                            get: { Double(min(range.sliderMax, max(range.sliderMin, value))) },
+                            set: { value = Int($0.rounded()) }
+                        ),
+                        in: Double(range.sliderMin)...Double(range.sliderMax),
+                        step: Double(range.step)
+                    )
+                } else {
+                    // A stepped Slider traps on a zero-width range, even when
+                    // disabled. Keep an inert track for empty/single-frame media
+                    // without expanding the parameter's valid frame range.
+                    Slider(value: .constant(0), in: 0...1)
+                        .disabled(true)
+                }
+            }
             .onChange(of: value) {
                 onChange()
             }
