@@ -309,6 +309,8 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
         switch hintAction(for: modifiers) {
         case .addForeground:
             hints.add(HintPoint(x: object.x, y: object.y, kind: .foreground, frame: hintFrame))
+        case .addIgnore:
+            hints.add(HintPoint(x: object.x, y: object.y, kind: .ignore, frame: hintFrame))
         case .addBackground:
             hints.add(HintPoint(x: object.x, y: object.y, kind: .background, frame: hintFrame))
         case .eraseNearest:
@@ -323,7 +325,7 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
            let setter = apiManager.api(for: (any FxParameterSettingAPI_v5).self) as? any FxParameterSettingAPI_v5 {
             var mode = Int32(PluginStateData().hintMode.rawValue)
             retrieval.getIntValue(&mode, fromParameter: ParameterIdentifier.hintMode, at: time)
-            if mode == HintMode.none.rawValue {
+            if mode != HintMode.manual.rawValue {
                 setter.setIntValue(Int32(HintMode.manual.rawValue), toParameter: ParameterIdentifier.hintMode, at: time)
             }
         }
@@ -453,6 +455,7 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
     private enum HintAction {
         case addForeground
         case addBackground
+        case addIgnore
         case eraseNearest
     }
 
@@ -465,6 +468,9 @@ class CorridorKeyHintOSC: NSObject, FxOnScreenControl_v4 {
         let raw = UInt(modifiers)
         if raw & UInt(kFxModifierKey_OPTION) != 0 {
             return .eraseNearest
+        }
+        if raw & UInt(kFxModifierKey_COMMAND) != 0 {
+            return .addIgnore
         }
         if raw & UInt(kFxModifierKey_SHIFT) != 0 {
             return .addBackground

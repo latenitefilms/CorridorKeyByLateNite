@@ -44,17 +44,19 @@ public enum ScreenColor: Int, Sendable, CaseIterable, Codable {
 /// V2 receives these as automated hints with quality 0.75; none changes the
 /// model weights. User points augment the selected prior in every mode.
 public enum HintMode: Int, Sendable, CaseIterable, Codable {
+    /// Menu order is independent of persisted raw values and FxPlug tags.
+    public static let allCases: [HintMode] = [.none, .automatic, .appleVision, .manual]
     /// Shared label distinguishes an optional generated mask from an imported alpha hint.
     public static let controlName = "Generated Hint"
     /// Shared help for both hosts; imported masks take precedence over local guidance.
-    public static let explanation = "None lets CorridorKey find the subject itself. Chroma uses the screen colour; Apple Vision adds subject detection. Manual Points starts with Chroma and adds the foreground and background points you place. An enabled Alpha Hint file replaces generated hints and points."
+    public static let explanation = "None lets CorridorKey find the subject itself. Chroma uses the screen colour; Apple Vision adds subject detection. Apple Vision + Manual Points uses detected subjects as a starting point: Foreground selects subjects, Background corrects small areas, and Ignore excludes detected objects. An enabled Alpha Hint file replaces generated hints and points."
     /// Green/blue chroma prior computed by Metal, without a Vision request.
     case automatic = 0
     /// Unions Vision's foreground-instance mask with the chroma prior.
     /// Vision chooses the available compute devices; this is not a guarantee
     /// that every request runs entirely on the Neural Engine.
     case appleVision = 1
-    /// Chroma prior plus required foreground/background points. This remains
+    /// Selected Vision instances plus local corrections. This remains
     /// an automated rough hint, not upstream v2's authoritative roto input.
     case manual = 2
     /// Let v2 select a subject without an alpha prior (confidence -1).
@@ -64,7 +66,7 @@ public enum HintMode: Int, Sendable, CaseIterable, Codable {
         switch self {
         case .automatic: return "Chroma"
         case .appleVision: return "Apple Vision"
-        case .manual: return "Manual Points"
+        case .manual: return "Apple Vision + Manual Points"
         case .none: return "None"
         }
     }
@@ -72,18 +74,9 @@ public enum HintMode: Int, Sendable, CaseIterable, Codable {
     /// Whether this mode runs the Vision foreground request when
     /// computing the upstream hint.
     public var usesVisionPrior: Bool {
-        self == .appleVision
+        self == .appleVision || self == .manual
     }
 
-    /// Whether this mode requires at least one user-placed hint
-    /// point somewhere in the clip. Unannotated frames use the chroma prior.
-    /// The render path checks this at
-    /// the start of the pre-inference stage and returns a
-    /// pass-through frame plus a status message rather than feeding
-    /// MLX an empty hint.
-    public var requiresUserHints: Bool {
-        self == .manual
-    }
 }
 
 /// Quality rung used for neural inference. `automatic` chooses a safe tier

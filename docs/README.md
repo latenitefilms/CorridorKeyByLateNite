@@ -40,17 +40,15 @@ It uses Apple's [Vision Framework](https://developer.apple.com/documentation/vis
 
 ---
 
-## Manual Hint
+## Apple Vision + Manual Points
 
-Foreground and background points adjust a small, soft-edged area of the coarse mask supplied to CorridorKey. Foreground points are not an outline or a selection: objects outside those points can still appear in the matte. A background point influences the area around it, rather than selecting an entire object for removal. Use the **Hint** output to inspect the mask the model receives.
+Apple Vision supplies the starting matte. Foreground points select detected subjects; mark each subject you want to retain. Background points correct small, soft-edged areas. Ignore points (red crosses) exclude a detected object, with a local correction when no instance is detected. Ignore takes precedence if the same instance is also marked Foreground. Vision must distinguish objects as separate instances to select them independently.
 
-New points belong to the frame where you place them. Pause on a frame, add foreground or background hints, then move to another frame to add a separate set. Choose **Analyse Clip** after editing. Changing hints invalidates the previous analysis in both the Standalone Editor and Final Cut Pro.
+New points belong to the frame where you place them. Unmarked frames use the Vision matte. Points do not track or propagate through the clip. Use **Alpha Hint (Diagnostic)** to inspect the guide and choose **Analyse Clip** after editing. The points guide CorridorKey's prediction; review the final matte. Changing points invalidates the previous analysis in both hosts.
 
-Frames without points use the automatic chroma hint. CorridorKey processes each frame independently; these points do not train the model, track the subject or propagate a correction through the clip. Temporal Stability smooths the resulting mattes and is not a tracking system.
+In the Standalone Editor, use **Subject Hints**. In Final Cut Pro, click for foreground, Shift-click for background, Command-click for Ignore, and Option-click to erase a nearby point. Both hosts offer **Clear Hints on This Frame** and **Clear All Hints**.
 
-In the Standalone Editor, use the **Subject Hints** menu. In Final Cut Pro, click the viewer for foreground, Shift-click for background, and Option-click to erase a nearby hint. Both hosts offer **Clear Hints on This Frame** and **Clear All Hints**.
-
-Hints saved by older versions have no frame information and retain their original clip-wide behaviour. Clear and replace them to use frame-specific hints. Existing analysis must be rebuilt once after this update.
+Hints saved by older versions retain their frame scope, including clip-wide points without frame information. Clear and replace those points to use frame-specific hints. Existing analysis must be rebuilt after this update. Generated Hint starts with **None**, while saved selections retain their original values.
 
 ---
 

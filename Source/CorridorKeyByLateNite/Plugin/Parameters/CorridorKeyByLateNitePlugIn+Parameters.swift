@@ -20,7 +20,7 @@ extension CorridorKeyToolboxPlugIn {
     /// Called once by FxPlug for each new instance.
     @objc(addParametersWithError:)
     func addParameters() throws {
-        guard let create = apiManager.api(for: (any FxParameterCreationAPI_v5).self) as? any FxParameterCreationAPI_v5 else {
+        guard let create = apiManager.api(for: (any FxParameterCreationAPI_v6).self) as? any FxParameterCreationAPI_v6 else {
             throw NSError(
                 domain: FxPlugErrorDomain,
                 code: kFxError_APIUnavailable,
@@ -99,7 +99,7 @@ extension CorridorKeyToolboxPlugIn {
         create.endParameterSubGroup()
     }
 
-    private func addSettingsGroup(create: any FxParameterCreationAPI_v5) throws {
+    private func addSettingsGroup(create: any FxParameterCreationAPI_v6) throws {
         create.startParameterSubGroup(
             "Settings",
             parameterID: ParameterIdentifier.settingsGroup,
@@ -143,11 +143,12 @@ extension CorridorKeyToolboxPlugIn {
         )
 
         // Generated guidance is optional; the v2 model can key without it.
-        create.addPopupMenu(
+        create.addTaggedPopupMenu(
             withName: HintMode.controlName,
             parameterID: ParameterIdentifier.hintMode,
-            defaultValue: UInt32(PluginStateData().hintMode.rawValue),
-            menuEntries: HintMode.allCases.map(\.displayName),
+            // Creation takes a menu index; retrieval and persistence use the stable tag.
+            defaultValue: UInt32(HintMode.allCases.firstIndex(of: PluginStateData().hintMode) ?? 0),
+            menuEntries: HintMode.allCases.map { FxTaggedMenuEntry(name: $0.displayName, tag: UInt($0.rawValue)) },
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 

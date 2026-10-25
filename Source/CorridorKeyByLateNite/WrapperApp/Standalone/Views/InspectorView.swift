@@ -104,6 +104,14 @@ private struct AnalysisStatusGroup: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+            if let info = viewModel.clipInfo {
+                LabeledContent("Source Resolution", value: "\(Int(info.renderSize.width)) × \(Int(info.renderSize.height))")
+                    .font(.callout).foregroundStyle(.secondary)
+                if info.kind == .video {
+                    LabeledContent("Source Frame Rate", value: "\(Double(info.nominalFrameRate).formatted(.number.precision(.fractionLength(0...3))))fps")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
             Text(AnalysisDiskCache.storageExplanation)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -197,13 +205,6 @@ private struct SettingsGroup: View {
                 defaultValue: ParameterRanges.Defaults.qualityMode,
                 onChange: viewModel.parameterDidChange
             )
-            // The Hint dropdown sits directly under Quality because
-            // hint generation is the second-most-impactful decision
-            // for the matte (after the inference rung). Replaces the
-            // old "Auto Subject Hint" checkbox — the dropdown's three
-            // values map cleanly to Automatic (chroma prior),
-            // Apple Vision (Neural-Engine subject mask), and Manual
-            // (user-placed dots only).
             EnumPicker(
                 title: ParameterRanges.hintModeName,
                 selection: $viewModel.state.hintMode,
@@ -266,15 +267,7 @@ private struct SettingsGroup: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if viewModel.state.hintMode == .manual && viewModel.state.hintPointSet.isEmpty {
-                Label(
-                    "Use Subject Hints to mark a foreground or background area, then choose Analyse Clip.",
-                    systemImage: "exclamationmark.triangle.fill"
-                )
-                .font(.caption)
-                .foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
-            }
+
         }
     }
 }

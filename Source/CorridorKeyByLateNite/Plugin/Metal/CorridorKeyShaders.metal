@@ -831,6 +831,18 @@ fragment float4 corridorKeyDrawOSCFragment(
         float radius = max(p.radius, 1.0);
         bool isActive = ((i + 1) == activePart);
 
+        if (p.kind == 2) {
+            // Ignore: red circular badge with a white cross, matching the editor.
+            float disc = 1.0 - smoothstep(radius - aaBand, radius + aaBand, length(offsetPixels));
+            float crossDistance = min(abs(offsetPixels.x - offsetPixels.y), abs(offsetPixels.x + offsetPixels.y)) * 0.7071;
+            float cross = (1.0 - smoothstep(radius * 0.12, radius * 0.12 + aaBand, crossDistance))
+                        * (1.0 - smoothstep(radius * 0.65, radius * 0.65 + aaBand, length(offsetPixels)));
+            float3 badge = mix(float3(0.95, 0.15, 0.20), float3(1.0), cross);
+            colour.rgb = mix(colour.rgb, badge, disc);
+            colour.a = max(colour.a, disc);
+            continue;
+        }
+
         if (p.kind == 1) {
             // Background hint — rounded rectangle in the user's
             // screen colour with a black outline. Mirrors the

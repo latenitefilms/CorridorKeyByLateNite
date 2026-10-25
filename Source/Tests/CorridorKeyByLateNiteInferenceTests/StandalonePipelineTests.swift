@@ -215,7 +215,7 @@ extension MLXInferenceTests {
         }
 
         @Test("Manual Hint analysis and diagnostic use only the current frame's annotations",
-              arguments: [HintPointKind.foreground, .background])
+              arguments: [HintPointKind.foreground, .background, .ignore])
         func manualHintsAreFrameScoped(kind: HintPointKind) throws {
             let engine = try StandaloneRenderEngine()
             let source = try Self.makeSource(width: 64, height: 64) { _, _ in
@@ -230,7 +230,9 @@ extension MLXInferenceTests {
             ])
             // An unmarked frame in a manually annotated clip must still analyse.
             let unmarked = try engine.extractMatteBlob(source: source, state: annotated, renderTime: duration)
-            let automatic = try engine.extractMatteBlob(source: source, state: Self.neutralState(), renderTime: duration)
+            var unannotated = annotated
+            unannotated.hintPointSet.clear()
+            let automatic = try engine.extractMatteBlob(source: source, state: unannotated, renderTime: duration)
             let maxDelta = zip(unmarked.alphaFloats, automatic.alphaFloats).reduce(Float.zero) {
                 max($0, abs($1.0 - $1.1))
             }
@@ -239,12 +241,16 @@ extension MLXInferenceTests {
             annotated.outputMode = .hint
             let markedPixels = Self.readRGBA(try engine.render(source: source, state: annotated, renderTime: .zero).destinationTexture)
             let unmarkedPixels = Self.readRGBA(try engine.render(source: source, state: annotated, renderTime: duration).destinationTexture)
-            var baseline = Self.neutralState()
+            var baseline = unannotated
             baseline.outputMode = .hint
             let baselinePixels = Self.readRGBA(try engine.render(source: source, state: baseline, renderTime: duration).destinationTexture)
             #expect(unmarkedPixels == baselinePixels)
             let center = (32 * 64 + 32) * 4
-            #expect(abs(markedPixels[center] - unmarkedPixels[center]) > 0.1)
+            if kind == .foreground {
+                #expect(markedPixels[center] > unmarkedPixels[center] + 0.1)
+            } else {
+                #expect(markedPixels[center] <= unmarkedPixels[center])
+            }
             // Points guide local areas; they do not turn everything outside them into background.
             #expect(markedPixels[0] == unmarkedPixels[0])
         }

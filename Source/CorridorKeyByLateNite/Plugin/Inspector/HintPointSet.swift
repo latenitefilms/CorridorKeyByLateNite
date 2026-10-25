@@ -44,17 +44,18 @@ public struct HintFrame: Hashable, Sendable, Codable {
 /// Identical guidance in the standalone and Final Cut Pro inspectors.
 public enum ManualHintGuidance {
     /// Describes the local influence and analysis workflow without promising tracking.
-    public static let explanation = "Choose Foreground to keep a small area, or Background to remove it, then click the image. Erase removes a point. Points belong to the displayed frame and do not outline or track a subject; unmarked frames in Manual Points use Chroma. Choose Alpha Hint (Diagnostic) to inspect the guide, then Analyse Clip to update the result."
+    public static let explanation = "Apple Vision supplies the starting matte. Foreground selects a detected subject; mark more subjects to keep them too. Background removes a small area. Ignore (red cross) excludes a detected object, or removes a small area if no object is found. Ignore wins when the same object is also marked Foreground. Erase removes a point. Points apply only to the displayed frame and do not track; unmarked frames use Apple Vision. Choose Alpha Hint (Diagnostic) to inspect the guide, then Analyse Clip to update the result."
     /// Explains how to migrate annotations whose original frame was never recorded.
     public static let legacyExplanation = "Hints saved in earlier versions apply to every frame. Clear them and add new hints to make them frame-specific."
 }
 
-/// Foreground vs background hint label. Foreground points pull the
-/// matte toward 1.0 in their neighbourhood; background points pull it
-/// toward 0.0. Stored as `Int` to round-trip through NSNumber cleanly.
+/// Foreground and Ignore select or exclude Vision instances. Background and
+/// unmatched points make local corrections. Stable integers preserve saved hints.
 public enum HintPointKind: Int, Sendable, Codable {
     case foreground = 0
     case background = 1
+    /// Excludes the detected Vision instance, with a local correction as fallback.
+    case ignore = 2
 }
 
 /// One user-placed hint point. Coordinates are in object-normalized

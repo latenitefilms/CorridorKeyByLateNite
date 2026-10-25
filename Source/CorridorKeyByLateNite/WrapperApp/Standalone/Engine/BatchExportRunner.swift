@@ -55,7 +55,7 @@ enum BatchExportNaming {
     static func sharedSettings(from state: PluginStateData) -> PluginStateData {
         var settings = state
         settings.hintPointSet.clear()
-        if settings.hintMode == .manual { settings.hintMode = .automatic }
+        if settings.hintMode == .manual { settings.hintMode = .appleVision }
         settings.video.useAlphaHint = false
         settings.video.alphaHintAsset = nil
         settings.video.referenceFrame = 0

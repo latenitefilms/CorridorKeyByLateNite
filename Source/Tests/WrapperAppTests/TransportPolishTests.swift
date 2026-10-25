@@ -24,6 +24,41 @@ import CoreMedia
 @Suite("Transport polish", .serialized)
 struct TransportPolishTests {
 
+    @Test("Frame stepping and boundary jumps pause playback and clamp to actual samples")
+    @MainActor
+    func navigationPausesPlayback() throws {
+        let model = EditorViewModel(renderEngine: try StandaloneRenderEngine())
+        model.clipInfo = MediaSourceInfo(
+            url: URL(filePath: "/tmp/transport-test.mov"), renderSize: CGSize(width: 1920, height: 1080),
+            nominalFrameRate: 25, duration: CMTime(value: 4, timescale: 25), nativePixelFormat: 0,
+            timescale: 25000, videoTrackID: 1, preferredTransform: .identity,
+            colorPrimaries: nil, transferFunction: nil, yCbCrMatrix: nil
+        )
+        model.totalFrames = 4
+        model.phase = .ready
+        model.togglePlayback()
+        #expect(model.isPlaying)
+        model.step(byFrames: 1)
+        #expect(!model.isPlaying)
+        #expect(abs(model.playheadTime.seconds - 0.04) < 0.0001)
+        model.togglePlayback()
+        model.jumpToLastFrame()
+        #expect(!model.isPlaying)
+        #expect(abs(model.playheadTime.seconds - 0.12) < 0.0001)
+        model.step(byFrames: 1)
+        #expect(abs(model.playheadTime.seconds - 0.12) < 0.0001)
+        model.togglePlayback()
+        model.jumpToFirstFrame()
+        #expect(!model.isPlaying)
+        #expect(model.playheadTime == .zero)
+        model.step(byFrames: -1)
+        #expect(model.playheadTime == .zero)
+        model.totalFrames = 1
+        model.jumpToLastFrame()
+        #expect(model.playheadTime == .zero)
+        model.closeClip()
+    }
+
     @Test("nearestFrameTime clamps to the last valid frame so the counter never overshoots")
     func nearestFrameTimeClampsToLastFrame() async throws {
         let synthURL = try await SyntheticVideoFixture.writeMP4(frameCount: 4, fps: 24)

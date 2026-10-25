@@ -76,6 +76,7 @@ struct CorridorKeyHeaderView: View {
                 backendStatusRow
 
                 cachedMattesStatusRow
+                SourceClipInformation(snapshot: bridge.snapshot)
                 Text(bridge.videoMemoryDescription).font(.caption).foregroundStyle(.secondary)
                 Text(AnalysisDiskCache.storageExplanation)
                     .font(.caption)
@@ -125,7 +126,7 @@ struct CorridorKeyHeaderView: View {
                 }
             }
             .labelStyle(.iconOnly)
-            .help(ManualHintGuidance.explanation + "\nClick for foreground, Shift-click for background, Option-click to erase."
+            .help(ManualHintGuidance.explanation + "\nClick for foreground, Shift-click for background, Command-click to ignore, Option-click to erase."
                   + (bridge.hasLegacyHints ? "\n" + ManualHintGuidance.legacyExplanation : ""))
 
             if case .warming = bridge.snapshot.warmup {
@@ -264,5 +265,23 @@ struct CorridorKeyHeaderView: View {
         case .ready(let resolution): return "Neural Model: Ready (\(resolution)px)"
         case .failed(let message): return "Neural Model Failed: \(message)"
         }
+    }
+}
+
+/// Source metadata uses native clip timing rather than the Final Cut Pro project rate.
+private struct SourceClipInformation: View {
+    let snapshot: CorridorKeyAnalysisSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            if let width = snapshot.sourceWidth, let height = snapshot.sourceHeight {
+                Text("Source Resolution: \(width) × \(height)")
+            }
+            if let frameRate = snapshot.sourceFrameRate {
+                Text("Source Frame Rate: \(frameRate.formatted(.number.precision(.fractionLength(0...3))))fps")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 }

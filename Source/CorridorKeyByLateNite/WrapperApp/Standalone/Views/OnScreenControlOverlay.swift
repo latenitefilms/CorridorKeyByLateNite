@@ -74,6 +74,7 @@ struct OnScreenControlOverlay: View {
         case .disabled: return ""
         case .foregroundHint: return "Click to add a local foreground hint on this frame."
         case .backgroundHint: return "Click to add a local background hint on this frame."
+        case .ignoreHint: return "Click an unwanted object to exclude it from the Vision hint on this frame."
         case .eraseHint: return "Click near a hint to remove it."
         }
     }
@@ -108,6 +109,12 @@ struct HintPointMarker: View {
                 foregroundMarker
             case .background:
                 backgroundMarker
+            case .ignore:
+                Image(systemName: "xmark.circle.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, .red)
+                    .font(.title3)
+                    .accessibilityLabel("Ignore object")
             }
         }
         .shadow(color: .black.opacity(0.45), radius: 1.8, y: 1)
@@ -187,6 +194,11 @@ struct SubjectHintsMenu: View {
             }
             .keyboardShortcut("b", modifiers: [.command, .shift])
 
+            Button("Mark Ignore", systemImage: "xmark.circle.fill") {
+                viewModel.oscTool = .ignoreHint
+            }
+            .keyboardShortcut("i", modifiers: [.command, .shift])
+
             Button("Erase Nearest Hint", systemImage: "eraser") {
                 viewModel.oscTool = .eraseHint
             }
@@ -209,14 +221,15 @@ struct SubjectHintsMenu: View {
         }
         .menuStyle(.borderlessButton)
         .controlSize(.regular)
-        .help("Mark local foreground or background areas on this frame, then choose Analyse Clip.")
+        .help(ManualHintGuidance.explanation)
     }
 
     private var menuLabelTitle: String {
         switch viewModel.oscTool {
         case .disabled: return "Subject"
-        case .foregroundHint: return "Marking FG"
-        case .backgroundHint: return "Marking BG"
+        case .foregroundHint: return "Marking Foreground"
+        case .backgroundHint: return "Marking Background"
+        case .ignoreHint: return "Marking Ignore"
         case .eraseHint: return "Erasing"
         }
     }
@@ -226,6 +239,7 @@ struct SubjectHintsMenu: View {
         case .disabled: return "person.crop.rectangle"
         case .foregroundHint: return "person.fill.badge.plus"
         case .backgroundHint: return "rectangle.fill.badge.minus"
+        case .ignoreHint: return "xmark.circle.fill"
         case .eraseHint: return "eraser"
         }
     }
@@ -241,6 +255,7 @@ extension OnScreenControlTool {
         case .disabled: return "Off"
         case .foregroundHint: return "Mark Foreground"
         case .backgroundHint: return "Mark Background"
+        case .ignoreHint: return "Mark Ignore"
         case .eraseHint: return "Erase Nearest Hint"
         }
     }

@@ -206,12 +206,12 @@ struct EditorViewModelTests {
 
         viewModel.playheadTime = CMTime(value: 1, timescale: 24)
         #expect(viewModel.currentFrameHints.isEmpty)
-        viewModel.oscTool = .backgroundHint
+        viewModel.oscTool = .ignoreHint
         undo.beginUndoGrouping()
         viewModel.handleOSCClick(atNormalizedPoint: CGPoint(x: 0.5, y: 0.5))
         undo.endUndoGrouping()
         #expect(viewModel.state.hintPointSet.points.count == 2)
-        #expect(viewModel.currentFrameHints.first?.kind == .background)
+        #expect(viewModel.currentFrameHints.first?.kind == .ignore)
 
         undo.beginUndoGrouping()
         viewModel.clearHintsOnCurrentFrame()
@@ -224,7 +224,7 @@ struct EditorViewModelTests {
         #expect(viewModel.currentFrameHints.first?.kind == .foreground)
         #expect(viewModel.state.hintPointSet.points.count == 2)
         viewModel.playheadTime = CMTime(value: 1, timescale: 24)
-        #expect(viewModel.currentFrameHints.first?.kind == .background)
+        #expect(viewModel.currentFrameHints.first?.kind == .ignore)
         undo.redo()
         #expect(viewModel.currentFrameHints.isEmpty)
         viewModel.closeClip()

@@ -214,6 +214,24 @@ enum RenderStages {
         return output
     }
 
+    /// Builds an identical Vision prior for analysis and diagnostics. Manual selection
+    /// uses only selected instances so chroma cannot restore excluded objects.
+    static func prepareVisionHint(mask: any MTLTexture, source: any MTLTexture,
+                                  includeChroma: Bool, screenColor: SIMD3<Float>,
+                                  entry: MetalDeviceCacheEntry,
+                                  commandBuffer: any MTLCommandBuffer) throws -> PooledTexture {
+        let vision = try extractHint(source: mask, layout: 1, targetWidth: source.width,
+                                     targetHeight: source.height, entry: entry, commandBuffer: commandBuffer)
+        guard includeChroma else { return vision }
+        let chroma = try generateChromaHint(source: source, screenColor: screenColor,
+                                            entry: entry, commandBuffer: commandBuffer)
+        let combined = try unionHints(primary: vision.texture, secondary: chroma.texture,
+                                      entry: entry, commandBuffer: commandBuffer)
+        vision.returnOnCompletion(of: commandBuffer)
+        chroma.returnOnCompletion(of: commandBuffer)
+        return combined
+    }
+
     // MARK: - Hint-point overlay
 
     /// In-place applies user-placed hint points (foreground / background

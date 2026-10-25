@@ -184,6 +184,7 @@ enum OnScreenControlTool: Hashable, Sendable, CaseIterable, Identifiable {
     case disabled
     case foregroundHint
     case backgroundHint
+    case ignoreHint
     case eraseHint
 
     var id: Self { self }
@@ -193,6 +194,7 @@ enum OnScreenControlTool: Hashable, Sendable, CaseIterable, Identifiable {
         case .disabled: return "Off"
         case .foregroundHint: return "Foreground"
         case .backgroundHint: return "Background"
+        case .ignoreHint: return "Ignore"
         case .eraseHint: return "Erase"
         }
     }
@@ -202,6 +204,7 @@ enum OnScreenControlTool: Hashable, Sendable, CaseIterable, Identifiable {
         case .disabled: return "circle.slash"
         case .foregroundHint: return "plus.circle.fill"
         case .backgroundHint: return "minus.circle.fill"
+        case .ignoreHint: return "xmark.circle.fill"
         case .eraseHint: return "eraser"
         }
     }
@@ -978,7 +981,8 @@ final class EditorViewModel {
     ///
     /// Frame-index space: 0 → frame 0, 1 → frame N-1.
     func scrub(toNormalized fraction: Double) {
-        guard let clipInfo else { return }
+        guard let clipInfo, phase.isReady, !isStillImage, fraction.isFinite else { return }
+        stopPlayback()
         let clamped = min(max(fraction, 0), 1)
         let lastFrameIndex = max(totalFrames - 1, 0)
         let frameRate = max(Double(clipInfo.nominalFrameRate), 0.001)
@@ -992,10 +996,11 @@ final class EditorViewModel {
     }
 
     /// Moves the playhead by an integer number of source frames.
-    /// Wraps inputs to stay within the clip duration. Used by the
+    /// Pauses playback and clamps to actual source samples. Used by the
     /// transport's step buttons.
     func step(byFrames delta: Int) {
-        guard let clipInfo else { return }
+        guard let clipInfo, phase.isReady, !isStillImage else { return }
+        stopPlayback()
         let frameRate = max(Double(clipInfo.nominalFrameRate), 0.001)
         let currentFrame = Int((playheadTime.seconds * frameRate).rounded())
         let targetFrame = max(0, min(totalFrames - 1, currentFrame + delta))
@@ -1006,6 +1011,12 @@ final class EditorViewModel {
         playheadTime = target
         renderPreview(at: target)
     }
+
+    /// Pauses and seeks to the first source frame.
+    func jumpToFirstFrame() { scrub(toNormalized: 0) }
+
+    /// Pauses and seeks to the last sample, never the time just past the clip.
+    func jumpToLastFrame() { scrub(toNormalized: 1) }
 
     // MARK: - Preview rendering
 
@@ -1140,6 +1151,9 @@ final class EditorViewModel {
         case .backgroundHint:
             nextSet.add(HintPoint(x: clampedX, y: clampedY, kind: .background, frame: frame))
             actionName = "Add Background Hint"
+        case .ignoreHint:
+            nextSet.add(HintPoint(x: clampedX, y: clampedY, kind: .ignore, frame: frame))
+            actionName = "Add Ignore Hint"
         case .eraseHint:
             let didRemove = nextSet.removeNearest(toX: clampedX, y: clampedY, tolerance: 0.05, at: playheadTime)
             actionName = didRemove ? "Erase Hint" : nil
@@ -1180,7 +1194,7 @@ final class EditorViewModel {
         defer { pendingEditName = nil }
         var editedState = state
         editedState.hintPointSet = newSet
-        if editedState.hintMode == .none, !newSet.isEmpty { editedState.hintMode = .manual }
+        if !newSet.isEmpty { editedState.hintMode = .manual }
         state = editedState
         // Hints feed the MLX bridge at analysis time. Re-render the
         // preview now so the dots appear immediately; the user can

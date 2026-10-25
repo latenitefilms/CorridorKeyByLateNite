@@ -283,19 +283,6 @@ final class RenderPipeline: @unchecked Sendable {
                 cachedHeight: header.height
             )
         }
-        // Manual hint mode demands at least one user-placed hint —
-        // the network can't produce a useful matte from an empty
-        // hint channel. Surface as a pass-through so the user sees
-        // their footage rather than a black frame, and label the
-        // backend so the inspector status row can explain why.
-        if inputs.state.hintMode.requiresUserHints,
-           inputs.state.hintPointSet.points.isEmpty {
-            return try renderSourcePassThrough(
-                inputs: inputs,
-                context: context,
-                backendDescription: "Manual Hint — add at least one foreground / background point"
-            )
-        }
         // Unanalysed → leave the source untouched. Running MLX on the render
         // thread made toggling the effect feel laggy and produced inconsistent
         // output while the analysis cache was being built, so pass-through is
@@ -404,9 +391,6 @@ final class RenderPipeline: @unchecked Sendable {
                           sourceRowOrder: ImageRowOrder = .topToBottom) throws {
         entry.beginAnalysisFrame()
         defer { entry.endAnalysisFrame() }
-        if state.hintMode.requiresUserHints, state.hintPointSet.isEmpty, !state.video.useAlphaHint {
-            throw KeyingInferenceError.modelUnavailable("Manual Hint needs at least one foreground or background point.")
-        }
         let normalized = try normalizeSourceRows(sourceTexture, rowOrder: sourceRowOrder,
                                                  entry: entry, commandQueue: commandQueue)
         defer { normalized?.returnManually() }
@@ -629,8 +613,7 @@ final class RenderPipeline: @unchecked Sendable {
     /// Writes the source tile straight through to the destination. Used when
     /// the clip hasn't been analysed yet — the plug-in stays out of the way
     /// until the cache is populated. The optional `backendDescription`
-    /// override lets the Manual Hint pass-through surface a more
-    /// specific reason in the inspector's status row.
+    /// override labels explicit Original output in the inspector's status row.
     private func renderSourcePassThrough(
         inputs: ResolvedRenderInputs,
         context: DeviceContext,
@@ -699,7 +682,8 @@ final class RenderPipeline: @unchecked Sendable {
            #available(macOS 14.0, *) {
             if let engine = context.entry.visionHintEngine() as? VisionHintEngine {
                 do {
-                    visionMask = try engine.generateMask(source: context.sourceTexture)
+                    visionMask = try engine.generateMask(source: context.sourceTexture,
+                        points: inputs.state.hintMode == .manual ? inputs.state.hintPointSet.points(at: inputs.renderTime) : nil)
                     if visionMask == nil {
                         visionFailureReason = "Vision found no foreground instance"
                         PluginLog.notice("Hint Diagnostic: Vision returned nil — falling back to green-bias hint.")
@@ -707,6 +691,7 @@ final class RenderPipeline: @unchecked Sendable {
                         PluginLog.notice("Hint Diagnostic: Vision returned a mask, will resample and compose.")
                     }
                 } catch {
+                    if inputs.state.hintMode == .manual { throw error }
                     visionFailureReason = error.localizedDescription
                     PluginLog.notice("Hint Diagnostic: Vision threw error '\(error.localizedDescription)' — falling back to green-bias hint.")
                 }
@@ -718,6 +703,9 @@ final class RenderPipeline: @unchecked Sendable {
             PluginLog.notice("Hint Diagnostic: skipping Vision — hintMode=\(inputs.state.hintMode.displayName), externalHintAttached=\(inputs.alphaHintTexture != nil).")
         }
 
+        if inputs.state.hintMode == .manual, suppliedHint == nil, !inputs.state.video.useAlphaHint, visionMask == nil {
+            throw KeyingInferenceError.modelUnavailable("Apple Vision is unavailable. Try again or choose a different Generated Hint.")
+        }
         guard let commandBuffer = context.commandQueue.makeCommandBuffer() else {
             throw MetalDeviceCacheError.commandBufferCreationFailed
         }
@@ -752,38 +740,12 @@ final class RenderPipeline: @unchecked Sendable {
                 targetWidth: rotatedSource.width, targetHeight: rotatedSource.height,
                 entry: context.entry, commandBuffer: commandBuffer)
         } else if let mask = visionMask {
-            // Same union as `runPreInference` — see the long comment
-            // there for why a Vision-only hint loses foreground props.
-            // Diagnostic mode shows exactly what the network will see,
-            // so it has to mirror the production combine.
-            let visionPooled = try RenderStages.extractHint(
-                source: mask.texture,
-                layout: 1,
-                targetWidth: rotatedSource.width,
-                targetHeight: rotatedSource.height,
-                entry: context.entry,
-                commandBuffer: commandBuffer
-            )
-            mask.retainOnCompletion(of: commandBuffer)
-            let chromaPooled = try RenderStages.generateChromaHint(
-                source: rotatedSource,
+            hintPooled = try RenderStages.prepareVisionHint(
+                mask: mask.texture, source: rotatedSource, includeChroma: inputs.state.hintMode != .manual,
                 screenColor: screenTransform.estimatedScreenReference,
-                entry: context.entry,
-                commandBuffer: commandBuffer
+                entry: context.entry, commandBuffer: commandBuffer
             )
-            hintPooled = try RenderStages.unionHints(
-                primary: visionPooled.texture,
-                secondary: chromaPooled.texture,
-                entry: context.entry,
-                commandBuffer: commandBuffer
-            )
-            visionPooled.returnOnCompletion(of: commandBuffer)
-            chromaPooled.returnOnCompletion(of: commandBuffer)
         } else {
-            // Manual and Automatic share the chroma prior — see the
-            // matching branch in `runPreInference` for why a pure
-            // zero-base hint produces nonsense mattes. Manual mode's
-            // contract is enforced upstream by the empty-hint guard.
             hintPooled = try RenderStages.generateChromaHint(
                 source: rotatedSource,
                 screenColor: screenTransform.estimatedScreenReference,
@@ -795,7 +757,8 @@ final class RenderPipeline: @unchecked Sendable {
         // Step 3: layer OSC hint points on top of whichever upstream
         // hint we just produced — so the diagnostic also shows the
         // user's manual dots.
-        let frameHints = inputs.state.video.useAlphaHint || inputs.state.hintMode == .none ? [] : inputs.state.hintPointSet.points(at: inputs.renderTime)
+        let frameHints = inputs.state.video.useAlphaHint || inputs.state.hintMode == .none
+            ? [] : (visionMask?.localCorrections ?? inputs.state.hintPointSet.points(at: inputs.renderTime))
         if !frameHints.isEmpty {
             try RenderStages.applyHintPoints(
                 hint: hintPooled.texture,
@@ -947,15 +910,15 @@ final class RenderPipeline: @unchecked Sendable {
         // before encoding GPU preprocessing. Vision reads
         // the original (un-rotated) source — the hint is single-channel
         // alpha, colour-space-independent, so the screen matrix is
-        // irrelevant. Fall back to the green-bias hint when Vision finds
-        // no salient subject or fails for any reason; the render path
-        // never silently degrades.
+        // irrelevant. Automatic Vision may fall back to chroma. Manual
+        // selection must not restore excluded objects when Vision is unavailable.
         var visionMask: VisionMask? = nil
-        if hintMode == .appleVision, hintTexture == nil, #available(macOS 14.0, *) {
+        if hintMode.usesVisionPrior, hintTexture == nil, #available(macOS 14.0, *) {
             if let engine = entry.visionHintEngine() as? VisionHintEngine {
                 do {
-                    visionMask = try engine.generateMask(source: sourceTexture)
+                    visionMask = try engine.generateMask(source: sourceTexture, points: hintMode == .manual ? hintPoints : nil)
                 } catch {
+                    if hintMode == .manual { throw error }
                     PluginLog.notice(
                         "Vision hint failed for analysis frame, falling back to green-bias hint: \(error.localizedDescription)"
                     )
@@ -963,6 +926,9 @@ final class RenderPipeline: @unchecked Sendable {
             }
         }
 
+        if hintMode == .manual, hintTexture == nil, visionMask == nil {
+            throw KeyingInferenceError.modelUnavailable("Apple Vision is unavailable. Try again or choose a different Generated Hint.")
+        }
         guard let preCommandBuffer = commandQueue.makeCommandBuffer() else {
             throw MetalDeviceCacheError.commandBufferCreationFailed
         }
@@ -992,50 +958,12 @@ final class RenderPipeline: @unchecked Sendable {
                 targetWidth: rotatedSource.width, targetHeight: rotatedSource.height,
                 entry: entry, commandBuffer: preCommandBuffer)
         } else if let mask = visionMask {
-            // Apple Vision's foreground-instance detector is a *subject*
-            // model — it picks people, animals, and salient objects but
-            // ignores generic foreground props (a sword, a phone, a
-            // carved totem in front of the screen). On its own that
-            // means the hint says "background" everywhere a prop sits,
-            // and the network pulls the prop out of the matte too. To
-            // recover those pixels we union the Vision mask with the
-            // chroma prior: anywhere chroma says "this isn't the screen
-            // colour" gets pulled back into foreground even if Vision
-            // missed it. Vision still drives the hint where it does see
-            // a subject (people consistently key better with the binary
-            // saliency mask than with the chroma gradient), and the
-            // chroma fills in everything else.
-            let visionPooled = try RenderStages.extractHint(
-                source: mask.texture,
-                layout: 1,
-                targetWidth: rotatedSource.width,
-                targetHeight: rotatedSource.height,
-                entry: entry,
-                commandBuffer: preCommandBuffer
-            )
-            mask.retainOnCompletion(of: preCommandBuffer)
-            let chromaPooled = try RenderStages.generateChromaHint(
-                source: rotatedSource,
+            hintTexturePooled = try RenderStages.prepareVisionHint(
+                mask: mask.texture, source: rotatedSource, includeChroma: hintMode != .manual,
                 screenColor: screenTransform.estimatedScreenReference,
-                entry: entry,
-                commandBuffer: preCommandBuffer
+                entry: entry, commandBuffer: preCommandBuffer
             )
-            hintTexturePooled = try RenderStages.unionHints(
-                primary: visionPooled.texture,
-                secondary: chromaPooled.texture,
-                entry: entry,
-                commandBuffer: preCommandBuffer
-            )
-            visionPooled.returnOnCompletion(of: preCommandBuffer)
-            chromaPooled.returnOnCompletion(of: preCommandBuffer)
         } else {
-            // Manual and Automatic both use the chroma-derived prior
-            // here — the network was trained on that distribution,
-            // not on sparse user dots in isolation. The empty-hint
-            // guard in `renderInternal` / the analyser already
-            // refuses to run Manual mode without at least one user
-            // dot, so the user's clicks still gate progress; they
-            // just augment the chroma prior on top of feeding it.
             hintTexturePooled = try RenderStages.generateChromaHint(
                 source: rotatedSource,
                 screenColor: screenTransform.estimatedScreenReference,
@@ -1047,10 +975,11 @@ final class RenderPipeline: @unchecked Sendable {
         // Layer user-placed foreground / background dots from the OSC
         // on top of whichever upstream hint we just produced. No-op
         // when the user hasn't placed any.
-        if !hintPoints.isEmpty {
+        let localCorrections = visionMask?.localCorrections ?? hintPoints
+        if !localCorrections.isEmpty {
             try RenderStages.applyHintPoints(
                 hint: hintTexturePooled.texture,
-                points: hintPoints,
+                points: localCorrections,
                 entry: entry,
                 commandBuffer: preCommandBuffer
             )

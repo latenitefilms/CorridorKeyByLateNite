@@ -16,6 +16,25 @@ import Testing
 @Suite("HintPointSet")
 struct HintPointSetTests {
 
+    @Test("Ignore hints retain their kind and frame across FxPlug persistence")
+    func ignoreRoundTrip() throws {
+        let frame = try #require(HintFrame(time: .zero, duration: CMTime(value: 1, timescale: 25)))
+        let original = HintPointSet(points: [HintPoint(x: 0.2, y: 0.8, kind: .ignore, frame: frame)])
+        let restored = HintPointSet.fromParameterDictionary(original.asParameterDictionary())
+        #expect(restored == original)
+        #expect(restored.points(at: .zero).first?.kind == .ignore)
+        #expect(restored.points(at: CMTime(value: 1, timescale: 25)).isEmpty)
+    }
+
+    @Test("Generated Hint menu starts with None without changing saved tags")
+    func hintMenuCompatibility() {
+        #expect(HintMode.allCases == [.none, .automatic, .appleVision, .manual])
+        #expect(HintMode.none.rawValue == 3)
+        #expect(HintMode.manual.rawValue == 2)
+        #expect(HintMode.manual.usesVisionPrior)
+        #expect(HintMode.manual.displayName == "Apple Vision + Manual Points")
+    }
+
     @Test("Round-trip via parameter dictionary preserves every point")
     func dictionaryRoundTrip() throws {
         let original = HintPointSet(points: [

@@ -30,6 +30,9 @@ import CoreVideo
 import CoreImage
 import Vision
 import Accelerate
+#if canImport(CorridorKeyToolboxLogic)
+import CorridorKeyToolboxLogic
+#endif
 
 /// Wraps a Vision-generated mask as a plain Metal-owned texture. The
 /// CVPixelBuffer / CVMetalTexture lifecycle is handled inside
@@ -37,9 +40,12 @@ import Accelerate
 /// `.r8Unorm` texture downstream callers can sample freely.
 struct VisionMask: @unchecked Sendable {
     let texture: any MTLTexture
+    /// Points not already resolved by instance selection; nil preserves legacy overlays.
+    let localCorrections: [HintPoint]?
 
-    init(texture: any MTLTexture) {
+    init(texture: any MTLTexture, localCorrections: [HintPoint]? = nil) {
         self.texture = texture
+        self.localCorrections = localCorrections
     }
 
     /// No-op kept for source compatibility. The Metal-owned texture is
@@ -123,10 +129,10 @@ final class VisionHintEngine: @unchecked Sendable {
     }
 
     /// Runs Vision's foreground-instance detector on `source` and returns
-    /// a Metal texture containing the union of every detected subject's
-    /// scaled mask. Returns `nil` when Vision detected no foreground —
-    /// the caller should fall back to `RenderStages.generateChromaHint`
-    /// in that case.
+    /// a Metal texture containing the selected subjects' scaled mask. Passing
+    /// `points` enables instance selection, even when the array is empty. With
+    /// no points argument, a missing detection returns nil for chroma fallback;
+    /// selection mode instead returns an empty mask plus local corrections.
     ///
     /// `source` may be in any pixel format Core Image can interpret;
     /// `.rgba16Float` and `.rgba8Unorm` both work. The returned texture is
@@ -155,7 +161,7 @@ final class VisionHintEngine: @unchecked Sendable {
     /// The blit runs on a dedicated command queue borrowed from the
     /// device cache and is committed before this function returns —
     /// the returned texture is fully valid the moment it lands.
-    func generateMask(source: any MTLTexture) throws -> VisionMask? {
+    func generateMask(source: any MTLTexture, points: [HintPoint]? = nil) throws -> VisionMask? {
         requestLock.lock()
         defer { requestLock.unlock() }
         // Tag the CIImage with a known colour space — without this
@@ -206,25 +212,88 @@ final class VisionHintEngine: @unchecked Sendable {
 
         guard let observation = request.results?.first else {
             PluginLog.notice("Vision hint: no observation returned from foreground request.")
-            return nil
+            return try points.map { try emptyMask(localCorrections: $0) }
         }
         guard !observation.allInstances.isEmpty else {
-            PluginLog.notice("Vision hint: observation has zero instances — falling back to green-bias hint.")
-            return nil
+            PluginLog.notice("Vision hint: observation has zero foreground instances.")
+            return try points.map { try emptyMask(localCorrections: $0) }
         }
 
+        let selection = try Self.selectInstances(
+            instanceMask: observation.instanceMask, allInstances: observation.allInstances, points: points ?? []
+        )
+        // Some Vision mask APIs interpret an empty selection as all subjects.
+        // Explicit black preserves the user's decision to exclude every instance.
+        guard !selection.instances.isEmpty else { return try emptyMask(localCorrections: selection.localCorrections) }
         let maskBuffer: CVPixelBuffer
         do {
             maskBuffer = try observation.generateScaledMaskForImage(
-                forInstances: observation.allInstances,
+                forInstances: selection.instances,
                 from: handler
             )
         } catch {
             PluginLog.error("Vision hint mask scaling failed: \(error.localizedDescription)")
             throw VisionHintError.maskGenerationFailed(error)
         }
-        PluginLog.notice("Vision hint: produced \(observation.allInstances.count) instance mask(s) at \(CVPixelBufferGetWidth(maskBuffer))×\(CVPixelBufferGetHeight(maskBuffer)).")
-        return try wrapAsMetalTexture(pixelBuffer: maskBuffer)
+        PluginLog.notice("Vision hint: selected \(selection.instances.count) of \(observation.allInstances.count) instance mask(s) at \(CVPixelBufferGetWidth(maskBuffer))×\(CVPixelBufferGetHeight(maskBuffer)).")
+        let mask = try wrapAsMetalTexture(pixelBuffer: maskBuffer)
+        return VisionMask(texture: mask.texture, localCorrections: points == nil ? nil : selection.localCorrections)
+    }
+
+    /// Resolves top-down source points against Vision's instance labels, honoring row stride.
+    /// Foreground selects a union of subjects; Ignore always subtracts from that selection.
+    /// Background remains a local correction rather than discarding an entire subject.
+    struct InstanceSelection {
+        let instances: IndexSet
+        let localCorrections: [HintPoint]
+    }
+
+    /// Resolves labels once per point; foreground selections never reappear as local lifts.
+    static func selectInstances(instanceMask: CVPixelBuffer, allInstances: IndexSet,
+                                points: [HintPoint]) throws -> InstanceSelection {
+        guard !points.isEmpty else { return InstanceSelection(instances: allInstances, localCorrections: []) }
+        let status = CVPixelBufferLockBaseAddress(instanceMask, .readOnly)
+        guard status == kCVReturnSuccess else { throw VisionHintError.textureWrappingFailed(status) }
+        defer { CVPixelBufferUnlockBaseAddress(instanceMask, .readOnly) }
+        guard CVPixelBufferGetPixelFormatType(instanceMask) == kCVPixelFormatType_OneComponent8,
+              let base = CVPixelBufferGetBaseAddress(instanceMask) else {
+            throw VisionHintError.textureWrappingFailed(kCVReturnInvalidPixelFormat)
+        }
+        let width = CVPixelBufferGetWidth(instanceMask)
+        let height = CVPixelBufferGetHeight(instanceMask)
+        let stride = CVPixelBufferGetBytesPerRow(instanceMask)
+        var included = IndexSet()
+        var excluded = IndexSet()
+        var localCorrections: [HintPoint] = []
+        for point in points {
+            guard point.x.isFinite, point.y.isFinite,
+                  (0...1).contains(point.x), (0...1).contains(point.y) else { continue }
+            let column = min(Int(point.x * Double(width)), width - 1)
+            let row = min(Int(point.y * Double(height)), height - 1)
+            let instance = Int(base.load(fromByteOffset: row * stride + column, as: UInt8.self))
+            guard point.kind != .background, allInstances.contains(instance) else {
+                localCorrections.append(point)
+                continue
+            }
+            if point.kind == .foreground { included.insert(instance) }
+            else { excluded.insert(instance) }
+        }
+        return InstanceSelection(instances: (included.isEmpty ? allInstances : included).subtracting(excluded),
+                                 localCorrections: localCorrections)
+    }
+
+    /// A deliberate empty selection must not fall back to chroma or all subjects.
+    private func emptyMask(localCorrections: [HintPoint]) throws -> VisionMask {
+        guard let cacheEntry else { throw VisionHintError.textureWrappingFailed(kCVReturnInvalidArgument) }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: 1, height: 1, mipmapped: false)
+        descriptor.storageMode = .shared
+        descriptor.usage = .shaderRead
+        guard let texture = cacheEntry.device.makeTexture(descriptor: descriptor) else {
+            throw VisionHintError.textureWrappingFailed(kCVReturnAllocationFailed)
+        }
+        var black: UInt8 = 0
+        texture.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &black, bytesPerRow: 1)
+        return VisionMask(texture: texture, localCorrections: localCorrections)
     }
 
     /// Wraps a Vision mask CVPixelBuffer as an `.r8Unorm` MTLTexture.

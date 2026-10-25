@@ -42,6 +42,11 @@ struct CorridorKeyAnalysisSnapshot: Equatable, Sendable {
     /// supplying every optional field.
     let hintPointCount: Int
 
+    /// Host-reported input dimensions and native clip frame rate, when available.
+    let sourceWidth: Int?
+    let sourceHeight: Int?
+    let sourceFrameRate: Double?
+
     /// Default-valued init so focused snapshot logic tests only need to
     /// provide fields relevant to the behaviour under test.
     init(
@@ -53,7 +58,10 @@ struct CorridorKeyAnalysisSnapshot: Equatable, Sendable {
         analysisETASeconds: Double? = nil,
         lastRenderMilliseconds: Double? = nil,
         renderBackendDescription: String = "—",
-        hintPointCount: Int = 0
+        hintPointCount: Int = 0,
+        sourceWidth: Int? = nil,
+        sourceHeight: Int? = nil,
+        sourceFrameRate: Double? = nil
     ) {
         self.state = state
         self.analyzedFrameCount = analyzedFrameCount
@@ -64,6 +72,9 @@ struct CorridorKeyAnalysisSnapshot: Equatable, Sendable {
         self.lastRenderMilliseconds = lastRenderMilliseconds
         self.renderBackendDescription = renderBackendDescription
         self.hintPointCount = hintPointCount
+        self.sourceWidth = sourceWidth
+        self.sourceHeight = sourceHeight
+        self.sourceFrameRate = sourceFrameRate
     }
 
     static let empty = CorridorKeyAnalysisSnapshot(

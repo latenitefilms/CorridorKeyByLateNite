@@ -18,6 +18,7 @@ import CoreMedia
 struct TransportBar: View {
     @Bindable var viewModel: EditorViewModel
     let onImport: () -> Void
+    let onBatchImport: () -> Void
     let onClose: () -> Void
     let onExport: () -> Void
     /// Tells the host editor to surface its `.fileImporter` for the
@@ -31,6 +32,10 @@ struct TransportBar: View {
                 Button("Import…", systemImage: "square.and.arrow.down", action: onImport)
                     .buttonStyle(.bordered)
 
+                Button("Batch Import…", systemImage: "square.stack.3d.up", action: onBatchImport)
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.analysisStatus.inProgress || viewModel.exportStatus.inProgress || viewModel.batchExport.isRunning)
+
                 Button(viewModel.isStillImage ? "Close Image" : "Close Clip", systemImage: "xmark.circle", action: onClose)
                     .buttonStyle(.bordered)
                     .disabled(!viewModel.phase.isReady)
@@ -39,8 +44,6 @@ struct TransportBar: View {
 
                 if viewModel.isStillImage {
                     StillImageInfoLabel(renderSize: viewModel.renderSize)
-                } else {
-                    playbackCluster
                 }
 
                 Spacer()
@@ -71,45 +74,15 @@ struct TransportBar: View {
             }
 
             if !viewModel.isStillImage {
-                scrubberRow
+                HStack {
+                    PlaybackControls(viewModel: viewModel)
+                    scrubberRow
+                }
             }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
         .background(.regularMaterial)
-    }
-
-    private var playbackCluster: some View {
-        HStack(spacing: 14) {
-            Button("Step Back", systemImage: "backward.frame.fill") {
-                viewModel.step(byFrames: -1)
-            }
-            .buttonStyle(.borderless)
-            .labelStyle(.iconOnly)
-            .disabled(!viewModel.phase.isReady)
-            .controlSize(.large)
-
-            Button(
-                viewModel.isPlaying ? "Pause" : "Play",
-                systemImage: viewModel.isPlaying ? "pause.fill" : "play.fill"
-            ) {
-                viewModel.togglePlayback()
-            }
-            .buttonStyle(.borderless)
-            .labelStyle(.iconOnly)
-            .disabled(!viewModel.phase.isReady)
-            .controlSize(.extraLarge)
-            .keyboardShortcut(.space, modifiers: [])
-            .font(.title2)
-
-            Button("Step Forward", systemImage: "forward.frame.fill") {
-                viewModel.step(byFrames: 1)
-            }
-            .buttonStyle(.borderless)
-            .labelStyle(.iconOnly)
-            .disabled(!viewModel.phase.isReady)
-            .controlSize(.large)
-        }
     }
 
     private var scrubberRow: some View {
@@ -134,7 +107,7 @@ struct TransportBar: View {
                     .foregroundStyle(.secondary)
                 fpsIndicator
             }
-            .frame(width: 110, alignment: .trailing)
+            .frame(minWidth: 110, alignment: .trailing)
         }
     }
 
@@ -188,11 +161,11 @@ struct TransportBar: View {
     ///   every frame; it's just running slower than realtime.
     private var fpsIndicator: some View {
         let achieved = viewModel.measuredPlaybackFPS
-        let target = viewModel.targetPlaybackFPS
+        let target = Double(viewModel.clipInfo?.nominalFrameRate ?? 0)
         let isPlaying = viewModel.isPlaying
         let isRealtime = isPlaying && target > 0 && achieved >= target * 0.95
-        let badgeColour: Color = isPlaying ? (isRealtime ? .green : .orange) : .white
-        return Text("\(Int(achieved.rounded()))fps")
+        let badgeColour: Color = isPlaying ? (isRealtime ? .green : .orange) : .primary
+        return Text("\(Int(achieved.rounded()))fps (\(target.formatted(.number.precision(.fractionLength(0...3))))fps)")
             .font(.caption.monospacedDigit())
             .foregroundStyle(badgeColour)
             .help(fpsIndicatorTooltip(isPlaying: isPlaying, isRealtime: isRealtime))
@@ -213,6 +186,40 @@ struct TransportBar: View {
     private func timeLabel(for time: CMTime) -> String {
         let frameRate = Double(viewModel.clipInfo?.nominalFrameRate ?? 24)
         return TransportTimecodeFormatter(frameRate: frameRate).format(time)
+    }
+}
+
+/// Playback actions share the same frame-safe view-model methods for buttons and keys.
+private struct PlaybackControls: View {
+    @Bindable var viewModel: EditorViewModel
+
+    var body: some View {
+        HStack {
+            Button("Go to First Frame", systemImage: "backward.end.fill", action: viewModel.jumpToFirstFrame)
+                .help("Go to the first frame and pause playback.")
+            Button("Step Back", systemImage: "backward.frame.fill") {
+                viewModel.step(byFrames: -1)
+            }
+            .keyboardShortcut(.leftArrow, modifiers: [])
+            .help("Previous frame (Left Arrow)")
+            Button(viewModel.isPlaying ? "Pause" : "Play",
+                   systemImage: viewModel.isPlaying ? "pause.fill" : "play.fill",
+                   action: viewModel.togglePlayback)
+                .keyboardShortcut(.space, modifiers: [])
+                .help("Play or pause (Space)")
+                .font(.title2)
+            Button("Step Forward", systemImage: "forward.frame.fill") {
+                viewModel.step(byFrames: 1)
+            }
+            .keyboardShortcut(.rightArrow, modifiers: [])
+            .help("Next frame (Right Arrow)")
+            Button("Go to Last Frame", systemImage: "forward.end.fill", action: viewModel.jumpToLastFrame)
+                .help("Go to the last frame and pause playback.")
+        }
+        .buttonStyle(.borderless)
+        .labelStyle(.iconOnly)
+        .controlSize(.large)
+        .disabled(!viewModel.phase.isReady || viewModel.isStillImage)
     }
 }
 

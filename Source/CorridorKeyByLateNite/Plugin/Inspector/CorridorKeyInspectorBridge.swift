@@ -175,6 +175,18 @@ final class CorridorKeyInspectorBridge {
         let lastRender = plugin?.lastFrameMilliseconds.read()
         let lastRenderForFooter: Double? = (lastRender ?? 0) > 0 ? lastRender : nil
         let backendDescription = plugin?.lastRenderReport.read()?.backendDescription ?? "—"
+        var sourceWidth: UInt = 0
+        var sourceHeight: UInt = 0
+        var pixelAspectRatio: Double = 1
+        if let inputAPI = apiManager.api(for: (any FxOnScreenControlAPI_v3).self) as? any FxOnScreenControlAPI_v3 {
+            inputAPI.inputWidth(&sourceWidth, height: &sourceHeight, pixelAspectRatio: &pixelAspectRatio)
+        }
+        var frameDuration = CMTime.invalid
+        if let timing = apiManager.api(for: (any FxTimingAPI_v4).self) as? any FxTimingAPI_v4 {
+            timing.frameDuration(&frameDuration)
+        }
+        let sourceFrameRate = frameDuration.isNumeric && frameDuration.seconds > 0
+            ? 1 / frameDuration.seconds : nil
         return CorridorKeyAnalysisSnapshot(
             state: state,
             analyzedFrameCount: analysed,
@@ -183,7 +195,10 @@ final class CorridorKeyInspectorBridge {
             warmup: warmup,
             analysisETASeconds: eta,
             lastRenderMilliseconds: lastRenderForFooter,
-            renderBackendDescription: backendDescription
+            renderBackendDescription: backendDescription,
+            sourceWidth: sourceWidth > 0 ? Int(sourceWidth) : nil,
+            sourceHeight: sourceHeight > 0 ? Int(sourceHeight) : nil,
+            sourceFrameRate: sourceFrameRate
         )
     }
 
@@ -273,14 +288,14 @@ final class CorridorKeyInspectorBridge {
             fromParameter: ParameterIdentifier.qualityMode,
             at: CMTime.zero
         )
-        var hintModeRaw = Int32(HintMode.appleVision.rawValue)
+        var hintModeRaw = Int32(PluginStateData().hintMode.rawValue)
         retrieval.getIntValue(&hintModeRaw, fromParameter: ParameterIdentifier.hintMode, at: .zero)
         var smoothing = ObjCBool(false)
         var smoothingStrength = 0.5
         retrieval.getBoolValue(&smoothing, fromParameter: ParameterIdentifier.temporalStabilityEnabled, at: .zero)
         retrieval.getFloatValue(&smoothingStrength, fromParameter: ParameterIdentifier.temporalStabilityStrength, at: .zero)
         if !data.matchesHints(
-            mode: HintMode(rawValue: Int(hintModeRaw)) ?? .appleVision,
+            mode: HintMode(rawValue: Int(hintModeRaw)) ?? PluginStateData().hintMode,
             points: plugin.loadHintPointSet(using: retrieval),
             video: plugin.videoSettings(using: retrieval, at: .zero),
             temporalStabilityEnabled: smoothing.boolValue, temporalStabilityStrength: smoothingStrength

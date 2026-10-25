@@ -282,6 +282,7 @@
 					</parameter>
 					<parameter name="Upscale Method" id="6002" flags="12901679120" default="1" value="1"/>
 					<parameter name="Output" id="5001" flags="12901679120" default="0" value="0"/>
+					<!-- Generated Hint stores the stable tag: 3 = None, now first in the menu. -->
 					<parameter name="Generated Hint" id="1007" flags="12901679120" default="3" value="3"/>
 					<parameter name="Input is Linear" id="9001" flags="12901679120" default="0" value="0"/>
 					<parameter name="Linearize Output" id="9002" flags="12901679120" default="0" value="0"/>

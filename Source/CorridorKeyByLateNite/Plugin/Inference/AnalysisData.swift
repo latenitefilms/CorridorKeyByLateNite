@@ -50,7 +50,8 @@ struct AnalysisData: Sendable {
     /// Version 7 stores alpha and RGB in canonical top-down rows for every host.
     /// Version 8 moves production payloads into the bounded local disk cache.
     /// Version 9 records temporal/color/hint controls and aspect-preserving v2 predictions.
-    static let currentSchemaVersion: Int = 9
+    /// Version 10 replaces chroma-based manual hints with selected Vision instances.
+    static let currentSchemaVersion: Int = 10
 
     let schemaVersion: Int
     let frameDuration: CMTime

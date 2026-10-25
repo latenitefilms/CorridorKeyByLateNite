@@ -140,7 +140,7 @@ extension EditorViewModelTests {
         state.video.timeAwareness = .four
         let settings = BatchExportNaming.sharedSettings(from: state)
         #expect(settings.hintPointSet.isEmpty)
-        #expect(settings.hintMode == .automatic)
+        #expect(settings.hintMode == .appleVision)
         #expect(!settings.video.useAlphaHint)
         #expect(settings.despillStrength == 0.25)
         #expect(settings.video.timeAwareness == .four)

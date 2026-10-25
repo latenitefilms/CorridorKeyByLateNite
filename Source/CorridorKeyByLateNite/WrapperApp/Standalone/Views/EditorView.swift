@@ -56,16 +56,13 @@ struct EditorView: View {
             TransportBar(
                 viewModel: viewModel,
                 onImport: { isImporting = true },
+                onBatchImport: presentBatchExport,
                 onClose: viewModel.closeClip,
                 onExport: { isExporting = true },
                 onPickBackdropImage: { isImportingBackdropImage = true }
             )
         }
         .navigationTitle(toolbarTitle)
-        .toolbar {
-            Button("Batch Export…", systemImage: "square.stack.3d.up", action: presentBatchExport)
-                .disabled(viewModel.analysisStatus.inProgress || viewModel.exportStatus.inProgress)
-        }
         .dropDestination(for: URL.self) { urls, _ in
             guard !viewModel.batchExport.isRunning, !urls.isEmpty else { return false }
             handleImportedURLs(urls)
