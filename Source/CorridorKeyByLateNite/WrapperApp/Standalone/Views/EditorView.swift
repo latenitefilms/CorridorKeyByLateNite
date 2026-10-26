@@ -49,11 +49,15 @@ struct EditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            previewArea
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .focusable(interactions: .edit)
-                .focusEffectDisabled()
-                .focused($previewHasFocus)
+            // Keep the focus target alive as the viewer changes from empty
+            // to loading to ready, so focus cannot fall into the inspector.
+            ZStack {
+                previewArea
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .focusable(interactions: .edit)
+            .focusEffectDisabled()
+            .focused($previewHasFocus)
 
             Divider()
 
@@ -68,7 +72,6 @@ struct EditorView: View {
         }
         .navigationTitle(toolbarTitle)
         .focusedSceneValue(viewModel)
-        .defaultFocus($previewHasFocus, true)
         .onKeyPress(.space, phases: [.down, .repeat]) { press in
             guard viewModel.phase.isReady, !viewModel.isStillImage,
                   !isImporting, !isExporting, !isBatchExporting, !isImportingBackdropImage,
@@ -86,6 +89,9 @@ struct EditorView: View {
             InspectorView(viewModel: viewModel)
                 .inspectorColumnWidth(min: 300, ideal: 340, max: 400)
         }
+        // Include both panes in the default-focus region. Keep automatic
+        // priority so deliberate navigation to an inspector field still works.
+        .defaultFocus($previewHasFocus, true)
         .fileImporter(
             isPresented: $isImporting,
             allowedContentTypes: MediaSourceLoader.supportedContentTypes,
@@ -101,7 +107,10 @@ struct EditorView: View {
         .sheet(isPresented: $isBatchExporting) {
             BatchExportSheet(model: viewModel.batchExport, state: viewModel.state)
         }
-        .onChange(of: viewModel.phase) { _, phase in
+        .onChange(of: viewModel.phase) { previousPhase, phase in
+            if case .loadingClip = previousPhase, case .ready = phase {
+                previewHasFocus = true
+            }
             if case .loadFailed(let message) = phase {
                 loadFailureMessage = message
             }
