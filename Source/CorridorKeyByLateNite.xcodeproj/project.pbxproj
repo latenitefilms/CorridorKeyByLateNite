@@ -702,7 +702,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
 				LastSwiftUpdateCheck = 1600;
-				LastUpgradeCheck = 2640;
+				LastUpgradeCheck = 2660;
 				ORGANIZATIONNAME = "Corridor Digital";
 				TargetAttributes = {
 					CK0700000000000000000001 = {
