@@ -232,6 +232,9 @@ final class EditorViewModel {
     /// Retains exactly the decoded frame on screen for source comparisons.
     @ObservationIgnored
     private var presentedSourceFrame: ReaderFrame?
+    /// Retains the keyed image while the source comparison is held.
+    @ObservationIgnored
+    private var presentedKeyedPreview: PreviewFrame?
     @ObservationIgnored
     private var warmsModelWhileOpen = false
 
@@ -321,12 +324,12 @@ final class EditorViewModel {
     /// While the user holds the "Show Original" button, this flips
     /// to `true` and the preview renders the source frame straight
     /// through (no pre-inference, no MLX, no post). Releasing the
-    /// button flips it back to `false`. The transient flag triggers
-    /// an immediate re-render via its `didSet`.
+    /// button flips it back to `false`. Both transitions reuse the
+    /// presented source and keyed textures without scheduling a render.
     var isShowingOriginal: Bool = false {
         didSet {
             guard oldValue != isShowingOriginal else { return }
-            renderPreview(at: playheadTime)
+            updatePresentedComparison()
         }
     }
     /// Backdrop drawn behind the keyed preview image. The declared
@@ -370,6 +373,8 @@ final class EditorViewModel {
 
     @ObservationIgnored
     private var videoSource: (any EditorMediaSource)?
+    @ObservationIgnored
+    private let mediaSourceLoader: @Sendable (URL) async throws -> any EditorMediaSource
     /// Invalidates imports that finish after another import or Close.
     @ObservationIgnored
     private var loadIdentifier = UUID()
@@ -387,11 +392,13 @@ final class EditorViewModel {
     private var exportRunnerTask: Task<Void, Never>?
     @ObservationIgnored
     private var exportRunIdentifier = 0
-    /// Debounces preview re-renders during slider drags so the GPU
-    /// isn't flooded with intermediate states. Reset every parameter
-    /// edit; whoever fires last wins.
+    /// Coalesces preview requests. Replacements drain their cancelled
+    /// predecessor before decoding, so synchronous AVFoundation reads
+    /// cannot accumulate while scrubbing. Only the latest request renders.
     @ObservationIgnored
     private var pendingPreviewTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var previewRequestIdentifier = UUID()
     /// Background Task that drives playback. Replaces the legacy
     /// `Timer.scheduledTimer` loop so each tick can await the GPU
     /// render before advancing — earlier builds fired ticks at the
@@ -473,7 +480,13 @@ final class EditorViewModel {
         parameterDidChange()
     }
 
-    init(renderEngine: StandaloneRenderEngine) {
+    /// The loader is injectable so decoder lifetime and cancellation can be
+    /// verified without depending on AVFoundation's scheduling in a test.
+    init(
+        renderEngine: StandaloneRenderEngine,
+        mediaSourceLoader: @escaping @Sendable (URL) async throws -> any EditorMediaSource = MediaSourceLoader.load
+    ) {
+        self.mediaSourceLoader = mediaSourceLoader
         self.renderEngine = renderEngine
         self.batchExport = BatchExportModel(engine: renderEngine)
         self.previewRenderer = StandalonePreviewRenderer(engine: renderEngine)
@@ -699,7 +712,7 @@ final class EditorViewModel {
         loadIdentifier = identifier
         phase = .loadingClip(url)
         do {
-            let source = try await MediaSourceLoader.load(url: url)
+            let source = try await mediaSourceLoader(url)
             guard loadIdentifier == identifier, !Task.isCancelled else { return }
             self.state.hintPointSet.clear()
             self.undoManager?.removeAllActions(withTarget: self)
@@ -715,6 +728,7 @@ final class EditorViewModel {
             self.playheadTime = .zero
             self.latestPreview = nil
             self.presentedSourceFrame = nil
+            self.presentedKeyedPreview = nil
             guard loadIdentifier == identifier, !Task.isCancelled else { return }
             self.phase = .ready
             if warmsModelWhileOpen { beginWarmupForCurrentQuality() }
@@ -765,6 +779,7 @@ final class EditorViewModel {
         clipInfo = nil
         latestPreview = nil
         presentedSourceFrame = nil
+        presentedKeyedPreview = nil
         matteCache.removeAll()
         restoredAnalysisLeases = []
         analysisStatus = .idle
@@ -796,20 +811,32 @@ final class EditorViewModel {
         targetPlaybackFPS = max(Double(clipInfo.nominalFrameRate), 0)
         measuredPlaybackFPS = 0
         isPlaying = true
-        pendingPreviewTask?.cancel()
-        pendingPreviewTask = nil
-        playbackTask?.cancel()
+        let previousPreview = pendingPreviewTask
+        let previousPlayback = playbackTask
+        previousPreview?.cancel()
+        previousPlayback?.cancel()
         let identifier = UUID()
         playbackRunIdentifier = identifier
         playbackTask = Task { @MainActor [weak self] in
+            defer {
+                if self?.playbackRunIdentifier == identifier {
+                    self?.playbackTask = nil
+                    self?.isPlaying = false
+                    self?.measuredPlaybackFPS = 0
+                }
+            }
+            // Cancellation does not interrupt AVFoundation's synchronous reads.
+            // Drain the previous owner before opening another decoder.
+            await previousPreview?.value
+            await previousPlayback?.value
+            guard !Task.isCancelled else { return }
             await self?.runPlaybackLoop(identifier: identifier)
         }
     }
 
     private func stopPlayback() {
-        playbackRunIdentifier = UUID()
         playbackTask?.cancel()
-        playbackTask = nil
+        // Retain the cancelled task until the next request has drained it.
         isPlaying = false
         measuredPlaybackFPS = 0
     }
@@ -823,19 +850,19 @@ final class EditorViewModel {
     ///    based path fired ticks at the nominal frame rate even
     ///    when the GPU couldn't keep up, which on a short looping
     ///    clip silently dropped most renders mid-flight.
-    /// 4. If the render finished faster than the source's per-frame
-    ///    interval, sleeps the remainder so playback runs at the
-    ///    real frame rate instead of turbo-mode.
+    /// 4. Waits until the frame's presentation deadline before publishing
+    ///    its image and time together. Decode latency stays in this interval.
     /// 5. Updates `measuredPlaybackFPS` from the wall-clock interval
     ///    so the transport bar's badge can colour itself green
     ///    (≥ 95% of target) or orange (below).
     private func runPlaybackLoop(identifier: UUID) async {
         guard let clipInfo, let source = videoSource else { return }
         var reader: PlaybackFrameReader?
+        var preparedLoop: Task<PreparedPlaybackTraversal, any Error>?
         let clock = ContinuousClock()
-        var deadline = clock.now
         let frameRate = max(Double(clipInfo.nominalFrameRate), 0.001)
         let frameIntervalSeconds = 1.0 / frameRate
+        var deadline = clock.now + .seconds(frameIntervalSeconds)
         // Window of recent samples used to smooth the displayed fps
         // — without smoothing, a single slow frame would slam the
         // badge into the orange band even when the average is fine.
@@ -853,7 +880,6 @@ final class EditorViewModel {
             if currentFrame >= lastFrame {
                 if loopEnabled {
                     nextFrame = 0
-                    reader = nil
                 } else {
                     isPlaying = false
                     break
@@ -867,12 +893,26 @@ final class EditorViewModel {
                 preferredTimescale: clipInfo.timescale
             )
             do {
-                if reader == nil {
+                var preparedFrame: ReaderFrame?
+                if nextFrame == 0, let preparedLoop {
+                    let traversal = try await preparedLoop.value
+                    await reader?.close()
+                    reader = traversal.reader
+                    preparedFrame = traversal.firstFrame
+                } else if reader == nil || nextFrame == 0 {
+                    await reader?.close()
                     reader = try await PlaybackFrameReader(source: source, startTime: target)
                 }
-                guard let frame = try await reader?.nextFrame() else { break }
+                if nextFrame == 0 { preparedLoop = nil }
+                if loopEnabled && preparedLoop == nil {
+                    preparedLoop = Task { try await PreparedPlaybackTraversal(source: source, startTime: .zero) }
+                }
+                let decodedFrame: ReaderFrame?
+                if let preparedFrame { decodedFrame = preparedFrame }
+                else { decodedFrame = try await reader?.nextFrame() }
+                guard let frame = decodedFrame else { break }
                 try Task.checkCancellation()
-                try await performRender(frame: frame)
+                try await performRender(frame: frame, presentationDeadline: deadline)
             } catch {
                 if !Task.isCancelled {
                     handlePreviewFailure(error)
@@ -882,28 +922,27 @@ final class EditorViewModel {
             }
             if Task.isCancelled { break }
 
+            // Prepare the next image during the frame's display interval.
+            // Presenting before sleeping exposed decoder latency at every seam.
             deadline += .seconds(frameIntervalSeconds)
-            if clock.now < deadline {
-                try? await clock.sleep(until: deadline)
-            } else {
-                // Never race through frames to catch up after a slow render.
-                deadline = clock.now
+            if deadline <= clock.now {
+                // A missed interval starts a fresh cadence; small scheduling
+                // delays must not accumulate into consistently slow playback.
+                deadline = clock.now + .seconds(frameIntervalSeconds)
             }
             if Task.isCancelled { break }
 
             let elapsed = tickStart.duration(to: clock.now).components
             let tickSeconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
-            let achievedFPS = 1.0 / max(tickSeconds, 0.001)
-            fpsSamples.append(achievedFPS)
+            fpsSamples.append(tickSeconds)
             while fpsSamples.count > fpsSampleCap {
                 fpsSamples.removeFirst()
             }
-            measuredPlaybackFPS = fpsSamples.reduce(0, +) / Double(fpsSamples.count)
+            measuredPlaybackFPS = Double(fpsSamples.count) / max(fpsSamples.reduce(0, +), 0.001)
         }
-        guard playbackRunIdentifier == identifier else { return }
-        playbackTask = nil
-        isPlaying = false
-        measuredPlaybackFPS = 0
+        await reader?.close()
+        preparedLoop?.cancel()
+        if let traversal = try? await preparedLoop?.value { await traversal.reader.close() }
     }
 
     /// Awaitable variant of `renderPreview(at:)` used by the
@@ -915,7 +954,7 @@ final class EditorViewModel {
     /// fights with because the playback task owns the rendering
     /// schedule end-to-end.
     @MainActor
-    private func performRender(frame: ReaderFrame) async throws {
+    private func performRender(frame: ReaderFrame, presentationDeadline: ContinuousClock.Instant) async throws {
         let frameTime = frame.presentationTime
         let frameIndex = currentFrameIndex(at: frameTime)
         var stateForFrame = state
@@ -931,24 +970,25 @@ final class EditorViewModel {
             Int(renderSize.height.rounded())
         )
         let pixelBuffer = frame.pixelBuffer
-        let showingOriginal = isShowingOriginal
         let result = try await previewRenderer.render(
-            frame: frame, state: stateForFrame, showingOriginal: showingOriginal
+            frame: frame, state: stateForFrame
         )
+        try await ContinuousClock().sleep(until: presentationDeadline)
         try Task.checkCancellation()
         // Publish timing only when its image is ready. Pausing while the next
         // frame renders must leave comparisons pinned to the displayed frame.
         playheadTime = frameTime
         presentedSourceFrame = frame
         if let next = matteCache[frameIndex + 1]?.reference { AnalysisDiskCache.shared.prefetch(next) }
-        self.latestPreview = PreviewFrame(
+        self.presentedKeyedPreview = PreviewFrame(
             texture: result.destinationTexture,
             pixelBuffer: result.destinationPixelBuffer,
             presentationTime: frameTime,
-            isLinear: (showingOriginal || result.report.effectiveInferenceResolution == 0) ? stateForFrame.video.inputIsLinear : stateForFrame.outputIsLinear,
-            isPremultiplied: showingOriginal || result.report.effectiveInferenceResolution == 0 || stateForFrame.outputMode != .foregroundPlusMatte,
+            isLinear: result.report.effectiveInferenceResolution == 0 ? stateForFrame.video.inputIsLinear : stateForFrame.outputIsLinear,
+            isPremultiplied: result.report.effectiveInferenceResolution == 0 || stateForFrame.outputMode != .foregroundPlusMatte,
             gamut: StandaloneRenderEngine.workingGamut(for: pixelBuffer)
         )
+        updatePresentedComparison()
         self.renderBackendDescription = result.report.backendDescription
         self.lastEngineDescription = result.report.guideSourceDescription
     }
@@ -1042,14 +1082,22 @@ final class EditorViewModel {
             Int(renderSize.height.rounded())
         )
         let previewRenderer = previewRenderer
-        let showingOriginal = isShowingOriginal
         let presentedFrame = presentedSourceFrame.flatMap {
             currentFrameIndex(at: $0.presentationTime) == frameIndex ? $0 : nil
         }
 
-        pendingPreviewTask?.cancel()
+        let previousPreview = pendingPreviewTask
+        let previousPlayback = playbackTask
+        previousPreview?.cancel()
+        let identifier = UUID()
+        previewRequestIdentifier = identifier
         pendingPreviewTask = Task { [weak self] in
-            guard let self else { return }
+            defer {
+                if self?.previewRequestIdentifier == identifier { self?.pendingPreviewTask = nil }
+            }
+            await previousPreview?.value
+            await previousPlayback?.value
+            guard !Task.isCancelled, let self else { return }
             let pixelBuffer: CVPixelBuffer
             do {
                 if let presentedFrame {
@@ -1066,20 +1114,21 @@ final class EditorViewModel {
             do {
                 let result = try await previewRenderer.render(
                     frame: ReaderFrame(pixelBuffer: pixelBuffer, presentationTime: frameTime, duration: .invalid),
-                    state: stateForFrame, showingOriginal: showingOriginal
+                    state: stateForFrame
                 )
                 if Task.isCancelled { return }
                 self.presentedSourceFrame = ReaderFrame(
                     pixelBuffer: pixelBuffer, presentationTime: frameTime, duration: .invalid
                 )
-                self.latestPreview = PreviewFrame(
+                self.presentedKeyedPreview = PreviewFrame(
                     texture: result.destinationTexture,
                     pixelBuffer: result.destinationPixelBuffer,
                     presentationTime: frameTime,
-                    isLinear: (showingOriginal || result.report.effectiveInferenceResolution == 0) ? stateForFrame.video.inputIsLinear : stateForFrame.outputIsLinear,
-                    isPremultiplied: showingOriginal || result.report.effectiveInferenceResolution == 0 || stateForFrame.outputMode != .foregroundPlusMatte,
+                    isLinear: result.report.effectiveInferenceResolution == 0 ? stateForFrame.video.inputIsLinear : stateForFrame.outputIsLinear,
+                    isPremultiplied: result.report.effectiveInferenceResolution == 0 || stateForFrame.outputMode != .foregroundPlusMatte,
                     gamut: StandaloneRenderEngine.workingGamut(for: pixelBuffer)
                 )
+                self.updatePresentedComparison()
                 self.renderBackendDescription = result.report.backendDescription
                 self.lastEngineDescription = result.report.guideSourceDescription
             } catch {
@@ -1089,11 +1138,30 @@ final class EditorViewModel {
         }
     }
 
+    /// Switches comparison without decoding, queuing behind a render, or moving time.
+    private func updatePresentedComparison() {
+        guard isShowingOriginal, let frame = presentedSourceFrame else {
+            latestPreview = presentedKeyedPreview
+            return
+        }
+        do {
+            let original = try renderEngine.renderShowingOriginal(source: frame.pixelBuffer)
+            latestPreview = PreviewFrame(
+                texture: original.destinationTexture, pixelBuffer: frame.pixelBuffer,
+                presentationTime: frame.presentationTime, isLinear: state.video.inputIsLinear,
+                gamut: StandaloneRenderEngine.workingGamut(for: frame.pixelBuffer)
+            )
+        } catch {
+            handlePreviewFailure(error)
+        }
+    }
+
     /// Keep Analyse Clip available after disposable-cache loss. Retain the
     /// references so export also fails explicitly until the user analyses again.
     private func handlePreviewFailure(_ error: any Error) {
         if error is AnalysisDiskCacheError {
             latestPreview = nil
+            presentedKeyedPreview = nil
             analysisStatus = .failed(error.localizedDescription)
         } else {
             phase = .loadFailed(error.localizedDescription)
@@ -1559,7 +1627,6 @@ final class EditorViewModel {
         if let pendingPreviewTask {
             tasks.append(pendingPreviewTask)
             pendingPreviewTask.cancel()
-            self.pendingPreviewTask = nil
         }
         if cancelModelWarmup {
             if let warmupPollingTask { tasks.append(warmupPollingTask) }

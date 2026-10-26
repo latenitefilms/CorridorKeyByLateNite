@@ -26,6 +26,7 @@ struct EditorView: View {
     @State private var isDropTargeted = false
     @State private var isImportingBackdropImage = false
     @State private var backdropImportError: String?
+    @FocusState private var previewHasFocus: Bool
     /// SwiftUI hands us the hosting `NSWindow`'s `UndoManager` here.
     /// The editor pipes it into `EditorViewModel` so hint-point
     /// edits register undo/redo against the manager Cmd-Z is
@@ -50,6 +51,9 @@ struct EditorView: View {
         VStack(spacing: 0) {
             previewArea
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .focusable(interactions: .edit)
+                .focusEffectDisabled()
+                .focused($previewHasFocus)
 
             Divider()
 
@@ -64,6 +68,14 @@ struct EditorView: View {
         }
         .navigationTitle(toolbarTitle)
         .focusedSceneValue(viewModel)
+        .defaultFocus($previewHasFocus, true)
+        .onKeyPress(.space, phases: [.down, .repeat]) { press in
+            guard viewModel.phase.isReady, !viewModel.isStillImage,
+                  !isImporting, !isExporting, !isBatchExporting, !isImportingBackdropImage,
+                  press.modifiers.isEmpty else { return .ignored }
+            if press.phase == .down { viewModel.togglePlayback() }
+            return .handled
+        }
         .onAppear { viewModel.prepareModelForEditor() }
         .dropDestination(for: URL.self) { urls, _ in
             guard !viewModel.batchExport.isRunning, !urls.isEmpty else { return false }

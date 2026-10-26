@@ -211,6 +211,7 @@ final class VideoSource: EditorMediaSource, @unchecked Sendable {
         try Task.checkCancellation()
         let reader = try await makeFrameReader(startTime: time, preferredPixelFormat: preferredPixelFormat)
         defer { reader.cancel() }
+        try Task.checkCancellation()
         guard let frame = try reader.nextFrame() else { throw VideoSourceError.pixelBufferUnavailable }
         return frame.pixelBuffer
     }
@@ -251,6 +252,7 @@ final class VideoSource: EditorMediaSource, @unchecked Sendable {
             throw VideoSourceError.readerOutputUnavailable
         }
         reader.add(output)
+        try Task.checkCancellation()
         guard reader.startReading() else {
             throw VideoSourceError.readerSetupFailed(
                 reader.error ?? VideoSourceError.readerOutputUnavailable
@@ -340,18 +342,40 @@ struct ReaderFrame: @unchecked Sendable {
 /// stay off the main actor; seeks and loop boundaries create a fresh reader.
 actor PlaybackFrameReader {
     private let source: any EditorMediaSource
-    private let reader: any MediaFrameReader
+    private var reader: (any MediaFrameReader)?
 
     init(source: any EditorMediaSource, startTime: CMTime) async throws {
         self.source = source
         self.reader = try await source.makeFrameReader(startTime: startTime)
     }
 
-    deinit { reader.cancel() }
+    deinit { reader?.cancel() }
 
     /// Returns the decoder's timestamp and full-precision IOSurface without copying.
     func nextFrame() throws -> ReaderFrame? {
         try Task.checkCancellation()
-        return try autoreleasepool { try reader.nextFrame() }
+        return try autoreleasepool { try reader?.nextFrame() }
+    }
+
+    /// AVFoundation teardown may block. Run it on the decoder actor before
+    /// releasing the last reference from the main actor at a loop boundary.
+    func close() {
+        reader?.cancel()
+        reader = nil
+    }
+}
+
+/// One traversal plus its decoded first frame. Preparing this during playback
+/// hides decoder startup at the seam without retaining a whole clip in memory.
+struct PreparedPlaybackTraversal: Sendable {
+    let reader: PlaybackFrameReader
+    let firstFrame: ReaderFrame
+
+    init(source: any EditorMediaSource, startTime: CMTime) async throws {
+        let reader = try await PlaybackFrameReader(source: source, startTime: startTime)
+        self.reader = reader
+        guard let frame = try await reader.nextFrame() else { throw VideoSourceError.sampleBufferUnavailable }
+        self.firstFrame = frame
+        try Task.checkCancellation()
     }
 }

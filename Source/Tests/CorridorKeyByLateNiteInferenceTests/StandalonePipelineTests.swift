@@ -16,6 +16,30 @@ extension MLXInferenceTests {
     /// A direct model test cannot detect a second flip introduced by a host.
     @Suite("Standalone pipeline", .serialized)
     struct StandalonePipelineTests {
+        @Test("Default Edge Decontaminate corrects opaque silhouettes and preserves opaque interiors", arguments: [false, true])
+        func opaqueEdgeDecontamination(keepOriginal: Bool) throws {
+            let engine = try StandaloneRenderEngine()
+            let source = try Self.makeSource(width: 512, height: 512) { _, _ in SIMD4<UInt8>(51, 204, 51, 255) }
+            var state = Self.neutralState()
+            state.video.keepOriginalInSolidAreas = keepOriginal
+            state.cachedMatteInferenceResolution = 512
+            state.cachedMatteBlob = try AnalysisFrameCodec.encode(
+                alpha: (0..<(512 * 512)).map { $0 % 512 < 256 ? Float(0) : Float(1) },
+                foregroundHalfRGBA: Self.constantForeground(SIMD4<Float>(0.2, 0.8, 0.2, 1)), width: 512, height: 512
+            )
+            let baseline = Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture)
+            state.edgeDecontaminateEnabled = true
+            state.edgeDecontaminateStrength = PluginStateData().edgeDecontaminateStrength
+            let corrected = Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture)
+            let edge = (256 * 512 + 256) * 4
+            let interior = (256 * 512 + 450) * 4
+            #expect(corrected[edge + 1] < baseline[edge + 1] - 0.1)
+            #expect(corrected[edge] == baseline[edge] && corrected[edge + 2] == baseline[edge + 2])
+            #expect(corrected[edge + 3] == 1)
+            #expect(corrected[interior + 1] == baseline[interior + 1])
+            #expect(corrected[0] == 0 && corrected[3] == 0)
+        }
+
         @Test("Cached edge decontamination survives solid source restoration", arguments: [false, true])
         func cachedEdgeDecontamination(keepOriginal: Bool) throws {
             let engine = try StandaloneRenderEngine()
@@ -52,6 +76,12 @@ extension MLXInferenceTests {
             )
             let baseline = Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture)
             state.lightWrapEnabled = true
+            state.lightWrapStrength = PluginStateData().lightWrapStrength
+            state.lightWrapRadius = PluginStateData().lightWrapRadius
+            let normal = Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture)
+            let defaultBand = (256 * 512 + 260) * 4
+            #expect(normal[defaultBand] > baseline[defaultBand] + 0.01,
+                    "Default controls must affect more than the outermost pixel")
             state.lightWrapStrength = 1
             state.lightWrapRadius = 2
             let narrow = Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture)

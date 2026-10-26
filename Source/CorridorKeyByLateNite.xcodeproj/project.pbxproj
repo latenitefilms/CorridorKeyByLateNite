@@ -7,13 +7,29 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		C20000000000000000000001 /* Model Licenses in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* Model Licenses */; };
-		C20000000000000000000002 /* Model Licenses in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* Model Licenses */; };
 		221345E22F98BC6800CF734C /* corridorkey_v2.mlxfn in Resources */ = {isa = PBXBuildFile; fileRef = 221345DC2F98BC6800CF734C /* corridorkey_v2.mlxfn */; };
 		22D097FF2F9887BD0096E749 /* Credits.rtf in Resources */ = {isa = PBXBuildFile; fileRef = 22D097FE2F9887BD0096E749 /* Credits.rtf */; };
 		22D0980E2F988FB70096E749 /* Motion Template in Resources */ = {isa = PBXBuildFile; fileRef = 22D0980D2F988FB70096E749 /* Motion Template */; };
 		22D7DAEC2FA7403600D828FB /* Background.png in Resources */ = {isa = PBXBuildFile; fileRef = 22D7DAEB2FA7403600D828FB /* Background.png */; };
 		22D7DAEE2FA82ECD00D828FB /* CorridorKey.icon in Resources */ = {isa = PBXBuildFile; fileRef = 22D7DAED2FA82ECD00D828FB /* CorridorKey.icon */; };
+		A10100000000000000000001 /* VideoInferenceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10200000000000000000001 /* VideoInferenceSettings.swift */; };
+		A10100000000000000000002 /* VideoInferenceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10200000000000000000001 /* VideoInferenceSettings.swift */; };
+		A20100000000000000000001 /* VideoInferenceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20200000000000000000001 /* VideoInferenceSession.swift */; };
+		A20100000000000000000002 /* VideoInferenceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20200000000000000000001 /* VideoInferenceSession.swift */; };
+		A30100000000000000000001 /* AlphaHintReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30200000000000000000001 /* AlphaHintReader.swift */; };
+		A30100000000000000000002 /* AlphaHintReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30200000000000000000001 /* AlphaHintReader.swift */; };
+		A40100000000000000000001 /* AlphaHintPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40200000000000000000001 /* AlphaHintPicker.swift */; };
+		A40100000000000000000002 /* AlphaHintPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40200000000000000000001 /* AlphaHintPicker.swift */; };
+		AD0100000000000000000001 /* AnalysisDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0200000000000000000001 /* AnalysisDiskCache.swift */; };
+		AD0100000000000000000002 /* AnalysisDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0200000000000000000001 /* AnalysisDiskCache.swift */; };
+		AF0100000000000000000001 /* AnalysisFrameCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0200000000000000000001 /* AnalysisFrameCodec.swift */; };
+		AF0100000000000000000002 /* AnalysisFrameCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0200000000000000000001 /* AnalysisFrameCodec.swift */; };
+		BE0100000000000000000001 /* BatchExportRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000001 /* BatchExportRunner.swift */; };
+		BE0100000000000000000002 /* BatchExportModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000002 /* BatchExportModel.swift */; };
+		BE0100000000000000000003 /* BatchExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000003 /* BatchExportSheet.swift */; };
+		BE0100000000000000000004 /* Tests/WrapperAppTests/EditorWorkflowRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000004 /* Tests/WrapperAppTests/EditorWorkflowRegressionTests.swift */; };
+		C20000000000000000000001 /* Model Licenses in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* Model Licenses */; };
+		C20000000000000000000002 /* Model Licenses in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* Model Licenses */; };
 		CK0100000000000000000001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000001 /* main.swift */; };
 		CK0100000000000000000002 /* CorridorKeyByLateNitePlugIn.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000002 /* CorridorKeyByLateNitePlugIn.swift */; };
 		CK0100000000000000000003 /* CorridorKeyByLateNitePlugIn+Parameters.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000003 /* CorridorKeyByLateNitePlugIn+Parameters.swift */; };
@@ -48,17 +64,6 @@
 		CK0100000000000000000050 /* CorridorKeyByLateNitePlugIn+FxAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000050 /* CorridorKeyByLateNitePlugIn+FxAnalyzer.swift */; };
 		CK0100000000000000000051 /* AnalysisData.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000051 /* AnalysisData.swift */; };
 		CK0100000000000000000052 /* MatteCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000052 /* MatteCodec.swift */; };
-		AF0100000000000000000001 /* AnalysisFrameCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0200000000000000000001 /* AnalysisFrameCodec.swift */; };
-		AD0100000000000000000001 /* AnalysisDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0200000000000000000001 /* AnalysisDiskCache.swift */; };
-		A40100000000000000000001 /* AlphaHintPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40200000000000000000001 /* AlphaHintPicker.swift */; };
-		A30100000000000000000001 /* AlphaHintReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30200000000000000000001 /* AlphaHintReader.swift */; };
-		A20100000000000000000001 /* VideoInferenceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20200000000000000000001 /* VideoInferenceSession.swift */; };
-		A10100000000000000000001 /* VideoInferenceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10200000000000000000001 /* VideoInferenceSettings.swift */; };
-		AD0100000000000000000002 /* AnalysisDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0200000000000000000001 /* AnalysisDiskCache.swift */; };
-		A40100000000000000000002 /* AlphaHintPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40200000000000000000001 /* AlphaHintPicker.swift */; };
-		A30100000000000000000002 /* AlphaHintReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30200000000000000000001 /* AlphaHintReader.swift */; };
-		A20100000000000000000002 /* VideoInferenceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20200000000000000000001 /* VideoInferenceSession.swift */; };
-		A10100000000000000000002 /* VideoInferenceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10200000000000000000001 /* VideoInferenceSettings.swift */; };
 		CK0100000000000000000060 /* CorridorKeyByLateNitePlugIn+CustomViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000060 /* CorridorKeyByLateNitePlugIn+CustomViews.swift */; };
 		CK0100000000000000000061 /* CorridorKeyInspectorBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000061 /* CorridorKeyInspectorBridge.swift */; };
 		CK0100000000000000000062 /* CorridorKeyHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000062 /* CorridorKeyHeaderView.swift */; };
@@ -104,7 +109,6 @@
 		SB0000000000000000000013 /* AnalysisData.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000051 /* AnalysisData.swift */; };
 		SB0000000000000000000014 /* SharedMLXBridgeRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000076 /* SharedMLXBridgeRegistry.swift */; };
 		SB0000000000000000000015 /* MatteCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK0200000000000000000052 /* MatteCodec.swift */; };
-		AF0100000000000000000002 /* AnalysisFrameCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0200000000000000000001 /* AnalysisFrameCodec.swift */; };
 		SB0000000000000000000016 /* KeyingInferenceEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = CK020000000000000000000F /* KeyingInferenceEngine.swift */; };
 		SB0000000000000000000017 /* MLXKeyingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = MX0100000000000000000003 /* MLXKeyingEngine.swift */; };
 		SB0000000000000000000018 /* VisionHintEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = VH0200000000000000000001 /* VisionHintEngine.swift */; };
@@ -134,6 +138,10 @@
 		SB0000000000000000000030 /* BackdropImageLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = SR000000000000000000000D /* BackdropImageLoader.swift */; };
 		SB0000000000000000000031 /* ScreenColorAutoDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = SR000000000000000000000E /* ScreenColorAutoDetector.swift */; };
 		SB0000000000000000000032 /* EditorPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = SR000000000000000000000F /* EditorPreferences.swift */; };
+		SI0100000000000000000001 /* MediaSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000001 /* MediaSource.swift */; };
+		SI0100000000000000000002 /* StillImageSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000002 /* StillImageSource.swift */; };
+		SI0100000000000000000003 /* StillImageExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000003 /* StillImageExporter.swift */; };
+		SI0100000000000000000004 /* StillImageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000004 /* StillImageTests.swift */; };
 		TP0400000000000000000001 /* TransportPolishTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TP0300000000000000000001 /* TransportPolishTests.swift */; };
 		VH0100000000000000000001 /* VisionHintEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = VH0200000000000000000001 /* VisionHintEngine.swift */; };
 		WB0000000000000000000002 /* SyntheticVideoFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000002 /* SyntheticVideoFixture.swift */; };
@@ -142,14 +150,6 @@
 		WB0000000000000000000005 /* StandaloneRenderEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000005 /* StandaloneRenderEngineTests.swift */; };
 		WB0000000000000000000006 /* AnalysisAndExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000006 /* AnalysisAndExportTests.swift */; };
 		WB0000000000000000000007 /* EditorViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000007 /* EditorViewModelTests.swift */; };
-		SI0100000000000000000001 /* MediaSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000001 /* MediaSource.swift */; };
-		SI0100000000000000000002 /* StillImageSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000002 /* StillImageSource.swift */; };
-		SI0100000000000000000003 /* StillImageExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000003 /* StillImageExporter.swift */; };
-		SI0100000000000000000004 /* StillImageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = SI0300000000000000000004 /* StillImageTests.swift */; };
-		BE0100000000000000000001 /* BatchExportRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000001 /* BatchExportRunner.swift */; };
-		BE0100000000000000000002 /* BatchExportModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000002 /* BatchExportModel.swift */; };
-		BE0100000000000000000003 /* BatchExportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000003 /* BatchExportSheet.swift */; };
-		BE0100000000000000000004 /* EditorWorkflowRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE0200000000000000000004 /* EditorWorkflowRegressionTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -195,12 +195,22 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		C20000000000000000000003 /* Model Licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "Model Licenses"; path = "../Model Licenses"; sourceTree = "<group>"; };
 		221345DC2F98BC6800CF734C /* corridorkey_v2.mlxfn */ = {isa = PBXFileReference; lastKnownFileType = file; path = corridorkey_v2.mlxfn; sourceTree = "<group>"; };
 		22D097FE2F9887BD0096E749 /* Credits.rtf */ = {isa = PBXFileReference; lastKnownFileType = text.rtf; name = Credits.rtf; path = CorridorKeyByLateNite/WrapperApp/Credits.rtf; sourceTree = "<group>"; };
 		22D0980D2F988FB70096E749 /* Motion Template */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "Motion Template"; path = "CorridorKeyByLateNite/WrapperApp/Resources/Motion Template"; sourceTree = "<group>"; };
 		22D7DAEB2FA7403600D828FB /* Background.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = Background.png; path = CorridorKeyByLateNite/WrapperApp/Resources/Background.png; sourceTree = "<group>"; };
 		22D7DAED2FA82ECD00D828FB /* CorridorKey.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = CorridorKey.icon; path = CorridorKeyByLateNite/WrapperApp/CorridorKey.icon; sourceTree = "<group>"; };
+		A10200000000000000000001 /* VideoInferenceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = VideoInferenceSettings.swift; path = CorridorKeyByLateNite/Plugin/Inference/VideoInferenceSettings.swift; sourceTree = "<group>"; };
+		A20200000000000000000001 /* VideoInferenceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = VideoInferenceSession.swift; path = CorridorKeyByLateNite/Plugin/Inference/VideoInferenceSession.swift; sourceTree = "<group>"; };
+		A30200000000000000000001 /* AlphaHintReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AlphaHintReader.swift; path = CorridorKeyByLateNite/Plugin/Inference/AlphaHintReader.swift; sourceTree = "<group>"; };
+		A40200000000000000000001 /* AlphaHintPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AlphaHintPicker.swift; path = CorridorKeyByLateNite/Plugin/Inspector/AlphaHintPicker.swift; sourceTree = "<group>"; };
+		AD0200000000000000000001 /* AnalysisDiskCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisDiskCache.swift; path = CorridorKeyByLateNite/Plugin/Inference/AnalysisDiskCache.swift; sourceTree = "<group>"; };
+		AF0200000000000000000001 /* AnalysisFrameCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisFrameCodec.swift; path = CorridorKeyByLateNite/Plugin/Inference/AnalysisFrameCodec.swift; sourceTree = "<group>"; };
+		BE0200000000000000000001 /* BatchExportRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BatchExportRunner.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/BatchExportRunner.swift; sourceTree = "<group>"; };
+		BE0200000000000000000002 /* BatchExportModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BatchExportModel.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Model/BatchExportModel.swift; sourceTree = "<group>"; };
+		BE0200000000000000000003 /* BatchExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BatchExportSheet.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Views/BatchExportSheet.swift; sourceTree = "<group>"; };
+		BE0200000000000000000004 /* Tests/WrapperAppTests/EditorWorkflowRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/WrapperAppTests/EditorWorkflowRegressionTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000003 /* Model Licenses */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "Model Licenses"; path = "../Model Licenses"; sourceTree = "<group>"; };
 		CK0200000000000000000001 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = main.swift; path = CorridorKeyByLateNite/Plugin/main.swift; sourceTree = "<group>"; };
 		CK0200000000000000000002 /* CorridorKeyByLateNitePlugIn.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CorridorKeyByLateNitePlugIn.swift; path = CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn.swift; sourceTree = "<group>"; };
 		CK0200000000000000000003 /* CorridorKeyByLateNitePlugIn+Parameters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "CorridorKeyByLateNitePlugIn+Parameters.swift"; path = "CorridorKeyByLateNite/Plugin/Parameters/CorridorKeyByLateNitePlugIn+Parameters.swift"; sourceTree = "<group>"; };
@@ -233,12 +243,6 @@
 		CK0200000000000000000050 /* CorridorKeyByLateNitePlugIn+FxAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "CorridorKeyByLateNitePlugIn+FxAnalyzer.swift"; path = "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+FxAnalyzer.swift"; sourceTree = "<group>"; };
 		CK0200000000000000000051 /* AnalysisData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisData.swift; path = CorridorKeyByLateNite/Plugin/Inference/AnalysisData.swift; sourceTree = "<group>"; };
 		CK0200000000000000000052 /* MatteCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MatteCodec.swift; path = CorridorKeyByLateNite/Plugin/Inference/MatteCodec.swift; sourceTree = "<group>"; };
-		AF0200000000000000000001 /* AnalysisFrameCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisFrameCodec.swift; path = CorridorKeyByLateNite/Plugin/Inference/AnalysisFrameCodec.swift; sourceTree = "<group>"; };
-		AD0200000000000000000001 /* AnalysisDiskCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisDiskCache.swift; path = CorridorKeyByLateNite/Plugin/Inference/AnalysisDiskCache.swift; sourceTree = "<group>"; };
-		A40200000000000000000001 /* AlphaHintPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AlphaHintPicker.swift; path = CorridorKeyByLateNite/Plugin/Inspector/AlphaHintPicker.swift; sourceTree = "<group>"; };
-		A30200000000000000000001 /* AlphaHintReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AlphaHintReader.swift; path = CorridorKeyByLateNite/Plugin/Inference/AlphaHintReader.swift; sourceTree = "<group>"; };
-		A20200000000000000000001 /* VideoInferenceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = VideoInferenceSession.swift; path = CorridorKeyByLateNite/Plugin/Inference/VideoInferenceSession.swift; sourceTree = "<group>"; };
-		A10200000000000000000001 /* VideoInferenceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = VideoInferenceSettings.swift; path = CorridorKeyByLateNite/Plugin/Inference/VideoInferenceSettings.swift; sourceTree = "<group>"; };
 		CK0200000000000000000060 /* CorridorKeyByLateNitePlugIn+CustomViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = "CorridorKeyByLateNitePlugIn+CustomViews.swift"; path = "CorridorKeyByLateNite/Plugin/Inspector/CorridorKeyByLateNitePlugIn+CustomViews.swift"; sourceTree = "<group>"; };
 		CK0200000000000000000061 /* CorridorKeyInspectorBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CorridorKeyInspectorBridge.swift; path = CorridorKeyByLateNite/Plugin/Inspector/CorridorKeyInspectorBridge.swift; sourceTree = "<group>"; };
 		CK0200000000000000000062 /* CorridorKeyHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CorridorKeyHeaderView.swift; path = CorridorKeyByLateNite/Plugin/Inspector/CorridorKeyHeaderView.swift; sourceTree = "<group>"; };
@@ -276,6 +280,10 @@
 		SF0000000000000000000003 /* Vision.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Vision.framework; path = System/Library/Frameworks/Vision.framework; sourceTree = SDKROOT; };
 		SF0000000000000000000004 /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
 		SF0000000000000000000005 /* CoreVideo.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreVideo.framework; path = System/Library/Frameworks/CoreVideo.framework; sourceTree = SDKROOT; };
+		SI0300000000000000000001 /* MediaSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaSource.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/MediaSource.swift; sourceTree = "<group>"; };
+		SI0300000000000000000002 /* StillImageSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageSource.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageSource.swift; sourceTree = "<group>"; };
+		SI0300000000000000000003 /* StillImageExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageExporter.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageExporter.swift; sourceTree = "<group>"; };
+		SI0300000000000000000004 /* StillImageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageTests.swift; path = Tests/CorridorKeyByLateNiteInferenceTests/StillImageTests.swift; sourceTree = "<group>"; };
 		SR0000000000000000000001 /* PixelBufferTextureBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PixelBufferTextureBridge.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/PixelBufferTextureBridge.swift; sourceTree = "<group>"; };
 		SR0000000000000000000002 /* VideoSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = VideoSource.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/VideoSource.swift; sourceTree = "<group>"; };
 		SR0000000000000000000003 /* StandaloneRenderEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StandaloneRenderEngine.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StandaloneRenderEngine.swift; sourceTree = "<group>"; };
@@ -300,14 +308,6 @@
 		WR0000000000000000000006 /* AnalysisAndExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisAndExportTests.swift; path = Tests/WrapperAppTests/AnalysisAndExportTests.swift; sourceTree = "<group>"; };
 		WR0000000000000000000007 /* EditorViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EditorViewModelTests.swift; path = Tests/WrapperAppTests/EditorViewModelTests.swift; sourceTree = "<group>"; };
 		WT0300000000000000000001 /* WrapperAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WrapperAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		SI0300000000000000000001 /* MediaSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = MediaSource.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/MediaSource.swift; sourceTree = "<group>"; };
-		SI0300000000000000000002 /* StillImageSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageSource.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageSource.swift; sourceTree = "<group>"; };
-		SI0300000000000000000003 /* StillImageExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageExporter.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageExporter.swift; sourceTree = "<group>"; };
-		SI0300000000000000000004 /* StillImageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = StillImageTests.swift; path = Tests/CorridorKeyByLateNiteInferenceTests/StillImageTests.swift; sourceTree = "<group>"; };
-		BE0200000000000000000001 /* BatchExportRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BatchExportRunner.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/BatchExportRunner.swift; sourceTree = "<group>"; };
-		BE0200000000000000000002 /* BatchExportModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BatchExportModel.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Model/BatchExportModel.swift; sourceTree = "<group>"; };
-		BE0200000000000000000003 /* BatchExportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BatchExportSheet.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Views/BatchExportSheet.swift; sourceTree = "<group>"; };
-		BE0200000000000000000004 /* EditorWorkflowRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tests/WrapperAppTests/EditorWorkflowRegressionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -623,7 +623,7 @@
 				WR0000000000000000000005 /* StandaloneRenderEngineTests.swift */,
 				WR0000000000000000000006 /* AnalysisAndExportTests.swift */,
 				WR0000000000000000000007 /* EditorViewModelTests.swift */,
-				BE0200000000000000000004 /* EditorWorkflowRegressionTests.swift */,
+				BE0200000000000000000004 /* Tests/WrapperAppTests/EditorWorkflowRegressionTests.swift */,
 			);
 			name = WrapperAppTests;
 			sourceTree = "<group>";
@@ -913,7 +913,7 @@
 				WB0000000000000000000005 /* StandaloneRenderEngineTests.swift in Sources */,
 				WB0000000000000000000006 /* AnalysisAndExportTests.swift in Sources */,
 				WB0000000000000000000007 /* EditorViewModelTests.swift in Sources */,
-				BE0100000000000000000004 /* EditorWorkflowRegressionTests.swift in Sources */,
+				BE0100000000000000000004 /* Tests/WrapperAppTests/EditorWorkflowRegressionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1136,19 +1136,38 @@ kernel void corridorKeyMatteRefineKernel(
 /// RGB vector onto green/blue removes legitimate neutral light and creates the
 /// complementary fringe. The other two channels provide a conservative floor,
 /// so this correction cannot push the screen channel below both of them.
-inline float3 decontaminateEdgeColor(float3 foreground, float matte, float3 screen, float strength) {
+inline float3 decontaminateEdgeColor(float3 foreground, float edgeAmount, float3 screen, float strength) {
     uint screenChannel = screen.r > max(screen.g, screen.b) ? 0u : (screen.g >= screen.b ? 1u : 2u);
     float nonScreenMaximum = max(foreground[(screenChannel + 1) % 3], foreground[(screenChannel + 2) % 3]);
     float excess = max(foreground[screenChannel] - nonScreenMaximum, 0.0);
-    foreground[screenChannel] -= excess * (1.0 - saturate(matte)) * saturate(strength);
+    foreground[screenChannel] -= excess * saturate(edgeAmount) * saturate(strength);
     return foreground;
+}
+
+/// Include opaque silhouette pixels as well as fractional coverage. A bounded
+/// neighbourhood finds the outside of the matte without touching solid interiors
+/// or adding a full-resolution intermediate texture. Scale with source size.
+inline float decontaminationEdgeAmount(texture2d<float, access::read> matte, uint2 position) {
+    int2 maximum = int2(matte.get_width(), matte.get_height()) - 1;
+    int radius = clamp(int(max(matte.get_width(), matte.get_height()) / 540), 1, 8);
+    float alpha = saturate(matte.read(position).r);
+    float minimumAlpha = alpha;
+    for (int vertical = -1; vertical <= 1; ++vertical) {
+        for (int horizontal = -1; horizontal <= 1; ++horizontal) {
+            int2 neighbour = clamp(int2(position) + int2(horizontal, vertical) * radius, int2(0), maximum);
+            minimumAlpha = min(minimumAlpha, saturate(matte.read(uint2(neighbour)).r));
+        }
+    }
+    return max(1.0 - alpha, alpha - minimumAlpha);
 }
 
 /// A spatial edge band also covers opaque silhouette pixels. RGB stays straight;
 /// alpha is applied once, by the final composite, rather than attenuating twice.
 inline float lightWrapAmount(float matte, float blurredMatte, float edgeBias) {
     float band = saturate(max(1.0 - matte, 2.0 * (matte - blurredMatte)));
-    return matte > 0.0 ? pow(band, mix(1.0, 4.0, saturate(edgeBias))) : 0.0;
+    // The former exponent (2.8 at the default bias) reduced a 25% band to
+    // just 2%, making normal Strength/Radius settings almost invisible.
+    return matte > 0.0 ? mix(band, smoothstep(0.0, 1.0, band), saturate(edgeBias)) : 0.0;
 }
 
 // MARK: - Fused foreground post-process (passthrough + light-wrap + decontam + inverse-rotation)
@@ -1210,7 +1229,7 @@ kernel void corridorKeyForegroundPostProcessKernel(
 
     // Stage 3: edge colour decontamination.
     if (params.edgeDecontaminateEnabled != 0 && params.edgeDecontaminateStrength > 0.0) {
-        rgb = decontaminateEdgeColor(rgb, m, params.screenColor, params.edgeDecontaminateStrength);
+        rgb = decontaminateEdgeColor(rgb, decontaminationEdgeAmount(matte, gid), params.screenColor, params.edgeDecontaminateStrength);
     }
 
     // Stage 4: inverse screen-colour rotation. Identity for both
@@ -1329,8 +1348,8 @@ kernel void corridorKeyLightWrapKernel(
 // MARK: - Edge colour decontamination (Phase 4.4)
 
 /// Removes residual screen colour from foreground RGB in the matte edge
-/// band (where `0 < matte < 1`). Removes only excess green or blue
-/// weighted by `(1 - matte) * strength`. Neutral and already-clean colours
+/// band, including opaque silhouette pixels. Removes only excess screen colour
+/// weighted by the spatial edge mask and strength. Neutral and already-clean colours
 /// are preserved. The opaque interior stays untouched, and fully transparent
 /// regions don't contribute to the composite anyway.
 kernel void corridorKeyEdgeDecontaminateKernel(
@@ -1344,8 +1363,7 @@ kernel void corridorKeyEdgeDecontaminateKernel(
     if (gid.x >= dims.x || gid.y >= dims.y) { return; }
 
     float3 fg = foreground.read(gid).rgb;
-    float m = saturate(matte.read(gid).r);
-    float3 decontaminated = decontaminateEdgeColor(fg, m, params.screenColor, params.strength);
+    float3 decontaminated = decontaminateEdgeColor(fg, decontaminationEdgeAmount(matte, gid), params.screenColor, params.strength);
     destination.write(float4(decontaminated, 1.0), gid);
 }
 

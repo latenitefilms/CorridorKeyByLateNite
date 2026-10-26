@@ -186,7 +186,10 @@ extension EditorViewModelTests {
     func proResPlayback() async throws {
         let repository = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let url = repository.appending(path: "LLM Resources/Benchmark/JallenClownWater/Input/HardestShotEver - 1sec.mov")
+        // A staged fixture lets an isolated test host avoid prompting for
+        // Documents-folder access during unattended performance runs.
+        let url = ProcessInfo.processInfo.environment["CORRIDOR_KEY_PLAYBACK_FIXTURE"].map { URL(filePath: $0) }
+            ?? repository.appending(path: "LLM Resources/Benchmark/JallenClownWater/Input/HardestShotEver - 1sec.mov")
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         let engine = try StandaloneRenderEngine()
         let source = try await VideoSource(url: url)
@@ -200,9 +203,26 @@ extension EditorViewModelTests {
         await model.loadClip(at: url)
         model.loopEnabled = true
         model.togglePlayback()
-        try await Task.sleep(for: .seconds(3))
+        var previousTime = CMTime.invalid
+        var previousPresentation = ContinuousClock.now
+        var loopIntervals: [Double] = []
+        let deadline = ContinuousClock.now + .seconds(3)
+        while ContinuousClock.now < deadline {
+            if let preview = model.latestPreview, preview.presentationTime != previousTime {
+                let now = ContinuousClock.now
+                if previousTime.isNumeric && preview.presentationTime < previousTime {
+                    let interval = previousPresentation.duration(to: now).components
+                    loopIntervals.append(Double(interval.seconds) + Double(interval.attoseconds) / 1e18)
+                }
+                previousTime = preview.presentationTime
+                previousPresentation = now
+            }
+            try await Task.sleep(for: .milliseconds(1))
+        }
         let achieved = model.measuredPlaybackFPS
         print("JallenClownWater 4K ProRes editor playback: \(achieved) fps; target \(model.targetPlaybackFPS) fps")
+        print("JallenClownWater loop presentation intervals (seconds): \(loopIntervals)")
+        #expect(loopIntervals.count >= 2)
         #expect(model.isPlaying)
         #expect(model.warmupStatus == .cold)
         #expect(achieved >= Double(source.info.nominalFrameRate) * 0.95)

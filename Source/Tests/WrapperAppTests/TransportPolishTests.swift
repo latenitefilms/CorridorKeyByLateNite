@@ -19,10 +19,86 @@
 import Testing
 import Foundation
 import CoreMedia
+import CoreVideo
 @testable import CorridorKeyByLateNiteApp
 
 @Suite("Transport polish", .serialized)
 struct TransportPolishTests {
+    @Test("Loop preparation hides slow reader startup at the seam")
+    @MainActor
+    func loopPreparationKeepsCadence() async throws {
+        let url = try await SyntheticVideoFixture.writeMP4(frameCount: 8, fps: 25)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let source = try await VideoSource(url: url)
+        let buffer = try await source.makeFrame(atTime: .zero)
+        let controlled = DelayedPreviewSource(
+            source: source, frame: ReaderFrame(pixelBuffer: buffer, presentationTime: .zero, duration: .invalid),
+            probe: PreviewDecodeProbe(), loopStartupDelay: .milliseconds(120)
+        )
+        let model = EditorViewModel(renderEngine: try StandaloneRenderEngine(), mediaSourceLoader: { _ in controlled })
+        model.state.outputMode = .original
+        await model.loadClip(at: url)
+        defer { model.closeClip() }
+        model.togglePlayback()
+        var lastTime = CMTime.invalid
+        var lastPresentation = ContinuousClock.now
+        var seams: [Double] = []
+        let deadline = ContinuousClock.now + .seconds(3)
+        while seams.count < 4 && ContinuousClock.now < deadline {
+            if let preview = model.latestPreview, preview.presentationTime != lastTime {
+                let now = ContinuousClock.now
+                if lastTime.isNumeric && preview.presentationTime < lastTime {
+                    let elapsed = lastPresentation.duration(to: now).components
+                    seams.append(Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18)
+                }
+                lastTime = preview.presentationTime
+                lastPresentation = now
+            }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        #expect(seams.count == 4)
+        #expect(seams.allSatisfy { $0 < 0.09 }, "Loop intervals: \(seams)")
+        for task in model.cancelWorkForEditorShutdown() { await task.value }
+    }
+
+    @Test("Rapid scrubs drain cancelled decoders and playback recovers")
+    @MainActor
+    func cancelledScrubsRemainSingleFlight() async throws {
+        let url = try await SyntheticVideoFixture.writeMP4(frameCount: 8, fps: 25)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let source = try await VideoSource(url: url)
+        let buffer = try await source.makeFrame(atTime: .zero)
+        let probe = PreviewDecodeProbe()
+        let controlled = DelayedPreviewSource(
+            source: source, frame: ReaderFrame(pixelBuffer: buffer, presentationTime: .zero, duration: .invalid), probe: probe
+        )
+        let model = EditorViewModel(renderEngine: try StandaloneRenderEngine(), mediaSourceLoader: { _ in controlled })
+        model.state.outputMode = .original
+        await model.loadClip(at: url)
+        defer { model.closeClip() }
+        for index in 0..<60 {
+            model.scrub(toNormalized: Double(index % 8) / 7)
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        model.scrub(toNormalized: 1)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while model.latestPreview?.presentationTime != model.playheadTime && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await probe.maximumConcurrentReads == 1)
+        #expect(model.latestPreview?.presentationTime == model.playheadTime)
+        model.togglePlayback()
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(model.isPlaying)
+        #expect(model.measuredPlaybackFPS > 15)
+        let shown = try #require(model.latestPreview)
+        model.isShowingOriginal = true
+        #expect(model.latestPreview?.presentationTime == shown.presentationTime)
+        model.isShowingOriginal = false
+        #expect(model.latestPreview?.texture === shown.texture)
+        for task in model.cancelWorkForEditorShutdown() { await task.value }
+        #expect(!model.hasInflightEditorWork)
+    }
 
     @Test("Playback publishes matching frame timing and comparison reuses the paused source")
     @MainActor
@@ -49,7 +125,7 @@ struct TransportPolishTests {
         #expect(model.playheadTime == paused.presentationTime)
         for showingOriginal in [true, false, true, false] {
             model.isShowingOriginal = showingOriginal
-            try await Task.sleep(for: .milliseconds(30))
+            // No task suspension: comparison must update synchronously.
             let compared = try #require(model.latestPreview)
             #expect(model.playheadTime == paused.presentationTime)
             #expect(compared.presentationTime == paused.presentationTime)
@@ -244,4 +320,38 @@ struct TransportPolishTests {
         #expect(formatter.format(.invalid) == "00:00:00:00")
         #expect(formatter.format(CMTime(seconds: -1, preferredTimescale: 24_000)) == "00:00:00:00")
     }
+}
+
+/// Models a decoder that cannot stop an in-flight read when its task is cancelled.
+private struct DelayedPreviewSource: EditorMediaSource {
+    let source: VideoSource
+    let frame: ReaderFrame
+    let probe: PreviewDecodeProbe
+    var loopStartupDelay: Duration = .zero
+    var info: MediaSourceInfo { source.info }
+
+    func makeFrame(atTime time: CMTime, preferredPixelFormat: OSType) async throws -> CVPixelBuffer {
+        await probe.beginRead()
+        let completion = Task { try? await Task.sleep(for: .milliseconds(50)) }
+        await completion.value
+        await probe.endRead()
+        return frame.pixelBuffer
+    }
+
+    func makeFrameReader(startTime: CMTime, preferredPixelFormat: OSType) async throws -> any MediaFrameReader {
+        if startTime == .zero { try await Task.sleep(for: loopStartupDelay) }
+        return try await source.makeFrameReader(startTime: startTime, preferredPixelFormat: preferredPixelFormat)
+    }
+}
+
+private actor PreviewDecodeProbe {
+    private var concurrentReads = 0
+    private(set) var maximumConcurrentReads = 0
+
+    func beginRead() {
+        concurrentReads += 1
+        maximumConcurrentReads = max(maximumConcurrentReads, concurrentReads)
+    }
+
+    func endRead() { concurrentReads -= 1 }
 }

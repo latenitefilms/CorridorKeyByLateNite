@@ -1,5 +1,59 @@
 # Standalone playback and workflow verification
 
+## 26 October 2026: playback recovery, loop cadence and edge controls
+
+A read-only stack sample of the stalled Xcode app found overlapping paused-preview
+requests blocked in `AVAssetReaderTrackOutput.copyNextSampleBuffer` and
+`AVAssetReader.cancelReading`. The main thread remained responsive. Cancelling a
+Swift task did not stop those synchronous decoder operations, and new scrubs kept
+creating readers. Preview replacements now await their cancelled predecessors;
+playback also drains prior preview/playback work before opening a reader. Reader
+setup checks cancellation before starting and before pulling its first sample.
+
+Source comparison now switches between the retained source and keyed image
+synchronously, without decoding or waiting for the render actor. Space has an
+explicit SwiftUI key handler and a default viewer focus target; key repeat is
+consumed without repeatedly toggling transport. The existing Playback menu remains.
+Interactive focus behavior still needs verification in the rebuilt app.
+
+Looping prepares the next reader and its first decoded frame while the current
+traversal plays, retaining at most one extra decoded frame. Reader teardown stays
+on the decoder actor. Rendered images publish on presentation deadlines, and small
+scheduler delays no longer accumulate into a slower cadence. The 4K/24 fps ProRes
+editor regression measured **24.02 fps**, with two observed loop intervals of
+**41.88 ms and 39.78 ms** (nominal interval: 41.67 ms). These are view-model
+publication times sampled at 1 ms, not physical display presentation measurements.
+The synthetic regression also holds loop intervals below 90 ms at 25 fps when
+decoder startup is deliberately delayed by 120 ms.
+
+Edge Decontaminate now uses a bounded, resolution-scaled matte neighbourhood to
+include opaque silhouette pixels while preserving solid interiors and clean
+colours. Light Wrap replaces its steep exponential falloff with a blend of linear
+and smoothstep falloff, making the existing default Strength/Radius useful across
+the edge band. Both changes are in the shared Metal shader. Parameter names,
+defaults, and the Motion template remain unchanged.
+
+Validation: **181 tests passed** (144 shared logic/Metal/cached-pipeline tests,
+26 editor/decoder tests, and 11 transport tests). These include cancellation that
+cannot interrupt an in-flight read, immediate source comparison, delayed loop
+startup, opaque-edge decontamination, and Light Wrap at default settings. To use a
+staged real-media fixture with an isolated Xcode test host, set
+`TEST_RUNNER_CORRIDOR_KEY_PLAYBACK_FIXTURE=/tmp/ck-loop-source.mov` when invoking
+`xcodebuild`; this avoids unattended Documents-folder permission prompts. An
+initial unstaged run timed out opening the source file, before playback began.
+
+Debug test builds and the optimized Release build passed for both the wrapper
+and embedded FxPlug renderer with signing disabled. Instruments Time Profiler
+recorded the decoder benchmark for 5.54 seconds and the benchmark exited normally.
+The Leaks launch stalled with its target suspended; both profiling processes were
+stopped without producing a valid leak measurement. SwiftLint is not installed.
+
+The original Xcode process is not hot-patched: stop and rebuild/run it to exercise
+the fixes. In-host Final Cut Pro and interactive keyboard validation remain manual
+checks. Whole-product coverage and leak freedom are not established by these tests.
+
+## 25 October 2026 baseline
+
 Measured 25 October 2026 on an Apple M1 Max with 64 GB unified memory, macOS 26.5. Input: `LLM Resources/Benchmark/JallenClownWater/Input/HardestShotEver - 1sec.mov` (3840 × 2160, 24 fps, 24 frames).
 
 ## Playback
