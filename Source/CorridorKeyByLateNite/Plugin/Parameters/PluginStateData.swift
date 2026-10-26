@@ -100,6 +100,9 @@ struct PluginStateData: Codable, Equatable, Sendable {
     /// translate normalised radii into destination pixels.
     var destinationLongEdgePixels: Int
 
+    /// Captured while FxPlug host APIs are available; rendering uses only this snapshot.
+    var workingColorGamut: WorkingColorGamut = .rec709
+
     /// Inline complete frame for fixtures and immediate callers. Production
     /// analysis uses `cachedFrameReference`; this serialized key stays stable.
     var cachedMatteBlob: Data?
@@ -244,6 +247,7 @@ struct PluginStateData: Codable, Equatable, Sendable {
         case renderQualityLevel
         case longEdgeBaseline
         case destinationLongEdgePixels
+        case workingColorGamut
         case cachedMatteBlob
         case cachedFrameReference
         case cachedMatteInferenceResolution
@@ -292,6 +296,7 @@ struct PluginStateData: Codable, Equatable, Sendable {
         self.renderQualityLevel = try container.decodeIfPresent(Int.self, forKey: .renderQualityLevel) ?? 2
         self.longEdgeBaseline = try container.decodeIfPresent(Double.self, forKey: .longEdgeBaseline) ?? 1920.0
         self.destinationLongEdgePixels = try container.decodeIfPresent(Int.self, forKey: .destinationLongEdgePixels) ?? 1920
+        self.workingColorGamut = try container.decodeIfPresent(WorkingColorGamut.self, forKey: .workingColorGamut) ?? .rec709
         self.cachedMatteBlob = try container.decodeIfPresent(Data.self, forKey: .cachedMatteBlob)
         self.cachedFrameReference = try container.decodeIfPresent(AnalysisFrameReference.self, forKey: .cachedFrameReference)
         self.cachedMatteInferenceResolution = try container.decodeIfPresent(Int.self, forKey: .cachedMatteInferenceResolution) ?? 0
@@ -336,6 +341,7 @@ struct PluginStateData: Codable, Equatable, Sendable {
         try container.encode(renderQualityLevel, forKey: .renderQualityLevel)
         try container.encode(longEdgeBaseline, forKey: .longEdgeBaseline)
         try container.encode(destinationLongEdgePixels, forKey: .destinationLongEdgePixels)
+        try container.encode(workingColorGamut, forKey: .workingColorGamut)
         try container.encodeIfPresent(cachedMatteBlob, forKey: .cachedMatteBlob)
         try container.encodeIfPresent(cachedFrameReference, forKey: .cachedFrameReference)
         try container.encode(cachedMatteInferenceResolution, forKey: .cachedMatteInferenceResolution)

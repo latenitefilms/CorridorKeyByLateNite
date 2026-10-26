@@ -499,3 +499,59 @@ contains no command-buffer error rows. These bounded headless captures do not
 validate live Final Cut Pro, the full UI, sustained GPU utilization or smaller-
 memory Macs. Captures are `/tmp/ckv2-bounded-cache-leaks.trace` and
 `/tmp/ckv2-bounded-cache-metal.trace` on the validation Mac.
+
+## FxPlug inspector and analysed playback
+
+The supplied Build 10 renderer log contains 774 custom-parameter unarchiving
+warnings for parameter 50. Its most recent entries are from 24 October; it does
+not contain per-render timings or a trace of the supplied screenshot's four-frame
+analysis. It also records completed analysis passes, so those warnings alone do
+not establish a failure to produce cached predictions.
+
+A headless regression reproduced a separate rendering defect: Recommended quality
+was recalculated from each render surface. A 1536px analysis was rejected when the
+host supplied an HD or smaller playback surface, and the pipeline returned the
+original image. Playback now retains the analysed resolution, scales the complete
+prediction to the destination, and tolerates source-size rounding. Explicit
+quality changes, changed hints and different aspect ratios remain invalidating.
+No model settings, persisted parameter IDs or analysis schema were changed.
+
+State capture now retrieves header storage once for the alpha asset, subject
+points and analysis index. A per-instance locked store reuses decoded frame
+metadata while respecting changed host values and undo/reset. Render callbacks
+use their immutable state, including the captured colour gamut, without querying
+parameter APIs. This follows Apple's [plug-in state contract](https://developer.apple.com/documentation/professional-video-applications/communicating-with-the-plug-in-state).
+Backend transitions are logged with output dimensions, quality and render time;
+there is no per-frame log write. Elimination of the host unarchiving warnings
+still requires a fresh in-host run.
+
+The header keeps analysis actions and status visible, with wrapping diagnostics
+in Analysis Details. Alpha Hint file selection and Set Current Frame as Reference
+now occupy a custom row inside Alpha Hint (new ID 9012); the published Motion
+group includes it. The shared picker provides About Alpha Hint in both hosts.
+Explicit custom-row bounds and scrollable overflow avoid clipping long filenames,
+errors and larger accessibility text.
+
+Validation: 150 selected Release logic, Metal and cached-render tests passed,
+including a regression that failed on the original reduced-surface path. The
+synthetic 1080p cached-foreground benchmark measured a 1.98 ms median across seven
+warmed frames on this Apple M1 Max. It uses a constant 512px prediction and excludes
+decoding, host IPC and display; it is not a sustained Final Cut Pro frame-rate
+measurement. Both Xcode products build with Swift 6 complete concurrency checking
+and signing disabled. The Motion XML parses successfully.
+
+Instruments Time Profiler captured the three cached-render regressions in
+`/tmp/CorridorKeyCachedRenderTests.trace`; all three passed under instrumentation.
+This is a short synthetic workload, not a sustained playback or Leaks capture.
+
+Reproduce the headless checks:
+
+```sh
+swift test --package-path Source -c release --filter 'CorridorKeyByLateNiteLogicTests|CorridorKeyByLateNiteMetalStagesTests|recommendedCacheDuringPlayback|diskBackedRendering|cachedPlayback|concurrentCachedFrames|invalidCachedFrame|cachedForegroundWorkingGamut'
+```
+
+Computer Use access to Final Cut Pro was not granted, so the live inspector,
+template refresh, save/reopen behaviour and actual timeline playback remain
+in-host checks. Run the rebuilt wrapper to refresh its bundled Motion template,
+then restart Final Cut Pro. SwiftLint is unavailable; whole-product coverage and
+leak freedom have not been established by this focused change.

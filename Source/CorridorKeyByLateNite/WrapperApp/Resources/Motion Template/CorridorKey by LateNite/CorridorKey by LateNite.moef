@@ -294,6 +294,7 @@
 					<parameter name="Low GPU Memory" id="9005" flags="12901679120" default="0" value="0"/>
 				</parameter>
 				<parameter name="Alpha Hint" id="170" flags="8589938704">
+					<parameter name="" id="9012" flags="12901679120"/>
 					<parameter name="Use Alpha Hint" id="9006" flags="12901679120" default="0" value="0"/>
 					<parameter name="Hint Frames" id="9007" flags="12901679120" default="0" value="0"/>
 					<parameter name="Reference Frame" id="9008" flags="12901679120" default="0" value="0"/>

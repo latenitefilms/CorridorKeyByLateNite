@@ -232,10 +232,19 @@ final class RenderPipeline: @unchecked Sendable {
             ? try screenTransform(source: context.sourceTexture, state: inputs.state, entry: context.entry, queue: context.commandQueue)
             : ScreenColorEstimator.defaultTransform(for: inputs.state.screenColor)
         let gamutTransform = ColorGamutMatrix.transform(for: inputs.workingGamut)
-        let inferenceResolution = inputs.state.qualityMode.resolvedInferenceResolution(
+        let requestedResolution = inputs.state.qualityMode.resolvedInferenceResolution(
             forLongEdge: context.longEdge,
             deviceRegistryID: context.entry.device.registryID
         )
+        // FCP supplies smaller source surfaces during playback. Recommended
+        // quality belongs to the analysis pass, not the current preview size.
+        // Cache lookup already validates the selected quality and prediction
+        // inputs; explicit quality selections still require their exact rung.
+        let cachedResolution = inputs.state.cachedMatteInferenceResolution
+        let hasCachedFrame = inputs.state.cachedFrameReference != nil || inputs.state.cachedMatteBlob != nil
+        let inferenceResolution = inputs.state.qualityMode == .automatic && hasCachedFrame
+            && QualityMode.inferenceLadder.contains(cachedResolution)
+            ? cachedResolution : requestedResolution
 
         // Diagnostic: when the user picks the Hint output mode, route
         // straight to a path that runs the pre-inference hint stage and
@@ -253,9 +262,8 @@ final class RenderPipeline: @unchecked Sendable {
             )
         }
 
-        // Fast path: FxAnalyzer already ran for this clip and the inference
-        // resolution matches the quality the user is asking for. Skip MLX
-        // entirely — the cache holds both network predictions.
+        // Both hosts use the original prediction and scale it to the current
+        // output surface. Playback never needs to rerun neural inference.
         let cachedBlob: Data?
         if let reference = inputs.state.cachedFrameReference,
            inputs.state.cachedMatteInferenceResolution == inferenceResolution {
@@ -1358,7 +1366,12 @@ final class RenderPipeline: @unchecked Sendable {
         else { return nil }
         if state.cachedFrameReference != nil {
             let geometry = InferenceGeometry(sourceWidth: sourceWidth, sourceHeight: sourceHeight, resolution: expectedResolution)
-            guard header.width == geometry.contentWidth, header.height == geometry.contentHeight else { return nil }
+            // A reduced host surface can round either source dimension by a
+            // pixel. Allow that quantisation in prediction space, while still
+            // rejecting caches from a different aspect ratio.
+            let tolerance = max(1, Int(ceil(Double(expectedResolution) / Double(max(1, max(sourceWidth, sourceHeight))))))
+            guard abs(header.width - geometry.contentWidth) <= tolerance,
+                  abs(header.height - geometry.contentHeight) <= tolerance else { return nil }
         }
         return header
     }

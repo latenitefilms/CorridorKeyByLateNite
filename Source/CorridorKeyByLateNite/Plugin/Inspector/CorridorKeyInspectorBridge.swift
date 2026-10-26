@@ -41,6 +41,23 @@ final class CorridorKeyInspectorBridge {
     @ObservationIgnored
     private var smoothedPerFrameSeconds: Double?
 
+    @ObservationIgnored
+    private var lastPoll: ContinuousClock.Instant?
+
+    /// Each visible custom row owns a cancellable observer. Coalescing reads
+    /// keeps opening Alpha Hint from doubling host IPC and metadata decoding.
+    func observeSnapshots() async {
+        while !Task.isCancelled {
+            let now = ContinuousClock.now
+            if lastPoll.map({ $0.duration(to: now) >= .milliseconds(700) }) ?? true {
+                lastPoll = now
+                refreshSnapshot()
+            }
+            do { try await Task.sleep(for: .milliseconds(750)) }
+            catch { return }
+        }
+    }
+
     init(apiManager: any PROAPIAccessing, plugin: CorridorKeyToolboxPlugIn) {
         self.apiManager = apiManager
         self.plugin = plugin

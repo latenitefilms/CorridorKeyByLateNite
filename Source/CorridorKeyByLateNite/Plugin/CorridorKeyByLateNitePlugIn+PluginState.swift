@@ -12,11 +12,18 @@ import Foundation
 import CoreMedia
 
 enum HeaderCustomParameterStorage {
+    /// A failed read is distinct from a successfully retrieved empty parameter.
+    /// Passing this value also prevents retrying failed IPC in each decoder.
+    struct Snapshot {
+        let dictionary: NSDictionary?
+    }
+
     static func dictionaryValue(
         for key: String,
-        using retrieval: any FxParameterRetrievalAPI_v6
+        using retrieval: any FxParameterRetrievalAPI_v6,
+        storage: Snapshot? = nil
     ) -> NSDictionary? {
-        let storage = storageDictionary(using: retrieval)
+        guard let storage = (storage ?? storageDictionary(using: retrieval)).dictionary else { return nil }
         if let dictionary = storage[NSString(string: key)] as? NSDictionary {
             return dictionary
         }
@@ -35,7 +42,7 @@ enum HeaderCustomParameterStorage {
 
         let storage = NSMutableDictionary()
         if let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6 {
-            for (existingKey, existingValue) in storageDictionary(using: retrieval) {
+            for (existingKey, existingValue) in storageDictionary(using: retrieval).dictionary ?? NSDictionary() {
                 storage[existingKey] = existingValue
             }
         }
@@ -50,14 +57,15 @@ enum HeaderCustomParameterStorage {
         )
     }
 
-    private static func storageDictionary(using retrieval: any FxParameterRetrievalAPI_v6) -> NSDictionary {
+    /// Read once per state capture, then share the immutable dictionary across decoders.
+    static func storageDictionary(using retrieval: any FxParameterRetrievalAPI_v6) -> Snapshot {
         var rawValue: (any NSCopying & NSObjectProtocol & NSSecureCoding)?
-        retrieval.getCustomParameterValue(
+        let succeeded = retrieval.getCustomParameterValue(
             &rawValue,
             fromParameter: ParameterIdentifier.headerSummary,
             at: CMTime.zero
         )
-        return rawValue as? NSDictionary ?? NSDictionary()
+        return Snapshot(dictionary: succeeded ? rawValue as? NSDictionary ?? NSDictionary() : nil)
     }
 }
 
@@ -65,7 +73,8 @@ extension CorridorKeyToolboxPlugIn {
 
 
     /// Captures native v2 parameters and the sandboxed hint asset for either analysis or rendering.
-    func videoSettings(using retrieval: any FxParameterRetrievalAPI_v6, at time: CMTime) -> VideoInferenceSettings {
+    func videoSettings(using retrieval: any FxParameterRetrievalAPI_v6, at time: CMTime,
+                       headerStorage: HeaderCustomParameterStorage.Snapshot? = nil) -> VideoInferenceSettings {
         var value = VideoInferenceSettings()
         value.inputIsLinear = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.inputIsLinear, time: time, default: value.inputIsLinear)
         value.linearizeOutput = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.linearizeOutput, time: time, default: value.linearizeOutput)
@@ -77,7 +86,7 @@ extension CorridorKeyToolboxPlugIn {
         value.referenceFrame = intValue(retrieval: retrieval, parameterID: ParameterIdentifier.referenceFrame, time: time, default: value.referenceFrame)
         value.alphaHintStrength = floatValue(retrieval: retrieval, parameterID: ParameterIdentifier.alphaHintStrength, time: time, default: value.alphaHintStrength)
         value.internalHintStrength = floatValue(retrieval: retrieval, parameterID: ParameterIdentifier.internalHintStrength, time: time, default: value.internalHintStrength)
-        if let dictionary = HeaderCustomParameterStorage.dictionaryValue(for: HeaderStorageKey.alphaHintAsset, using: retrieval),
+        if let dictionary = HeaderCustomParameterStorage.dictionaryValue(for: HeaderStorageKey.alphaHintAsset, using: retrieval, storage: headerStorage),
            let data = dictionary["asset"] as? Data {
             value.alphaHintAsset = try? PropertyListDecoder().decode(AlphaHintAsset.self, from: data)
         }
@@ -105,8 +114,12 @@ extension CorridorKeyToolboxPlugIn {
         }
 
         var state = PluginStateData()
+        let headerStorage = HeaderCustomParameterStorage.storageDictionary(using: retrieval)
         state.renderQualityLevel = Int(qualityLevel)
-        state.video = videoSettings(using: retrieval, at: renderTime)
+        state.video = videoSettings(using: retrieval, at: renderTime, headerStorage: headerStorage)
+        if let gamutAPI = apiManager.api(for: (any FxColorGamutAPI_v2).self) as? any FxColorGamutAPI_v2 {
+            state.workingColorGamut = ColorGamutMatrix.gamut(fromColorPrimariesRaw: UInt(gamutAPI.colorPrimaries()))
+        }
         if let timing = apiManager.api(for: (any FxTimingAPI_v4).self) as? any FxTimingAPI_v4 {
             var duration = CMTime.invalid
             var start = CMTime.invalid
@@ -301,16 +314,17 @@ extension CorridorKeyToolboxPlugIn {
 
         // Load the user's OSC-placed hint dots from the published header
         // storage dictionary so they round-trip through the `.moef` wrapper.
-        state.hintPointSet = loadHintPointSet(using: retrieval)
+        state.hintPointSet = loadHintPointSet(using: retrieval, headerStorage: headerStorage)
 
         // If FxAnalyzer has cached a matte for this frame, pack the
         // compressed blob and its inference resolution into the state so the
         // render callback can skip MLX entirely. Screen colour must match the
         // analysis run — mismatches invalidate the cache for that frame.
-        if let analysis = loadAnalysisData(using: retrieval),
+        if let analysis = loadAnalysisData(using: retrieval, headerStorage: headerStorage),
            let cachedMatte = analysis.cachedMatte(
                 at: renderTime,
                 screenColorRaw: state.screenColor.rawValue,
+                qualityModeRaw: state.qualityMode.rawValue,
                 hintConfiguration: state.analysisHintConfiguration
            ) {
             state.cachedMatteBlob = cachedMatte.blob
@@ -392,11 +406,13 @@ extension CorridorKeyToolboxPlugIn {
     /// custom parameter. Returns an empty set when it has never been written
     /// (the typical case until the user clicks the canvas with the OSC active).
     func loadHintPointSet(
-        using retrieval: any FxParameterRetrievalAPI_v6
+        using retrieval: any FxParameterRetrievalAPI_v6,
+        headerStorage: HeaderCustomParameterStorage.Snapshot? = nil
     ) -> HintPointSet {
         let dictionary = HeaderCustomParameterStorage.dictionaryValue(
             for: HeaderStorageKey.subjectPoints,
-            using: retrieval
+            using: retrieval,
+            storage: headerStorage
         )
         return HintPointSet.fromParameterDictionary(dictionary)
     }

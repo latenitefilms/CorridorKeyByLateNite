@@ -15,6 +15,50 @@ import Testing
 @Suite("AnalysisData")
 struct AnalysisDataTests {
 
+    @Test("Cache selection honours the quality choice independently of preview resolution")
+    func cacheQualityIdentity() {
+        let data = AnalysisData(
+            schemaVersion: AnalysisData.currentSchemaVersion,
+            frameDuration: CMTime(value: 1, timescale: 30), firstFrameTime: .zero,
+            frameCount: 1, analyzedCount: 1, screenColorRaw: 0,
+            qualityModeRaw: QualityMode.automatic.rawValue,
+            inferenceResolution: 1536, matteWidth: 1536, matteHeight: 864,
+            mattes: [0: Data([1])]
+        )
+        #expect(data.cachedMatte(at: .zero, screenColorRaw: 0,
+                                qualityModeRaw: QualityMode.automatic.rawValue)?.inferenceResolution == 1536)
+        // Even an explicit selection with the same resolution changes identity.
+        #expect(data.cachedMatte(at: .zero, screenColorRaw: 0,
+                                qualityModeRaw: QualityMode.ultra1536.rawValue) == nil)
+    }
+
+    @Test("Decoded metadata tracks host edits, undo and reset without crossing instances")
+    func metadataSnapshotLifetime() throws {
+        let store = AnalysisSnapshotStore()
+        let original = AnalysisData(
+            schemaVersion: AnalysisData.currentSchemaVersion,
+            frameDuration: CMTime(value: 1, timescale: 30), firstFrameTime: .zero,
+            frameCount: 1, analyzedCount: 1, screenColorRaw: 0, qualityModeRaw: 0,
+            inferenceResolution: 512, matteWidth: 512, matteHeight: 512,
+            mattes: [0: Data([1])]
+        )
+        let dictionary = original.asParameterDictionary()
+        #expect(store.load(dictionary)?.mattes[0] == Data([1]))
+        #expect(store.load(dictionary.copy() as? NSDictionary)?.mattes[0] == Data([1]))
+        let changed = try #require(dictionary.mutableCopy() as? NSMutableDictionary)
+        changed[AnalysisDataKey.mattes] = ["0": Data([2])] as NSDictionary
+        #expect(store.load(changed)?.mattes[0] == Data([2]))
+        #expect(store.load(dictionary)?.mattes[0] == Data([1]), "Undo restores the earlier host value")
+        #expect(store.load(nil)?.mattes[0] == Data([1]), "A failed IPC read can use this instance's last snapshot")
+        #expect(store.load(NSDictionary()) == nil, "A successful empty host value must invalidate analysis")
+        #expect(store.load(nil) == nil, "Old frames cannot reappear after a host reset")
+        #expect(store.load(dictionary)?.mattes[0] == Data([1]))
+        #expect(AnalysisSnapshotStore().load(nil) == nil, "Separate effect instances never borrow analysis")
+        store.clear()
+        #expect(store.load(nil) == nil)
+        #expect(store.load(dictionary)?.mattes[0] == Data([1]), "Reset also clears the decoded dictionary")
+    }
+
     @Test("FxPlug persistence stores compact references without embedding frame pixels")
     func diskReferenceRoundTrip() throws {
         let sessionID = UUID()

@@ -51,7 +51,7 @@ extension CorridorKeyToolboxPlugIn {
     @objc(classesForCustomParameterID:)
     func classes(forCustomParameterID parameterID: UInt32) -> Set<AnyHashable> {
         switch parameterID {
-        case ParameterIdentifier.headerSummary:
+        case ParameterIdentifier.headerSummary, ParameterIdentifier.alphaHintControls:
             let classes: [AnyClass] = [
                 NSDictionary.self,
                 NSMutableDictionary.self,
@@ -97,6 +97,9 @@ extension CorridorKeyToolboxPlugIn {
         let defaults = VideoInferenceSettings()
         let flags = CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         create.startParameterSubGroup("Alpha Hint", parameterID: ParameterIdentifier.alphaHintGroup, parameterFlags: CorridorKeyParameterFlags.default.fxFlags)
+        create.addCustomParameter(withName: "", parameterID: ParameterIdentifier.alphaHintControls,
+                                  defaultValue: NSDictionary(),
+                                  parameterFlags: CorridorKeyParameterFlags.headerCustomUI.fxFlags)
         create.addToggleButton(withName: VideoInferenceSettings.Labels.useAlphaHint, parameterID: ParameterIdentifier.useAlphaHint, defaultValue: defaults.useAlphaHint, parameterFlags: flags)
         create.addPopupMenu(withName: VideoInferenceSettings.Labels.hintFrames, parameterID: ParameterIdentifier.hintFrames, defaultValue: UInt32(defaults.hintFrames.rawValue), menuEntries: AlphaHintFrames.allCases.map(\.displayName), parameterFlags: flags)
         create.addIntSlider(withName: VideoInferenceSettings.Labels.referenceFrame, parameterID: ParameterIdentifier.referenceFrame, defaultValue: 0, parameterMin: 0, parameterMax: Int32.max, sliderMin: 0, sliderMax: 1000, delta: 1, parameterFlags: flags)

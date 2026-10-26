@@ -144,7 +144,7 @@ private struct AnalysisStatusGroup: View {
 
     private var warmupLabel: String {
         switch viewModel.warmupStatus {
-        case .cold: return "Neural Model: Cold"
+        case .cold: return "Neural Model: Not Loaded"
         case .warming(let resolution): return "Neural Model: Loading (\(resolution)px)…"
         case .ready(let resolution): return "Neural Model: Ready (\(resolution)px)"
         case .failed(let message): return "Neural Model Failed: \(message)"
@@ -302,8 +302,6 @@ private struct VideoAlphaHintGroup: View {
             AlphaHintPicker(asset: $viewModel.state.video.alphaHintAsset,
                             onChange: viewModel.videoParameterDidChange,
                             setCurrentReference: viewModel.setCurrentFrameAsHintReference)
-            Text("Import a black-and-white mask: white keeps the subject and black removes the background. Use Alpha Hint enables this file in place of Generated Hint and manual points.")
-                .font(.caption).foregroundStyle(.secondary)
             ParameterToggle(title: VideoInferenceSettings.Labels.useAlphaHint,
                             isOn: $viewModel.state.video.useAlphaHint, defaultValue: false,
                             onChange: viewModel.videoParameterDidChange)
@@ -329,8 +327,6 @@ private struct VideoAlphaHintGroup: View {
                                  value: $viewModel.state.video.internalHintStrength,
                                  onChange: viewModel.videoParameterDidChange,
                 onEditingChanged: viewModel.parameterEditingChanged)
-            Text("Reference Frame is zero-based. Single Frame propagates forwards and backwards using Time Awareness.")
-                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }

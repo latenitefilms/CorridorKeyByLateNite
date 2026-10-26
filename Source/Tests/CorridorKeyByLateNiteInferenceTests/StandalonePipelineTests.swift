@@ -16,6 +16,42 @@ extension MLXInferenceTests {
     /// A direct model test cannot detect a second flip introduced by a host.
     @Suite("Standalone pipeline", .serialized)
     struct StandalonePipelineTests {
+        @Test("Recommended cached quality survives reduced playback surfaces")
+        func recommendedCacheDuringPlayback() throws {
+            let engine = try StandaloneRenderEngine()
+            let resolution = 1536
+            let height = 864
+            let blob = try AnalysisFrameCodec.encode(
+                alpha: [Float](repeating: 0.5, count: resolution * height),
+                foregroundHalfRGBA: AnalysisFrameCodec.foregroundHalfRGBA(
+                    [Float](repeating: 0.4, count: resolution * height * 4)
+                ), width: resolution, height: height
+            )
+            let session = try AnalysisDiskCache.shared.beginSession()
+            var state = Self.neutralState()
+            state.qualityMode = .automatic
+            state.cachedMatteInferenceResolution = resolution
+            state.cachedFrameReference = try AnalysisDiskCache.shared.store(blob, in: session)
+            // FCP changes surface size when playback starts, then requests a
+            // larger image again when paused. The cached prediction is constant.
+            for (width, height) in [(1920, 1080), (960, 540), (853, 480), (1920, 1080)] {
+                let source = try Self.makeSource(width: width, height: height) { _, _ in
+                    SIMD4<UInt8>(20, 200, 40, 255)
+                }
+                let rendered = try engine.render(source: source, state: state, renderTime: .zero)
+                let pixels = Self.readRGBA(rendered.destinationTexture)
+                #expect(rendered.report.effectiveInferenceResolution == resolution)
+                #expect(abs(pixels[0] - 0.2) < 0.001, "Playback must use reconstructed RGB")
+                #expect(abs(pixels[3] - 0.5) <= 1.0 / 255, "Playback must use analysed alpha (8-bit output)")
+            }
+            // Explicit quality changes still require a matching analysis pass.
+            state.qualityMode = .draft512
+            let source = try Self.makeSource(width: 960, height: 540) { _, _ in SIMD4<UInt8>(20, 200, 40, 255) }
+            let changed = try engine.render(source: source, state: state, renderTime: .zero)
+            #expect(Self.readRGBA(changed.destinationTexture)[3] == 1)
+            withExtendedLifetime(session) {}
+        }
+
         @Test("Default Edge Decontaminate corrects opaque silhouettes and preserves opaque interiors", arguments: [false, true])
         func opaqueEdgeDecontamination(keepOriginal: Bool) throws {
             let engine = try StandaloneRenderEngine()

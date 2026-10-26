@@ -15,6 +15,15 @@ import Testing
 @Suite("PluginStateData")
 struct PluginStateDataTests {
 
+    @Test("Host colour gamut survives state transport without render-time API calls")
+    func hostColorGamutSnapshot() throws {
+        var state = PluginStateData()
+        state.workingColorGamut = .rec2020
+        let restored = PluginStateData.decoded(from: try state.encodedForHost())
+        #expect(restored.workingColorGamut == .rec2020)
+        #expect(PluginStateData.decoded(from: NSData(data: Data("{}".utf8))).workingColorGamut == .rec709)
+    }
+
     @Test("Round-trip preserves every field")
     func roundTripPreservesFields() throws {
         let matte = Data([0xFE, 0xED, 0xFA, 0xCE, 0xCA, 0xFE])

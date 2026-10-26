@@ -33,25 +33,52 @@ extension CorridorKeyToolboxPlugIn {
 
     @objc(createViewForParameterID:)
     func createViewForParameter(_ parameterID: UInt32) -> NSView? {
-        guard parameterID == ParameterIdentifier.headerSummary else {
+        guard parameterID == ParameterIdentifier.headerSummary || parameterID == ParameterIdentifier.alphaHintControls else {
             return nil
         }
 
         nonisolated(unsafe) let apiManagerRef = apiManager
         nonisolated(unsafe) let pluginRef = self
 
-        let hostingView: CorridorKeyHostingView<CorridorKeyHeaderView> = MainActor.assumeIsolated {
-            let bridge = CorridorKeyInspectorBridge(apiManager: apiManagerRef, plugin: pluginRef)
-            let view = CorridorKeyHostingView(rootView: CorridorKeyHeaderView(bridge: bridge))
+        let hostingView: CorridorKeyHostingView<CorridorKeyInspectorRow> = MainActor.assumeIsolated {
+            let bridge = pluginRef.inspectorBridge ?? CorridorKeyInspectorBridge(apiManager: apiManagerRef, plugin: pluginRef)
+            pluginRef.inspectorBridge = bridge
+            let row = CorridorKeyInspectorRow(bridge: bridge, parameterID: parameterID)
+            let view = CorridorKeyHostingView(rootView: row)
             view.retainedBridge = bridge
-            view.sizingOptions = [.intrinsicContentSize]
-            view.frame = NSRect(x: 0, y: 0, width: 320, height: 360)
-            view.layoutSubtreeIfNeeded()
-            view.setFrameSize(NSSize(width: 320, height: view.fittingSize.height))
+            // FxPlug reserves the returned frame height. Do not measure an
+            // unconstrained SwiftUI fittingSize: it lays prose on a single line.
+            view.sizingOptions = []
+            view.frame = NSRect(x: 0, y: 0, width: 320, height: row.height)
             view.autoresizingMask = [.width]
             return view
         }
 
         return Unmanaged.passRetained(hostingView).takeUnretainedValue()
+    }
+}
+
+/// Fixed host bounds with a scrolling fallback for accessibility text sizes,
+/// long filenames and errors. Normal content fits without scrolling.
+@MainActor
+private struct CorridorKeyInspectorRow: View {
+    @State var bridge: CorridorKeyInspectorBridge
+    let parameterID: UInt32
+
+    var height: CGFloat { parameterID == ParameterIdentifier.headerSummary ? 210 : 150 }
+
+    var body: some View {
+        ScrollView {
+            Group {
+                if parameterID == ParameterIdentifier.headerSummary {
+                    CorridorKeyHeaderView(bridge: bridge)
+                } else {
+                    CorridorKeyAlphaHintView(bridge: bridge)
+                }
+            }
+            .padding()
+        }
+        .frame(height: height, alignment: .top)
+        .task(id: ObjectIdentifier(bridge)) { await bridge.observeSnapshots() }
     }
 }

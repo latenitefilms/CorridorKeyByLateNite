@@ -15,6 +15,46 @@
 import Foundation
 import CoreMedia
 
+/// Per-instance decoded analysis metadata, protected across host callback threads.
+final class AnalysisSnapshotStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var snapshot: AnalysisData?
+    private var persistedDictionary: NSDictionary?
+
+    /// Avoid decoding a whole clip's property-list frame index for each frame.
+    /// The dictionary still comes from this request's host state, so undo and
+    /// parameter edits cannot be hidden behind a process-global cache.
+    func load(_ dictionary: NSDictionary?) -> AnalysisData? {
+        lock.withLock {
+            guard let dictionary else { return snapshot }
+            if let persistedDictionary, persistedDictionary.isEqual(dictionary) { return snapshot }
+            guard let decoded = AnalysisData.fromParameterDictionary(dictionary) else {
+                snapshot = nil
+                persistedDictionary = nil
+                return nil
+            }
+            persistedDictionary = dictionary.copy() as? NSDictionary
+            snapshot = decoded
+            return decoded
+        }
+    }
+
+    func store(_ snapshot: AnalysisData) {
+        lock.lock()
+        self.snapshot = snapshot
+        persistedDictionary = nil
+        lock.unlock()
+    }
+
+    func clear() {
+        lock.lock()
+        snapshot = nil
+        persistedDictionary = nil
+        lock.unlock()
+    }
+
+}
+
 /// Dictionary keys used when flattening `AnalysisData` into the custom
 /// parameter's `NSDictionary`. Changing any of these without bumping
 /// `AnalysisData.currentSchemaVersion` will silently break saved libraries.
@@ -109,9 +149,11 @@ struct AnalysisData: Sendable {
     func cachedMatte(
         at renderTime: CMTime,
         screenColorRaw requestedScreenColorRaw: Int,
+        qualityModeRaw requestedQualityModeRaw: Int? = nil,
         hintConfiguration requestedHints: AnalysisHintConfiguration? = nil
     ) -> CachedAnalysisMatte? {
         guard requestedHints == nil || hintConfiguration == requestedHints,
+              requestedQualityModeRaw == nil || qualityModeRaw == requestedQualityModeRaw,
               screenColorRaw == requestedScreenColorRaw,
               let index = frameIndex(for: renderTime) else { return nil }
         if let reference = frameReferences[index] {

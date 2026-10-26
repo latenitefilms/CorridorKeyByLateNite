@@ -114,46 +114,6 @@ final class AnalysisSessionState: @unchecked Sendable {
     }
 }
 
-/// Last known persisted analysis snapshot for this plug-in instance.
-///
-/// Final Cut Pro may render with an older encoded `pluginState` immediately
-/// after a seek or custom-parameter write. Keeping the same-process snapshot
-/// lets the render callback recover the current frame's matte while the host
-/// propagates the published header-storage parameter.
-final class AnalysisSnapshotStore: @unchecked Sendable {
-    private let lock = NSLock()
-    private var snapshot: AnalysisData?
-
-    func store(_ snapshot: AnalysisData) {
-        lock.lock()
-        self.snapshot = snapshot
-        lock.unlock()
-    }
-
-    func clear() {
-        lock.lock()
-        snapshot = nil
-        lock.unlock()
-    }
-
-    func currentSnapshot() -> AnalysisData? {
-        lock.lock()
-        defer { lock.unlock() }
-        return snapshot
-    }
-
-    func cachedMatte(
-        at renderTime: CMTime,
-        screenColorRaw: Int,
-        hintConfiguration: AnalysisHintConfiguration
-    ) -> CachedAnalysisMatte? {
-        currentSnapshot()?.cachedMatte(
-            at: renderTime,
-            screenColorRaw: screenColorRaw,
-            hintConfiguration: hintConfiguration
-        )
-    }
-}
 
 extension CorridorKeyToolboxPlugIn {
 
@@ -558,17 +518,17 @@ extension CorridorKeyToolboxPlugIn {
 
     /// Loads persisted metadata so `pluginState` can attach the current frame's
     /// local cache reference without moving complete image payloads through IPC.
-    func loadAnalysisData(using retrieval: any FxParameterRetrievalAPI_v6) -> AnalysisData? {
+    func loadAnalysisData(using retrieval: any FxParameterRetrievalAPI_v6,
+                          headerStorage: HeaderCustomParameterStorage.Snapshot? = nil) -> AnalysisData? {
+        let storage = headerStorage ?? HeaderCustomParameterStorage.storageDictionary(using: retrieval)
         let headerDictionary = HeaderCustomParameterStorage.dictionaryValue(
             for: HeaderStorageKey.analysisData,
-            using: retrieval
+            using: retrieval,
+            storage: storage
         )
-        if let analysis = AnalysisData.fromParameterDictionary(headerDictionary) {
-            analysisSnapshotStore.store(analysis)
-            return analysis
-        }
-
-        return analysisSnapshotStore.currentSnapshot()
+        // Only a failed host read may use the last known snapshot. An empty
+        // value is authoritative (Reset All, Reset Analysis or host undo).
+        return analysisSnapshotStore.load(storage.dictionary == nil ? nil : headerDictionary ?? NSDictionary())
     }
 
     // MARK: - Frame index math

@@ -1,270 +1,56 @@
-//
-//  CorridorKeyHeaderView.swift
-//  CorridorKey by LateNite
-//
-//  SwiftUI header drawn at the top of the Final Cut Pro inspector. Pulls its
-//  data from `CorridorKeyInspectorBridge` so the SwiftUI tree stays free of
-//  FxPlug types and can be previewed / unit-tested in isolation.
-//
-
 import SwiftUI
-import AppKit
 
-/// Inspector header the FxPlug custom-UI parameter hosts. Shows the app icon
-/// / version, exposes Analyse / Reset actions, and surfaces the same
-/// Analysis fields as the Standalone Editor.
+/// Compact analysis controls; diagnostics open separately from the host's fixed row.
 @MainActor
 struct CorridorKeyHeaderView: View {
-
-    /// `@State` pins the bridge to this view's identity so SwiftUI can
-    /// keep the per-property observation alive across re-renders. With a
-    /// plain `let` the subscription was only as stable as the caller's
-    /// ownership — and when Final Cut Pro collapsed and re-expanded the
-    /// inspector row, the struct was recycled before the hosting view was,
-    /// dropping the timer and leaving the header blank. `@State` mirrors
-    /// the old `@StateObject` ownership semantics for `@Observable`
-    /// classes.
-    @State private var bridge: CorridorKeyInspectorBridge
-
-    init(bridge: CorridorKeyInspectorBridge) {
-        _bridge = State(wrappedValue: bridge)
-    }
-
-    private let applicationIcon: NSImage = CorridorKeyInspectorAssets.applicationIcon()
-    private let versionLabel: String = {
-        "v\(CorridorKeyInspectorAssets.versionString()) (Build \(CorridorKeyInspectorAssets.buildString()))"
-    }()
+    let bridge: CorridorKeyInspectorBridge
+    @State private var showingDetails = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            Image(nsImage: applicationIcon)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 48, height: 48)
-                .accessibilityLabel("CorridorKey by LateNite")
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("CorridorKey by LateNite")
-                    .font(.headline)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text(versionLabel)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                CorridorKeyAnalysisControls(bridge: bridge, isAnalysisInFlight: isAnalysisInFlight)
-
-                AlphaHintPicker(asset: $bridge.alphaHintAsset,
-                                onChange: bridge.saveAlphaHintAsset,
-                                setCurrentReference: bridge.setCurrentFrameAsHintReference)
-                    .disabled(isAnalysisInFlight)
-                    .help("Alpha Hint imports a black-and-white mask: white keeps the subject; black removes the background. Enable Use Alpha Hint to replace generated hints and manual points.")
-                Text(HintMode.explanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if let message = bridge.hintSelectionError {
-                    Text(message).font(.caption).foregroundStyle(.red)
+        VStack(alignment: .leading) {
+            HStack {
+                Image(nsImage: CorridorKeyInspectorAssets.applicationIcon())
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 32, height: 32)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading) {
+                    Text("CorridorKey by LateNite").font(.headline)
+                    Text("v\(CorridorKeyInspectorAssets.versionString()) (Build \(CorridorKeyInspectorAssets.buildString()))")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-
-                analysisProgressLine
-
-                neuralModelStatusRow
-
-                backendStatusRow
-
-                cachedMattesStatusRow
-                SourceClipInformation(snapshot: bridge.snapshot)
-                Text(bridge.videoMemoryDescription).font(.caption).foregroundStyle(.secondary)
-                Text(AnalysisDiskCache.storageExplanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            }
+            CorridorKeyAnalysisControls(bridge: bridge)
+            CorridorKeyAnalysisProgress(snapshot: bridge.snapshot)
+            if let message = bridge.hintSelectionError {
+                Text(message).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Button("Analysis Details", systemImage: "info.circle") { showingDetails = true }
+                .buttonStyle(.borderless)
+                .popover(isPresented: $showingDetails) {
+                    CorridorKeyAnalysisDetails(bridge: bridge)
+                }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 0)
-        .task(id: ObjectIdentifier(bridge)) {
-            // SwiftUI cancels this task automatically when the view leaves
-            // the hierarchy, which removes the Timer-retain-cycle risk the
-            // old `startPolling` / `stopPolling` pair had.
-            bridge.refreshSnapshot()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(750))
-                if Task.isCancelled { break }
-                bridge.refreshSnapshot()
-            }
-        }
-    }
-
-    // MARK: - Subviews
-
-    @ViewBuilder
-    private var analysisProgressLine: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ProgressView(value: analysisProgressValue)
-                .progressViewStyle(.linear)
-
-            switch bridge.snapshot.state {
-            case .notAnalysed:
-                statusBadge(
-                    systemImage: "info.circle",
-                    tint: .secondary,
-                    text: "Press Analyse Clip to build the matte cache."
-                )
-            case .requested:
-                statusBadge(
-                    systemImage: "clock.fill",
-                    tint: .secondary,
-                    text: "Analysis queued…"
-                )
-            case .running:
-                statusBadge(
-                    systemImage: "wand.and.stars",
-                    tint: .secondary,
-                    text: runningStatusText
-                )
-            case .completed:
-                statusBadge(
-                    systemImage: "checkmark.seal.fill",
-                    tint: .green,
-                    text: "Analysed \(bridge.snapshot.analyzedFrameCount) \(bridge.snapshot.analyzedFrameCount == 1 ? "frame" : "frames")."
-                )
-            case .interrupted:
-                statusBadge(
-                    systemImage: "exclamationmark.octagon.fill",
-                    tint: .orange,
-                    text: "Analysis interrupted."
-                )
-            }
-        }
-    }
-
-    private var neuralModelStatusRow: some View {
-        statusBadge(
-            systemImage: warmupIconName,
-            tint: warmupColor,
-            text: warmupLabel
-        )
-    }
-
-    private var backendStatusRow: some View {
-        statusBadge(
-            systemImage: "info.circle",
-            tint: .secondary,
-            text: "Backend: \(bridge.snapshot.renderBackendDescription)"
-        )
-    }
-
-    private var cachedMattesStatusRow: some View {
-        statusBadge(
-            systemImage: "square.stack.3d.up",
-            tint: .secondary,
-            text: "Cached mattes: \(bridge.snapshot.analyzedFrameCount) / \(bridge.snapshot.totalFrameCount)"
-        )
-    }
-
-    private func statusBadge(
-        systemImage: String,
-        tint: Color,
-        text: String
-    ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Image(systemName: systemImage)
-                .foregroundStyle(tint)
-            Text(text)
-                .foregroundStyle(tint)
-        }
-        .font(.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
     }
-
-    // MARK: - Helpers
-
-    private var isAnalysisInFlight: Bool { bridge.snapshot.isWorking }
-
-    private var analysisProgressValue: Double {
-        switch bridge.snapshot.state {
-        case .completed:
-            return 1
-        case .notAnalysed, .requested, .running, .interrupted:
-            return bridge.snapshot.progress
-        }
-    }
-
-    private var runningStatusText: String {
-        let snapshot = bridge.snapshot
-        if snapshot.totalFrameCount > 0 {
-            return "Analysing frame \(snapshot.analyzedFrameCount) of \(snapshot.totalFrameCount)…"
-        }
-        return "Analysing…"
-    }
-
-    private var warmupIconName: String {
-        switch bridge.snapshot.warmup {
-        case .cold: return "moon.zzz"
-        case .warming: return "clock"
-        case .ready: return "checkmark.circle.fill"
-        case .failed: return "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var warmupColor: Color {
-        switch bridge.snapshot.warmup {
-        case .cold: return .secondary
-        case .warming: return .orange
-        case .ready: return .green
-        case .failed: return .red
-        }
-    }
-
-    private var warmupLabel: String {
-        switch bridge.snapshot.warmup {
-        case .cold: return "Neural Model: Cold"
-        case .warming(let resolution): return "Neural Model: Loading (\(resolution)px)…"
-        case .ready(let resolution): return "Neural Model: Ready (\(resolution)px)"
-        case .failed(let message): return "Neural Model Failed: \(message)"
-        }
-    }
 }
 
-/// Source metadata uses native clip timing rather than the Final Cut Pro project rate.
-private struct SourceClipInformation: View {
-    let snapshot: CorridorKeyAnalysisSnapshot
-
-    var body: some View {
-        VStack(alignment: .leading) {
-            if let width = snapshot.sourceWidth, let height = snapshot.sourceHeight {
-                Text("Source Resolution: \(width) × \(height)")
-            }
-            if let frameRate = snapshot.sourceFrameRate {
-                Text("Source Frame Rate: \(frameRate.formatted(.number.precision(.fractionLength(0...3))))fps")
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
-}
-
-/// Keeps the primary analysis/reset actions together, with secondary tools below.
+/// Keeps primary actions visible even in a narrow inspector.
 private struct CorridorKeyAnalysisControls: View {
     let bridge: CorridorKeyInspectorBridge
-    let isAnalysisInFlight: Bool
 
     var body: some View {
         VStack(alignment: .leading) {
-            HStack {
-                Button("Analyse Clip", systemImage: "wand.and.stars", action: bridge.triggerAnalysis)
-                    .buttonStyle(.borderedProminent)
-                Button("Reset All", systemImage: "arrow.counterclockwise", action: bridge.resetAllParameters)
-                    .help("Reset all keying parameters, animation and subject hints to their factory defaults.")
+            ViewThatFits(in: .horizontal) {
+                HStack { CorridorKeyPrimaryAnalysisButtons(bridge: bridge) }
+                VStack(alignment: .leading) { CorridorKeyPrimaryAnalysisButtons(bridge: bridge) }
             }
-            .disabled(isAnalysisInFlight)
+            .disabled(bridge.snapshot.isWorking)
             HStack {
                 Button("Reset Analysis", systemImage: "trash", action: bridge.resetAnalysis)
-                    .disabled(isAnalysisInFlight)
+                    .disabled(bridge.snapshot.isWorking)
                 Menu("Subject Hints", systemImage: "person.crop.circle") {
                     Button("Clear Hints on This Frame", systemImage: "eraser") {
                         bridge.clearHints(onCurrentFrame: true)
@@ -274,7 +60,9 @@ private struct CorridorKeyAnalysisControls: View {
                     }
                 }
                 .labelStyle(.iconOnly)
-                .help(ManualHintGuidance.explanation + "\nClick for foreground, Shift-click for background, Command-click to ignore, Option-click to erase."
+                .disabled(bridge.snapshot.isWorking)
+                .help(ManualHintGuidance.explanation
+                      + "\nClick for foreground, Shift-click for background, Command-click to ignore, Option-click to erase."
                       + (bridge.hasLegacyHints ? "\n" + ManualHintGuidance.legacyExplanation : ""))
                 if case .warming = bridge.snapshot.warmup {
                     Button("Cancel", systemImage: "xmark.circle", action: bridge.cancelWarmup)
@@ -285,5 +73,117 @@ private struct CorridorKeyAnalysisControls: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
+    }
+}
+
+private struct CorridorKeyPrimaryAnalysisButtons: View {
+    let bridge: CorridorKeyInspectorBridge
+
+    var body: some View {
+        Button("Analyse Clip", systemImage: "wand.and.stars", action: bridge.triggerAnalysis)
+            .buttonStyle(.borderedProminent)
+        Button("Reset All", systemImage: "arrow.counterclockwise", action: bridge.resetAllParameters)
+            .help("Reset all keying parameters, animation and subject hints to their factory defaults.")
+    }
+}
+
+/// Progress appears during analysis; its result remains visible afterwards.
+private struct CorridorKeyAnalysisProgress: View {
+    let snapshot: CorridorKeyAnalysisSnapshot
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            if snapshot.isWorking {
+                ProgressView(value: snapshot.progress).progressViewStyle(.linear)
+            }
+            switch snapshot.state {
+            case .notAnalysed:
+                Label("Choose Analyse Clip to key this clip.", systemImage: "info.circle")
+                    .foregroundStyle(.secondary)
+            case .requested:
+                Label("Analysis queued…", systemImage: "clock")
+            case .running:
+                Label("Analysing frame \(snapshot.analyzedFrameCount) of \(snapshot.totalFrameCount)…", systemImage: "wand.and.stars")
+            case .completed:
+                Label("Analysed \(snapshot.analyzedFrameCount) \(snapshot.analyzedFrameCount == 1 ? "frame" : "frames").", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+            case .interrupted:
+                Label("Analysis interrupted.", systemImage: "exclamationmark.octagon")
+                    .foregroundStyle(.orange)
+            }
+        }
+        .font(.caption)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Wrapping, scrollable diagnostics accommodate long errors without truncation.
+private struct CorridorKeyAnalysisDetails: View {
+    let bridge: CorridorKeyInspectorBridge
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading) {
+                Text("Analysis Details").font(.headline)
+                Text("Backend: \(bridge.snapshot.renderBackendDescription)")
+                Text("Cached mattes: \(bridge.snapshot.analyzedFrameCount) / \(bridge.snapshot.totalFrameCount)")
+                switch bridge.snapshot.warmup {
+                case .cold:
+                    Text("Neural Model: Not Loaded")
+                    Text("Analysed playback uses the cache and does not need the neural model to be loaded.")
+                        .foregroundStyle(.secondary)
+                case .warming(let resolution):
+                    Text("Neural Model: Loading (\(resolution)px)…")
+                case .ready(let resolution):
+                    Text("Neural Model: Ready (\(resolution)px)")
+                case .failed(let message):
+                    Text("Neural Model Failed: \(message)").foregroundStyle(.red)
+                }
+                if let width = bridge.snapshot.sourceWidth, let height = bridge.snapshot.sourceHeight {
+                    Text("Source Resolution: \(width) × \(height)")
+                }
+                if let rate = bridge.snapshot.sourceFrameRate {
+                    Text("Source Frame Rate: \(rate.formatted(.number.precision(.fractionLength(0...3))))fps")
+                }
+                if let milliseconds = bridge.snapshot.lastRenderMilliseconds {
+                    Text("Last Render: \(milliseconds.formatted(.number.precision(.fractionLength(1)))) ms")
+                }
+                Text(bridge.videoMemoryDescription)
+                Text(AnalysisDiskCache.storageExplanation).foregroundStyle(.secondary)
+                Divider()
+                Text(HintMode.controlName).font(.headline)
+                Text(HintMode.explanation)
+                if let message = bridge.hintSelectionError {
+                    Text(message).foregroundStyle(.red)
+                }
+            }
+            .font(.callout)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .padding()
+        }
+        .frame(width: 360, height: 420)
+    }
+}
+
+/// File selection sits beside the native Alpha Hint parameters in both hosts.
+@MainActor
+struct CorridorKeyAlphaHintView: View {
+    @Bindable var bridge: CorridorKeyInspectorBridge
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            AlphaHintPicker(asset: $bridge.alphaHintAsset,
+                            onChange: bridge.saveAlphaHintAsset,
+                            setCurrentReference: bridge.setCurrentFrameAsHintReference)
+                .disabled(bridge.snapshot.isWorking)
+            if let message = bridge.hintSelectionError {
+                Text(message).font(.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

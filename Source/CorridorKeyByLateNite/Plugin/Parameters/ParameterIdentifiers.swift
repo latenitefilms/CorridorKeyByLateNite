@@ -18,6 +18,10 @@ enum ParameterIdentifier {
     /// persistence dictionary for analysis data and subject points.
     static let headerSummary: UInt32 = 50
 
+    /// Presentation-only row inside Alpha Hint. Persisted assets remain on
+    /// headerSummary so existing libraries keep their selections.
+    static let alphaHintControls: UInt32 = 9012
+
     // Subgroups
     static let settingsGroup: UInt32 = 100
     static let interiorGroup: UInt32 = 110
