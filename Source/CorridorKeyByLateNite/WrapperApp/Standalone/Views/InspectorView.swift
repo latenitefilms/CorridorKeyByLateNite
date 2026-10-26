@@ -3,8 +3,8 @@
 //  CorridorKey by LateNite — Standalone Editor
 //
 //  Mirrors the Final Cut Pro inspector layout for the standalone
-//  editor: Settings → Interior Detail → Matte → Edge & Spill → Edge
-//  Refinement → Temporal Stability. Each group is a sibling `View`
+//  editor: Settings → Alpha Hint → Time Awareness → Temporal Stability →
+//  Interior Detail → Matte → Edge & Spill → Edge Refinement. Each group is a sibling `View`
 //  struct so SwiftUI invalidates only the group whose data changed.
 //
 //  Sliders bind to the editor's `PluginStateData` directly via
@@ -25,9 +25,11 @@ struct InspectorView: View {
                 InspectorGroupSeparator()
                 SettingsGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
+                VideoAlphaHintGroup(viewModel: viewModel)
+                InspectorGroupSeparator()
                 VideoTimeAwarenessGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
-                VideoAlphaHintGroup(viewModel: viewModel)
+                TemporalStabilityGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
                 InteriorDetailGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
@@ -36,8 +38,6 @@ struct InspectorView: View {
                 EdgeAndSpillGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
                 EdgeRefinementGroup(viewModel: viewModel)
-                InspectorGroupSeparator()
-                TemporalStabilityGroup(viewModel: viewModel)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
@@ -72,6 +72,11 @@ private struct AnalysisStatusGroup: View {
                 })
                 .buttonStyle(.borderedProminent)
                 .disabled(!viewModel.phase.isReady || viewModel.analysisStatus.inProgress)
+
+                Button("Reset All", systemImage: "arrow.counterclockwise", action: viewModel.resetAllParameters)
+                    .buttonStyle(.bordered)
+                    .disabled(viewModel.analysisStatus.inProgress)
+                    .help("Reset all keying parameters and subject hints to their factory defaults.")
 
                 if viewModel.analysisStatus.inProgress {
                     Button("Stop", systemImage: "stop.fill") {

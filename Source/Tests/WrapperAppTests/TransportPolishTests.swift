@@ -24,6 +24,41 @@ import CoreMedia
 @Suite("Transport polish", .serialized)
 struct TransportPolishTests {
 
+    @Test("Playback publishes matching frame timing and comparison reuses the paused source")
+    @MainActor
+    func comparisonStaysOnPresentedFrame() async throws {
+        let url = try await SyntheticVideoFixture.writeMP4(frameCount: 8, fps: 25)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let model = EditorViewModel(renderEngine: try StandaloneRenderEngine())
+        model.state.outputMode = .original
+        await model.loadClip(at: url)
+        defer { model.closeClip() }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while model.latestPreview == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        _ = try #require(model.latestPreview)
+        model.togglePlayback()
+        for _ in 0..<80 {
+            try await Task.sleep(for: .milliseconds(5))
+            let displayed = try #require(model.latestPreview)
+            #expect(model.playheadTime == displayed.presentationTime)
+        }
+        model.togglePlayback()
+        let paused = try #require(model.latestPreview)
+        #expect(model.playheadTime == paused.presentationTime)
+        for showingOriginal in [true, false, true, false] {
+            model.isShowingOriginal = showingOriginal
+            try await Task.sleep(for: .milliseconds(30))
+            let compared = try #require(model.latestPreview)
+            #expect(model.playheadTime == paused.presentationTime)
+            #expect(compared.presentationTime == paused.presentationTime)
+            // Original output aliases the decoder buffer. Retaining this exact
+            // buffer prevents random-access decoding from choosing a nearby sample.
+            #expect(compared.pixelBuffer === paused.pixelBuffer)
+        }
+    }
+
     @Test("Frame stepping and boundary jumps pause playback and clamp to actual samples")
     @MainActor
     func navigationPausesPlayback() throws {

@@ -10,7 +10,7 @@ We're just using a placeholder icon for now (taken from [VFX Toolbox](https://vf
 
 Run **CorridorKey by LateNite** from your `/Applications` folder.
 
-Click **Open Standalone Editor**.
+Click **Open Standalone Editor**. The neural model starts loading in the background immediately; you can import and preview media while it loads.
 
 ![](/static/wrapper-app.png)
 
@@ -28,6 +28,8 @@ First pick your:
 
 **Reduce Edge Flicker**, **Light Wrap**, and **Auto Despeckle** are off by default so the initial result preserves the model's detail. Reduce Edge Flicker is an additional smoothing pass; it can soften edges or introduce trails. Try Time Awareness first when a shot flickers. Saved effects retain their explicit settings.
 
+**Time Awareness** and **Temporal Stability** sit together in the inspector. **Reset All**, beside Analyse Clip, restores factory parameters and clears manual points and imported Alpha Hint selections. The reset supports Undo; in Final Cut Pro it also removes parameter keyframes.
+
 Then press **Analyse Clip**:
 
 ![](/static/standalone-editor-result.png)
@@ -41,6 +43,8 @@ For a still image, use the same **Analyse Clip** button and keying controls, the
 ### Playback
 
 Press **Space** to play or pause, and **Left Arrow** or **Right Arrow** to step one frame. The first-frame and last-frame buttons pause playback and jump to the corresponding source sample. The FPS display shows achieved playback speed followed by the source rate, for example `23fps (25fps)`. Source resolution and frame rate also appear below Cached mattes in the inspector.
+
+Press and hold **Show Original** to compare the displayed frame with its unkeyed source. Releasing it restores the keyed view without moving the playhead.
 
 ### Batch export
 
@@ -89,6 +93,8 @@ First pick your:
 
 **Reduce Edge Flicker**, **Light Wrap**, and **Auto Despeckle** are off by default so the initial result preserves the model's detail. Reduce Edge Flicker is an additional smoothing pass; it can soften edges or introduce trails. Try Time Awareness first when a shot flickers. Saved effects retain their explicit settings.
 
+**Time Awareness** and **Temporal Stability** sit together in the inspector. **Reset All**, beside Analyse Clip, restores factory parameters and clears manual points and imported Alpha Hint selections. The reset supports Undo; in Final Cut Pro it also removes parameter keyframes.
+
 Then press **Analyse Clip**:
 
 ![](/static/default-effect.png)
@@ -101,7 +107,9 @@ Then once done, you'll see it's complete:
 
 ![](/static/complete.png)
 
-You can now adjust the other properties as you want to get best results.
+You can now adjust the other properties as you want to get best results. Model loading in Final Cut Pro remains on demand.
+
+**Light Wrap** adds blurred source light along the silhouette; Radius controls its reach into the subject. **Edge Decontaminate** removes residual screen-colour excess at translucent edges. Already-clean edges may change little. Both affect foreground colour in Processed and foreground output modes; Matte Only and Source + Matte are diagnostic/source outputs. **Keep Original in Solid Areas** restores source detail before these edge corrections.
 
 Setting the **Output** to **Matte Only** can be helpful initially to get suitable values:
 

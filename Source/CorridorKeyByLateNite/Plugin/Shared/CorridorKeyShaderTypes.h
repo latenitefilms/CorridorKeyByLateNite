@@ -225,6 +225,7 @@ typedef struct CKForegroundPostProcessParams {
     int lightWrapEnabled;
     int edgeDecontaminateEnabled;
     int applyInverseRotation;
+    int keepOriginalInSolidAreas;
 } CKForegroundPostProcessParams;
 
 // Temporal-blend parameters. The kernel runs *during analysis* over a

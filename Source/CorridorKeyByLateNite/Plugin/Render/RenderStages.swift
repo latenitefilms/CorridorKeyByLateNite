@@ -834,6 +834,7 @@ enum RenderStages {
         let screenColor: SIMD3<Float>
         let inverseScreenMatrix: simd_float3x3
         let applyInverseRotation: Bool
+        var keepOriginalInSolidAreas = false
     }
 
     /// Runs the fused `corridorKeyForegroundPostProcessKernel`. Replaces
@@ -849,6 +850,7 @@ enum RenderStages {
         matte: any MTLTexture,
         blurredSource: any MTLTexture,
         passthroughMatte: (any MTLTexture)? = nil,
+        blurredMatte: (any MTLTexture)? = nil,
         config: FusedForegroundConfig,
         entry: MetalDeviceCacheEntry,
         commandBuffer: any MTLCommandBuffer
@@ -872,6 +874,7 @@ enum RenderStages {
         encoder.setTexture(matte, index: Int(CKTextureIndexMatte.rawValue))
         encoder.setTexture(blurredSource, index: Int(CKTextureIndexHint.rawValue))
         encoder.setTexture(passthroughMatte ?? matte, index: Int(CKTextureIndexCoarse.rawValue))
+        encoder.setTexture(blurredMatte ?? matte, index: Int(CKTextureIndexTempA.rawValue))
         encoder.setTexture(output.texture, index: Int(CKTextureIndexOutput.rawValue))
 
         var params = CKForegroundPostProcessParams(
@@ -883,7 +886,8 @@ enum RenderStages {
             sourcePassthroughEnabled: config.sourcePassthrough ? 1 : 0,
             lightWrapEnabled: config.lightWrapEnabled ? 1 : 0,
             edgeDecontaminateEnabled: config.edgeDecontaminateEnabled ? 1 : 0,
-            applyInverseRotation: config.applyInverseRotation ? 1 : 0
+            applyInverseRotation: config.applyInverseRotation ? 1 : 0,
+            keepOriginalInSolidAreas: config.keepOriginalInSolidAreas ? 1 : 0
         )
         encoder.setBytes(
             &params,
@@ -1312,6 +1316,11 @@ enum RenderStages {
         )
         intermediate.returnOnCompletion(of: commandBuffer)
 
+        let blurredMatte = try makePassthroughMatte(
+            matte: matte, erodeRadius: 0, blurRadius: radiusPixels,
+            entry: entry, commandBuffer: commandBuffer
+        )
+        blurredMatte?.returnOnCompletion(of: commandBuffer)
         guard let output = entry.texturePool.acquire(
             width: width,
             height: height,
@@ -1330,6 +1339,7 @@ enum RenderStages {
         encoder.setTexture(foreground, index: Int(CKTextureIndexForeground.rawValue))
         encoder.setTexture(blurredSource.texture, index: Int(CKTextureIndexSource.rawValue))
         encoder.setTexture(matte, index: Int(CKTextureIndexMatte.rawValue))
+        encoder.setTexture(blurredMatte?.texture ?? matte, index: Int(CKTextureIndexTempA.rawValue))
         encoder.setTexture(output.texture, index: Int(CKTextureIndexOutput.rawValue))
         var params = CKLightWrapParams(strength: strength, edgeBias: 0.6)
         encoder.setBytes(

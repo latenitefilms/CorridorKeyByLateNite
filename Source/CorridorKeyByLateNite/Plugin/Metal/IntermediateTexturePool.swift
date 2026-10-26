@@ -92,8 +92,11 @@ final class PooledTexture: @unchecked Sendable {
     /// is fully retired on the GPU. Safe to call multiple times — subsequent
     /// registrations no-op once the texture has been returned.
     func returnOnCompletion(of commandBuffer: any MTLCommandBuffer) {
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            self?.returnManually()
+        // Keep the lease alive until GPU completion. A weak capture allows
+        // deinit to recycle the texture while later encoders still read it.
+        // The lease does not retain the command buffer, so this forms no cycle.
+        commandBuffer.addCompletedHandler { [self] _ in
+            returnManually()
         }
     }
 

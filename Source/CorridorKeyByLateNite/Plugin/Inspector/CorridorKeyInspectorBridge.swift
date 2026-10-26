@@ -122,6 +122,17 @@ final class CorridorKeyInspectorBridge {
         refreshSnapshot()
     }
 
+    /// Restores the same factory state as the standalone editor in one host undo group.
+    func resetAllParameters() {
+        do {
+            try plugin?.resetAllParameters()
+            hintSelectionError = nil
+        } catch {
+            hintSelectionError = error.localizedDescription
+        }
+        refreshSnapshot()
+    }
+
     /// Cancels in-flight MLX warm-up and resets the ETA estimator. The
     /// warm-up Task is the primary cancelable work — a full forward-
     /// analysis cancel is a host-level action (kFxAnalysisState_*).

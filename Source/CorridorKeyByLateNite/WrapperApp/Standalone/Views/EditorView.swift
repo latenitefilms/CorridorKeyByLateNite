@@ -63,6 +63,8 @@ struct EditorView: View {
             )
         }
         .navigationTitle(toolbarTitle)
+        .focusedSceneValue(viewModel)
+        .onAppear { viewModel.prepareModelForEditor() }
         .dropDestination(for: URL.self) { urls, _ in
             guard !viewModel.batchExport.isRunning, !urls.isEmpty else { return false }
             handleImportedURLs(urls)

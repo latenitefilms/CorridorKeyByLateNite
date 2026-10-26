@@ -70,6 +70,22 @@ struct CorridorKeyToolboxApp: App {
                 .frame(minWidth: 1260, minHeight: 700)
         }
         .windowResizability(.contentMinSize)
+        .commands { EditorPlaybackCommands() }
+    }
+}
+
+/// Routes Space to the active editor regardless of the focused transport control.
+private struct EditorPlaybackCommands: Commands {
+    @FocusedValue(EditorViewModel.self) private var viewModel
+
+    var body: some Commands {
+        CommandMenu("Playback") {
+            Button(viewModel?.isPlaying == true ? "Pause" : "Play", systemImage: "playpause") {
+                viewModel?.togglePlayback()
+            }
+            .keyboardShortcut(.space, modifiers: [])
+            .disabled(viewModel?.phase.isReady != true || viewModel?.isStillImage != false)
+        }
     }
 }
 

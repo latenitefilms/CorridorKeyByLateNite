@@ -205,7 +205,6 @@ private struct PlaybackControls: View {
             Button(viewModel.isPlaying ? "Pause" : "Play",
                    systemImage: viewModel.isPlaying ? "pause.fill" : "play.fill",
                    action: viewModel.togglePlayback)
-                .keyboardShortcut(.space, modifiers: [])
                 .help("Play or pause (Space)")
                 .font(.title2)
             Button("Step Forward", systemImage: "forward.frame.fill") {

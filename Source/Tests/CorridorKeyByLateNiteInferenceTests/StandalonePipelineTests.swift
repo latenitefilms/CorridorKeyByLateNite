@@ -16,6 +16,59 @@ extension MLXInferenceTests {
     /// A direct model test cannot detect a second flip introduced by a host.
     @Suite("Standalone pipeline", .serialized)
     struct StandalonePipelineTests {
+        @Test("Cached edge decontamination survives solid source restoration", arguments: [false, true])
+        func cachedEdgeDecontamination(keepOriginal: Bool) throws {
+            let engine = try StandaloneRenderEngine()
+            let source = try Self.makeSource(width: 512, height: 512) { _, _ in SIMD4<UInt8>(51, 204, 51, 255) }
+            var state = Self.neutralState()
+            state.video.keepOriginalInSolidAreas = keepOriginal
+            state.cachedMatteInferenceResolution = 512
+            let alpha: Float = keepOriginal ? 0.97 : 0.5
+            state.cachedMatteBlob = try AnalysisFrameCodec.encode(
+                alpha: [Float](repeating: alpha, count: 512 * 512),
+                foregroundHalfRGBA: Self.constantForeground(SIMD4<Float>(0.2, 0.8, 0.2, 1)), width: 512, height: 512
+            )
+            let baseline = Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture)
+            state.edgeDecontaminateEnabled = true
+            state.edgeDecontaminateStrength = 1
+            let corrected = Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture)
+            #expect(corrected[1] < baseline[1] - 0.008)
+            #expect(corrected[0] == baseline[0] && corrected[2] == baseline[2])
+            #expect(corrected[3] == baseline[3], "Edge colour correction must preserve alpha.")
+            state.edgeDecontaminateStrength = 0
+            #expect(Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture) == baseline)
+        }
+
+        @Test("Cached light wrap reaches opaque silhouette edges, obeys radius and preserves interiors", arguments: [false, true])
+        func cachedLightWrap(keepOriginal: Bool) throws {
+            let engine = try StandaloneRenderEngine()
+            let source = try Self.makeSource(width: 512, height: 512) { _, _ in SIMD4<UInt8>(76, 76, 76, 255) }
+            var state = Self.neutralState()
+            state.video.keepOriginalInSolidAreas = keepOriginal
+            state.cachedMatteInferenceResolution = 512
+            state.cachedMatteBlob = try AnalysisFrameCodec.encode(
+                alpha: (0..<(512 * 512)).map { $0 % 512 < 256 ? Float(0) : Float(1) },
+                foregroundHalfRGBA: Self.constantForeground(SIMD4<Float>(0.2, 0.2, 0.2, 1)), width: 512, height: 512
+            )
+            let baseline = Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture)
+            state.lightWrapEnabled = true
+            state.lightWrapStrength = 1
+            state.lightWrapRadius = 2
+            let narrow = Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture)
+            state.lightWrapRadius = 12
+            let wide = Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture)
+            let edge = (256 * 512 + 256) * 4
+            let innerEdge = (256 * 512 + 260) * 4
+            let interior = (256 * 512 + 450) * 4
+            #expect(narrow[edge] > baseline[edge] + 0.03)
+            #expect(wide[innerEdge] > narrow[innerEdge] + 0.01)
+            #expect(wide[interior] == baseline[interior])
+            #expect(wide[0] == 0 && wide[3] == 0, "Light wrap must not illuminate the transparent background.")
+            #expect(wide[edge + 3] == baseline[edge + 3])
+            state.lightWrapStrength = 0
+            #expect(Self.readRGBA(try engine.render(source: source, state: state, renderTime: .zero).destinationTexture) == baseline)
+        }
+
         @Test("Time Awareness Off emits each frame immediately and matches deferred single-frame inference")
         func singleFrameStreamingMatchesDeferred() async throws {
             let engine = try StandaloneRenderEngine()

@@ -1163,6 +1163,12 @@ final class RenderPipeline: @unchecked Sendable {
             blurredSourceTexture = displaySource
         }
 
+        let lightWrapMattePooled = lightWrapActive ? try RenderStages.makePassthroughMatte(
+            matte: refinedMatte, erodeRadius: 0, blurRadius: Float(inputs.state.lightWrapRadius),
+            entry: context.entry, commandBuffer: postCommandBuffer
+        ) : nil
+        defer { lightWrapMattePooled?.returnManually() }
+
         // 5. Fused foreground post-process: source-passthrough +
         // light-wrap + edge-decontam + inverse-rotation all in one
         // dispatch. Saves three compute encoders and ~3 MB of
@@ -1175,17 +1181,20 @@ final class RenderPipeline: @unchecked Sendable {
         // axis tracks the chosen colour rather than always being green.
         // The inverse-rotation slot stays wired but is identity for both
         // screen colors because v2 receives their original RGB.
+        let edgeDecontaminateActive = inputs.state.edgeDecontaminateEnabled
+            && inputs.state.edgeDecontaminateStrength > 0
+        let correctsEdgeColor = lightWrapActive || edgeDecontaminateActive
         let fusedForegroundConfig = RenderStages.FusedForegroundConfig(
             sourcePassthrough: inputs.state.sourcePassthroughEnabled,
             lightWrapEnabled: lightWrapActive,
             lightWrapStrength: Float(inputs.state.lightWrapStrength),
             lightWrapEdgeBias: 0.6,
-            edgeDecontaminateEnabled: inputs.state.edgeDecontaminateEnabled
-                && inputs.state.edgeDecontaminateStrength > 0,
+            edgeDecontaminateEnabled: edgeDecontaminateActive,
             edgeDecontaminateStrength: Float(inputs.state.edgeDecontaminateStrength),
             screenColor: screenTransform.estimatedScreenReference,
             inverseScreenMatrix: screenTransform.inverseMatrix,
-            applyInverseRotation: !screenTransform.isIdentity
+            applyInverseRotation: !screenTransform.isIdentity,
+            keepOriginalInSolidAreas: inputs.state.video.keepOriginalInSolidAreas && correctsEdgeColor
         )
         let restoredPooled = try RenderStages.applyFusedForegroundPostProcess(
             foreground: despilled,
@@ -1193,18 +1202,23 @@ final class RenderPipeline: @unchecked Sendable {
             matte: refinedMatte,
             blurredSource: blurredSourceTexture,
             passthroughMatte: passthroughMattePooled?.texture,
+            blurredMatte: lightWrapMattePooled?.texture,
             config: fusedForegroundConfig,
             entry: context.entry,
             commandBuffer: postCommandBuffer
         )
 
+        // When correcting edges, restore source detail before those corrections.
+        // Otherwise retain exact source pixels in compose, including linear RGB.
+        var compositionState = inputs.state
+        compositionState.video.keepOriginalInSolidAreas = inputs.state.video.keepOriginalInSolidAreas && !correctsEdgeColor
         // 6. Final compose into FCP destination.
         try compose(
             source: context.sourceTexture,
             foreground: restoredPooled.texture,
             matte: refinedMatte,
             context: context,
-            state: inputs.state,
+            state: compositionState,
             commandBuffer: postCommandBuffer
         )
 

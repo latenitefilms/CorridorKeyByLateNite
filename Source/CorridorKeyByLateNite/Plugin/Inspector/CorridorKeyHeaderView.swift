@@ -55,7 +55,7 @@ struct CorridorKeyHeaderView: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: false, vertical: true)
 
-                analyseControls
+                CorridorKeyAnalysisControls(bridge: bridge, isAnalysisInFlight: isAnalysisInFlight)
 
                 AlphaHintPicker(asset: $bridge.alphaHintAsset,
                                 onChange: bridge.saveAlphaHintAsset,
@@ -100,44 +100,6 @@ struct CorridorKeyHeaderView: View {
     }
 
     // MARK: - Subviews
-
-    private var analyseControls: some View {
-        HStack(spacing: 8) {
-            Button(action: bridge.triggerAnalysis) {
-                Label("Analyse Clip", systemImage: "wand.and.stars")
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(isAnalysisInFlight)
-
-            Button(action: bridge.resetAnalysis) {
-                Label("Reset Analysis", systemImage: "trash")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(isAnalysisInFlight)
-
-            Menu("Subject Hints", systemImage: "person.crop.circle") {
-                Button("Clear Hints on This Frame", systemImage: "eraser") {
-                    bridge.clearHints(onCurrentFrame: true)
-                }
-                Button("Clear All Hints", systemImage: "trash") {
-                    bridge.clearHints(onCurrentFrame: false)
-                }
-            }
-            .labelStyle(.iconOnly)
-            .help(ManualHintGuidance.explanation + "\nClick for foreground, Shift-click for background, Command-click to ignore, Option-click to erase."
-                  + (bridge.hasLegacyHints ? "\n" + ManualHintGuidance.legacyExplanation : ""))
-
-            if case .warming = bridge.snapshot.warmup {
-                Button(action: bridge.cancelWarmup) {
-                    Label("Cancel", systemImage: "xmark.circle")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-        }
-    }
 
     @ViewBuilder
     private var analysisProgressLine: some View {
@@ -283,5 +245,45 @@ private struct SourceClipInformation: View {
         }
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+}
+
+/// Keeps the primary analysis/reset actions together, with secondary tools below.
+private struct CorridorKeyAnalysisControls: View {
+    let bridge: CorridorKeyInspectorBridge
+    let isAnalysisInFlight: Bool
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            HStack {
+                Button("Analyse Clip", systemImage: "wand.and.stars", action: bridge.triggerAnalysis)
+                    .buttonStyle(.borderedProminent)
+                Button("Reset All", systemImage: "arrow.counterclockwise", action: bridge.resetAllParameters)
+                    .help("Reset all keying parameters, animation and subject hints to their factory defaults.")
+            }
+            .disabled(isAnalysisInFlight)
+            HStack {
+                Button("Reset Analysis", systemImage: "trash", action: bridge.resetAnalysis)
+                    .disabled(isAnalysisInFlight)
+                Menu("Subject Hints", systemImage: "person.crop.circle") {
+                    Button("Clear Hints on This Frame", systemImage: "eraser") {
+                        bridge.clearHints(onCurrentFrame: true)
+                    }
+                    Button("Clear All Hints", systemImage: "trash") {
+                        bridge.clearHints(onCurrentFrame: false)
+                    }
+                }
+                .labelStyle(.iconOnly)
+                .help(ManualHintGuidance.explanation + "\nClick for foreground, Shift-click for background, Command-click to ignore, Option-click to erase."
+                      + (bridge.hasLegacyHints ? "\n" + ManualHintGuidance.legacyExplanation : ""))
+                if case .warming = bridge.snapshot.warmup {
+                    Button("Cancel", systemImage: "xmark.circle", action: bridge.cancelWarmup)
+                        .labelStyle(.iconOnly)
+                        .help("Cancel model loading")
+                }
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 }

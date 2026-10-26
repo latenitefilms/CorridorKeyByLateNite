@@ -15,6 +15,30 @@ import Testing
 @Suite("IntermediateTexturePool")
 struct IntermediateTexturePoolTests {
 
+    @Test("Completion keeps a texture lease alive until the GPU retires its command buffer")
+    func completionRetainsLease() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let queue = try #require(device.makeCommandQueue())
+        let command = try #require(queue.makeCommandBuffer())
+        let pool = IntermediateTexturePool(device: device)
+        var lease = try #require(pool.acquire(width: 64, height: 64)) as PooledTexture?
+        let identity = ObjectIdentifier(try #require(lease).texture)
+        weak var pendingLease = lease
+        lease?.returnOnCompletion(of: command)
+        lease = nil
+        #expect(pendingLease != nil, "The completion callback must retain the lease.")
+        let concurrent = try #require(pool.acquire(width: 64, height: 64))
+        #expect(ObjectIdentifier(concurrent.texture) != identity, "An in-flight texture must not be handed to another stage.")
+        await withCheckedContinuation { continuation in
+            command.addCompletedHandler { _ in continuation.resume() }
+            command.commit()
+        }
+        let recycled = try #require(pool.acquire(width: 64, height: 64))
+        #expect(ObjectIdentifier(recycled.texture) == identity)
+        concurrent.returnManually()
+        recycled.returnManually()
+    }
+
     @Test("Same-shape acquisitions hit the cache after a manual return")
     func reuseAfterManualReturn() async throws {
         guard let device = MTLCreateSystemDefaultDevice() else {

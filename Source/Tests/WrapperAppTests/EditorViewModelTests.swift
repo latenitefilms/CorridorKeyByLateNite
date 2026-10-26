@@ -19,6 +19,61 @@ import CoreMedia
 @MainActor
 struct EditorViewModelTests {
 
+    @Test("Reset All restores factory settings, invalidates changed analysis and supports one-step undo")
+    func resetAllParameters() throws {
+        let model = EditorViewModel(renderEngine: try StandaloneRenderEngine())
+        let preferences = EditorPreferences.makeInitialState()
+        defer {
+            EditorPreferences.qualityMode = preferences.qualityMode
+            EditorPreferences.hintMode = preferences.hintMode
+            EditorPreferences.upscaleMethod = preferences.upscaleMethod
+        }
+        model.state = PluginStateData(qualityMode: .draft512, hintMode: .manual,
+            alphaGamma: 1.4, lightWrapEnabled: true, edgeDecontaminateEnabled: true)
+        model.state.video.timeAwareness = .four
+        model.state.video.keepOriginalInSolidAreas = true
+        let previous = model.state
+        model.matteCache[0] = MatteCacheEntry(blob: Data([1]), width: 1, height: 1, inferenceResolution: 512)
+        model.analysisStatus = .completed(elapsedSeconds: 1, totalFrames: 1)
+        model.phase = .ready
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.undoManager = undo
+        model.resetAllParameters()
+        #expect(model.state == PluginStateData())
+        #expect(model.matteCache.isEmpty)
+        #expect(model.analysisStatus == .idle)
+        #expect(undo.undoActionName == "Reset All Parameters")
+        undo.undo()
+        #expect(model.state == previous)
+        #expect(model.matteCache.count == 1)
+        #expect(!undo.canUndo)
+        undo.redo()
+        #expect(model.state == PluginStateData())
+        #expect(model.matteCache.isEmpty)
+        model.closeClip()
+    }
+
+    @Test("Opening an empty standalone editor requests model warm-up before import")
+    func editorLaunchWarmup() async throws {
+        let model = EditorViewModel(renderEngine: try StandaloneRenderEngine())
+        model.state.qualityMode = .draft512
+        #expect(model.warmupStatus == .cold)
+        model.prepareModelForEditor()
+        #expect(model.clipInfo == nil)
+        #expect(model.warmupStatus == .warming(resolution: 512) || model.warmupStatus == .ready(resolution: 512))
+        model.prepareModelForEditor()
+        model.closeClip()
+        #expect(model.warmupStatus != .cold, "Closing media must not cancel editor-level warm-up.")
+        let other = EditorViewModel(renderEngine: try StandaloneRenderEngine())
+        other.state.qualityMode = .draft512
+        other.prepareModelForEditor()
+        for task in model.cancelWorkForEditorShutdown() { await task.value }
+        #expect(other.renderEngine.warmupStatus(forResolution: 512, screenColor: other.state.screenColor) != .cold,
+                "Closing one window must not cancel another window's shared model load.")
+        for task in other.cancelWorkForEditorShutdown() { await task.value }
+    }
+
     @Test("Inspector renders empty, single-frame and multi-frame reference sliders", arguments: [0, 1, 2, 120])
     func inspectorRendersReferenceFrameSlider(totalFrames: Int) throws {
         let viewModel = EditorViewModel(renderEngine: try StandaloneRenderEngine())

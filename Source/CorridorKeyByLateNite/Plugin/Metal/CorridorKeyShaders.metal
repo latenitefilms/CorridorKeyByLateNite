@@ -1144,6 +1144,13 @@ inline float3 decontaminateEdgeColor(float3 foreground, float matte, float3 scre
     return foreground;
 }
 
+/// A spatial edge band also covers opaque silhouette pixels. RGB stays straight;
+/// alpha is applied once, by the final composite, rather than attenuating twice.
+inline float lightWrapAmount(float matte, float blurredMatte, float edgeBias) {
+    float band = saturate(max(1.0 - matte, 2.0 * (matte - blurredMatte)));
+    return matte > 0.0 ? pow(band, mix(1.0, 4.0, saturate(edgeBias))) : 0.0;
+}
+
 // MARK: - Fused foreground post-process (passthrough + light-wrap + decontam + inverse-rotation)
 
 /// Collapses four per-pixel foreground passes into a single dispatch.
@@ -1166,6 +1173,7 @@ kernel void corridorKeyForegroundPostProcessKernel(
     texture2d<float, access::read> matte [[texture(CKTextureIndexMatte)]],
     texture2d<float, access::read> blurredSource [[texture(CKTextureIndexHint)]],
     texture2d<float, access::read> passthroughMatte [[texture(CKTextureIndexCoarse)]],
+    texture2d<float, access::read> blurredMatte [[texture(CKTextureIndexTempA)]],
     texture2d<float, access::write> destination [[texture(CKTextureIndexOutput)]],
     constant CKForegroundPostProcessParams &params [[buffer(0)]],
     uint2 gid [[thread_position_in_grid]]
@@ -1186,13 +1194,18 @@ kernel void corridorKeyForegroundPostProcessKernel(
         rgb = interior * src + (1.0 - interior) * rgb;
     }
 
+    // Restore solid source detail before creative edge corrections, so the
+    // final composite cannot silently discard those corrections.
+    if (params.keepOriginalInSolidAreas != 0 && m > 0.95) {
+        rgb = sourceRGB.read(gid).rgb;
+    }
+
     // Stage 2: light wrap. Blurred-source ambient additively blends
     // into the foreground along the soft edge.
     if (params.lightWrapEnabled != 0 && params.lightWrapStrength > 0.0) {
         float3 wrap = blurredSource.read(gid).rgb;
-        float falloff = 1.0 - m;
-        float biased = pow(falloff, mix(1.0, 4.0, saturate(params.lightWrapEdgeBias)));
-        rgb = rgb + wrap * biased * params.lightWrapStrength * m;
+        float amount = lightWrapAmount(m, blurredMatte.read(gid).r, params.lightWrapEdgeBias);
+        rgb += wrap * amount * params.lightWrapStrength;
     }
 
     // Stage 3: edge colour decontamination.
@@ -1289,12 +1302,13 @@ kernel void corridorKeyTemporalBlendKernel(
 
 /// Simulates environment lighting wrapping onto the subject near matte
 /// edges. `sourceBlur` is a pre-blurred copy of the original source RGB; the
-/// kernel reads that outside-the-matte colour and additively blends it into
-/// the foreground along the falloff `(1 - matte)`.
+/// kernel blends it into a spatial silhouette band derived from blurred alpha.
+/// Only the final composite applies alpha to the corrected straight RGB.
 kernel void corridorKeyLightWrapKernel(
     texture2d<float, access::read> foreground [[texture(CKTextureIndexForeground)]],
     texture2d<float, access::read> sourceBlur [[texture(CKTextureIndexSource)]],
     texture2d<float, access::read> matte [[texture(CKTextureIndexMatte)]],
+    texture2d<float, access::read> blurredMatte [[texture(CKTextureIndexTempA)]],
     texture2d<float, access::write> destination [[texture(CKTextureIndexOutput)]],
     constant CKLightWrapParams &params [[buffer(CKBufferIndexLightWrapParams)]],
     uint2 gid [[thread_position_in_grid]]
@@ -1304,12 +1318,11 @@ kernel void corridorKeyLightWrapKernel(
 
     float3 fg = foreground.read(gid).rgb;
     float m = saturate(matte.read(gid).r);
-    // A thin ring near the matte edge gets the strongest wrap; interiors
-    // (`m` near 1) are untouched. `edgeBias` biases the falloff curve.
-    float falloff = 1.0 - m;
-    float biased = pow(falloff, mix(1.0, 4.0, saturate(params.edgeBias)));
+    // Opaque silhouette pixels receive wrap too; solid interiors beyond
+    // the blur radius remain unchanged. `edgeBias` shapes the falloff.
+    float biased = lightWrapAmount(m, blurredMatte.read(gid).r, params.edgeBias);
     float3 wrap = sourceBlur.read(gid).rgb;
-    float3 blended = fg + wrap * biased * params.strength * m;
+    float3 blended = fg + wrap * biased * params.strength;
     destination.write(float4(blended, 1.0), gid);
 }
 

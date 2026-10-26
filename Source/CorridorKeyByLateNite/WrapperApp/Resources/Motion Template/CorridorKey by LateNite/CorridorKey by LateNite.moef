@@ -165,13 +165,13 @@
 		<version>2</version>
 		<target object="10010" channel="./50" name=""/>
 		<target object="10010" channel="./100" name="Settings"/>
-		<target object="10010" channel="./160" name="Time Awareness"/>
 		<target object="10010" channel="./170" name="Alpha Hint"/>
+		<target object="10010" channel="./160" name="Time Awareness"/>
+		<target object="10010" channel="./150" name="Temporal Stability"/>
 		<target object="10010" channel="./110" name="Interior Detail"/>
 		<target object="10010" channel="./120" name="Matte"/>
 		<target object="10010" channel="./130" name="Edge &amp; Spill"/>
 		<target object="10010" channel="./140" name="Edge Refinement"/>
-		<target object="10010" channel="./150" name="Temporal Stability"/>
 	</publishSettings>
 	<currentFrame>0 1 1 0</currentFrame>
 	<activeLayer>10003</activeLayer>

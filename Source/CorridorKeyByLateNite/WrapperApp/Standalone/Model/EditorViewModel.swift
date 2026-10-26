@@ -229,6 +229,11 @@ final class EditorViewModel {
     /// The queue belongs to the editor so permissions survive dismissing its sheet.
     let batchExport: BatchExportModel
     private let previewRenderer: StandalonePreviewRenderer
+    /// Retains exactly the decoded frame on screen for source comparisons.
+    @ObservationIgnored
+    private var presentedSourceFrame: ReaderFrame?
+    @ObservationIgnored
+    private var warmsModelWhileOpen = false
 
     var phase: EditorPhase = .noClipLoaded
     /// All user-editable parameters. Bound directly to the inspector
@@ -400,17 +405,12 @@ final class EditorViewModel {
     /// Polls the shared MLX bridge registry while the rung is warming
     /// up so the inspector badge tracks `cold → warming → ready` in
     /// real time. Cancelled when the engine becomes `.ready` /
-    /// `.failed`, when the user closes the clip, or when a fresh
-    /// warm-up kicks off for a different rung.
+    /// `.failed`, when the editor closes, or when its displayed quality changes.
     @ObservationIgnored
     private var warmupPollingTask: Task<Void, Never>?
     @ObservationIgnored
     private var activeWarmupResolution: Int?
-    /// Screen colour the in-flight warm-up was started against. Tracked
-    /// so flipping the Screen Colour picker mid-session cancels the
-    /// warm-up for the colour we're leaving and kicks one off for the
-    /// colour we're entering, instead of silently leaving the badge on
-    /// the wrong bridge.
+    /// Screen colour used for status queries. All v2 colours share one model.
     @ObservationIgnored
     private var activeWarmupScreenColor: ScreenColor?
     /// `UndoManager` the SwiftUI environment hands us at view-mount
@@ -694,7 +694,7 @@ final class EditorViewModel {
     /// Colour from the first frame, and renders the first frame for
     /// preview.
     func loadClip(at url: URL) async {
-        cancelInflightWork()
+        cancelInflightWork(cancelModelWarmup: false)
         let identifier = UUID()
         loadIdentifier = identifier
         phase = .loadingClip(url)
@@ -714,9 +714,10 @@ final class EditorViewModel {
             self.exportStatus = .idle
             self.playheadTime = .zero
             self.latestPreview = nil
+            self.presentedSourceFrame = nil
             guard loadIdentifier == identifier, !Task.isCancelled else { return }
             self.phase = .ready
-            warmupStatus = .cold
+            if warmsModelWhileOpen { beginWarmupForCurrentQuality() }
             renderPreview(at: .zero)
         } catch {
             guard loadIdentifier == identifier, !Task.isCancelled else { return }
@@ -758,11 +759,12 @@ final class EditorViewModel {
     func closeClip() {
         phase = .noClipLoaded
         loadIdentifier = UUID()
-        cancelInflightWork()
+        cancelInflightWork(cancelModelWarmup: false)
         stopPlayback()
         videoSource = nil
         clipInfo = nil
         latestPreview = nil
+        presentedSourceFrame = nil
         matteCache.removeAll()
         restoredAnalysisLeases = []
         analysisStatus = .idle
@@ -815,8 +817,7 @@ final class EditorViewModel {
     /// Awaits-each-frame playback loop. Each iteration:
     ///
     /// 1. Picks the next frame index (wrapping when `loopEnabled`).
-    /// 2. Moves the playhead so the slider/time label track in real
-    ///    time as the user expects.
+    /// 2. Decodes the next frame without advancing the visible playhead.
     /// 3. **Awaits** `performRender(frame:)` for that frame so the
     ///    user actually sees every frame land — the legacy timer-
     ///    based path fired ticks at the nominal frame rate even
@@ -865,15 +866,12 @@ final class EditorViewModel {
                 seconds: Double(nextFrame) / frameRate,
                 preferredTimescale: clipInfo.timescale
             )
-            playheadTime = target
-
             do {
                 if reader == nil {
                     reader = try await PlaybackFrameReader(source: source, startTime: target)
                 }
                 guard let frame = try await reader?.nextFrame() else { break }
                 try Task.checkCancellation()
-                playheadTime = frame.presentationTime
                 try await performRender(frame: frame)
             } catch {
                 if !Task.isCancelled {
@@ -938,6 +936,10 @@ final class EditorViewModel {
             frame: frame, state: stateForFrame, showingOriginal: showingOriginal
         )
         try Task.checkCancellation()
+        // Publish timing only when its image is ready. Pausing while the next
+        // frame renders must leave comparisons pinned to the displayed frame.
+        playheadTime = frameTime
+        presentedSourceFrame = frame
         if let next = matteCache[frameIndex + 1]?.reference { AnalysisDiskCache.shared.prefetch(next) }
         self.latestPreview = PreviewFrame(
             texture: result.destinationTexture,
@@ -1041,13 +1043,20 @@ final class EditorViewModel {
         )
         let previewRenderer = previewRenderer
         let showingOriginal = isShowingOriginal
+        let presentedFrame = presentedSourceFrame.flatMap {
+            currentFrameIndex(at: $0.presentationTime) == frameIndex ? $0 : nil
+        }
 
         pendingPreviewTask?.cancel()
         pendingPreviewTask = Task { [weak self] in
             guard let self else { return }
             let pixelBuffer: CVPixelBuffer
             do {
-                pixelBuffer = try await source.makeFrame(atTime: frameTime)
+                if let presentedFrame {
+                    pixelBuffer = presentedFrame.pixelBuffer
+                } else {
+                    pixelBuffer = try await source.makeFrame(atTime: frameTime)
+                }
             } catch {
                 if Task.isCancelled { return }
                 self.phase = .loadFailed(error.localizedDescription)
@@ -1060,6 +1069,9 @@ final class EditorViewModel {
                     state: stateForFrame, showingOriginal: showingOriginal
                 )
                 if Task.isCancelled { return }
+                self.presentedSourceFrame = ReaderFrame(
+                    pixelBuffer: pixelBuffer, presentationTime: frameTime, duration: .invalid
+                )
                 self.latestPreview = PreviewFrame(
                     texture: result.destinationTexture,
                     pixelBuffer: result.destinationPixelBuffer,
@@ -1089,15 +1101,23 @@ final class EditorViewModel {
     }
 
     /// Refreshes a paused preview and persists session-level choices. Playback
-    /// consumes the next frame with the latest settings. Model loading starts
-    /// only when analysis is requested, so importing and playing ProRes remains
-    /// independent of model initialization and GPU inference.
+    /// consumes the next frame with the latest settings. Model warm-up runs
+    /// independently of source decoding and preview playback.
     func parameterDidChange() {
         renderPreview(at: playheadTime)
-        if analysisStatus.inProgress { beginWarmupForCurrentQuality() }
+        if warmsModelWhileOpen || analysisStatus.inProgress { beginWarmupForCurrentQuality() }
         EditorPreferences.qualityMode = state.qualityMode
         EditorPreferences.hintMode = state.hintMode
         EditorPreferences.upscaleMethod = state.upscaleMethod
+    }
+
+    /// Restores factory parameters in one undoable edit. The state observer
+    /// invalidates predictions only when an inference setting changes.
+    func resetAllParameters() {
+        pendingEditName = "Reset All Parameters"
+        defer { pendingEditName = nil }
+        state = PluginStateData()
+        parameterDidChange()
     }
 
     /// Same estimate as the analysis preflight and FxPlug inspector.
@@ -1433,23 +1453,25 @@ final class EditorViewModel {
 
     // MARK: - Helpers
 
+    /// Called when a standalone editor appears, even before importing media.
+    /// FxPlug never calls this; its model remains demand-loaded.
+    func prepareModelForEditor() {
+        warmsModelWhileOpen = true
+        beginWarmupForCurrentQuality()
+    }
+
     private func beginWarmupForCurrentQuality() {
-        let longEdge = max(Int(renderSize.width.rounded()), Int(renderSize.height.rounded()))
-        guard longEdge > 0 else { return }
-        let resolution = state.qualityMode.resolvedInferenceResolution(forLongEdge: longEdge)
+        let longEdge = max(Int(clipInfo?.renderSize.width ?? 1920), Int(clipInfo?.renderSize.height ?? 1080))
+        let resolution = state.qualityMode.resolvedInferenceResolution(
+            forLongEdge: longEdge, deviceRegistryID: renderEngine.device.registryID
+        )
         let screenColor = state.screenColor
-        // Cancel any prior warm-up against a different `(rung, colour)`
-        // tuple — flipping either knob between Analyse passes used to
-        // leave the previous bridge mid-compile, which the registry
-        // would still warm to completion and pin in unified memory.
-        if let activeWarmupResolution,
-           let activeWarmupScreenColor,
-           (activeWarmupResolution != resolution || activeWarmupScreenColor != screenColor) {
-            renderEngine.cancelWarmup(
-                forResolution: activeWarmupResolution,
-                screenColor: activeWarmupScreenColor
-            )
+        if activeWarmupResolution == resolution, activeWarmupScreenColor == screenColor,
+           warmupStatus == .warming(resolution: resolution) || warmupStatus == .ready(resolution: resolution) {
+            return
         }
+        // V2 shares one model across resolutions and screen colours. Changing
+        // either while importing must not cancel the launch-time load.
         activeWarmupResolution = resolution
         activeWarmupScreenColor = screenColor
         do {
@@ -1471,7 +1493,7 @@ final class EditorViewModel {
     /// Polls the shared MLX bridge registry every 400 ms and republishes
     /// the result on `warmupStatus` so the inspector badge tracks the
     /// engine's lifecycle in real time. Stops when the engine is ready,
-    /// failed, or the user closed the clip.
+    /// failed, or the editor closes.
     private func startWarmupStatusPolling(forResolution resolution: Int, screenColor: ScreenColor) {
         warmupPollingTask?.cancel()
         warmupPollingTask = Task { @MainActor [weak self] in
@@ -1487,6 +1509,7 @@ final class EditorViewModel {
                 }
                 switch latest {
                 case .ready, .failed:
+                    self.warmupPollingTask = nil
                     return
                 case .cold, .warming:
                     break
@@ -1501,9 +1524,15 @@ final class EditorViewModel {
     /// cooperative cancellation without keeping the view model alive.
     @discardableResult
     func cancelWorkForEditorShutdown() -> [Task<Void, Never>] {
+        warmsModelWhileOpen = false
         var tasks = cancelInflightWork()
         if let batchTask = batchExport.cancel() { tasks.append(batchTask) }
         return tasks
+    }
+
+    /// Other editor windows may still need the process-wide model during teardown.
+    var hasModelDemand: Bool {
+        warmsModelWhileOpen || analysisTask != nil || analysisRunnerTask != nil || batchExport.isRunning
     }
 
     var hasInflightEditorWork: Bool {
@@ -1519,7 +1548,7 @@ final class EditorViewModel {
     }
 
     @discardableResult
-    private func cancelInflightWork() -> [Task<Void, Never>] {
+    private func cancelInflightWork(cancelModelWarmup: Bool = true) -> [Task<Void, Never>] {
         loadIdentifier = UUID()
         var tasks: [Task<Void, Never>] = []
         if let inflightRenderTask {
@@ -1532,12 +1561,10 @@ final class EditorViewModel {
             pendingPreviewTask.cancel()
             self.pendingPreviewTask = nil
         }
-        if let warmupPollingTask {
-            tasks.append(warmupPollingTask)
-            warmupPollingTask.cancel()
-            self.warmupPollingTask = nil
+        if cancelModelWarmup {
+            if let warmupPollingTask { tasks.append(warmupPollingTask) }
+            tasks.append(contentsOf: cancelActiveWarmup())
         }
-        tasks.append(contentsOf: cancelActiveWarmup())
         tasks.append(contentsOf: cancelAnalysisTasks())
         tasks.append(contentsOf: cancelExportTasks())
         if let playbackTask {
@@ -1574,7 +1601,8 @@ final class EditorViewModel {
         warmupPollingTask?.cancel()
         warmupPollingTask = nil
         if let activeWarmupResolution, let activeWarmupScreenColor {
-            if let warmupTask = renderEngine.cancelWarmup(
+            if !EditorWorkRegistry.shared.hasModelDemand(excluding: self),
+               let warmupTask = renderEngine.cancelWarmup(
                 forResolution: activeWarmupResolution,
                 screenColor: activeWarmupScreenColor
             ) {
@@ -1638,6 +1666,14 @@ final class EditorWorkRegistry {
         prune()
         return entries.flatMap { entry in
             entry.viewModel?.cancelWorkForEditorShutdown() ?? []
+        }
+    }
+
+    /// A closing editor must not cancel the shared load another window is using.
+    func hasModelDemand(excluding viewModel: EditorViewModel) -> Bool {
+        entries.contains { entry in
+            guard let other = entry.viewModel, other !== viewModel else { return false }
+            return other.hasModelDemand
         }
     }
 

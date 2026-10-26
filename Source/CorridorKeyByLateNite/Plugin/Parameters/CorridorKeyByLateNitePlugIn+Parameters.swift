@@ -30,12 +30,13 @@ extension CorridorKeyToolboxPlugIn {
 
         try addHeaderParameter(create: create)
         try addSettingsGroup(create: create)
-        addVideoGroups(create: create)
+        addAlphaHintGroup(create: create)
+        addTimeAwarenessGroup(create: create)
+        try addTemporalStabilityGroup(create: create)
         try addInteriorDetailGroup(create: create)
         try addMatteGroup(create: create)
         try addEdgeAndSpillGroup(create: create)
         try addEdgeRefinementGroup(create: create)
-        try addTemporalStabilityGroup(create: create)
         PluginLog.notice("Parameters registered with Final Cut Pro.")
     }
 
@@ -83,13 +84,18 @@ extension CorridorKeyToolboxPlugIn {
 
 
     /// V2 controls use one set of labels and defaults in both hosts.
-    private func addVideoGroups(create: any FxParameterCreationAPI_v5) {
+    private func addTimeAwarenessGroup(create: any FxParameterCreationAPI_v5) {
         let defaults = VideoInferenceSettings()
         let flags = CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         create.startParameterSubGroup("Time Awareness", parameterID: ParameterIdentifier.timeAwarenessGroup, parameterFlags: CorridorKeyParameterFlags.default.fxFlags)
         create.addPopupMenu(withName: VideoInferenceSettings.Labels.timeAwareness, parameterID: ParameterIdentifier.timeAwareness, defaultValue: UInt32(defaults.timeAwareness.rawValue), menuEntries: TimeAwareness.allCases.map(\.displayName), parameterFlags: flags)
         create.addToggleButton(withName: VideoInferenceSettings.Labels.lowGPUMemory, parameterID: ParameterIdentifier.lowGPUMemory, defaultValue: defaults.lowGPUMemory, parameterFlags: flags)
         create.endParameterSubGroup()
+    }
+
+    private func addAlphaHintGroup(create: any FxParameterCreationAPI_v5) {
+        let defaults = VideoInferenceSettings()
+        let flags = CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         create.startParameterSubGroup("Alpha Hint", parameterID: ParameterIdentifier.alphaHintGroup, parameterFlags: CorridorKeyParameterFlags.default.fxFlags)
         create.addToggleButton(withName: VideoInferenceSettings.Labels.useAlphaHint, parameterID: ParameterIdentifier.useAlphaHint, defaultValue: defaults.useAlphaHint, parameterFlags: flags)
         create.addPopupMenu(withName: VideoInferenceSettings.Labels.hintFrames, parameterID: ParameterIdentifier.hintFrames, defaultValue: UInt32(defaults.hintFrames.rawValue), menuEntries: AlphaHintFrames.allCases.map(\.displayName), parameterFlags: flags)
@@ -520,5 +526,108 @@ extension CorridorKeyToolboxPlugIn {
     ) {
         let flags: CorridorKeyParameterFlags = enabled ? .default : [.default, .disabled]
         _ = setter.setParameterFlags(flags.fxFlags, toParameter: parameterID)
+    }
+}
+
+// MARK: - Factory reset
+
+extension CorridorKeyToolboxPlugIn {
+    /// Resets values and animation using the shared factory state. All host writes
+    /// share one action and undo group; resetting never requests model warm-up.
+    @MainActor
+    func resetAllParameters() throws {
+        guard let action = apiManager.api(for: (any FxCustomParameterActionAPI_v4).self) as? any FxCustomParameterActionAPI_v4 else {
+            throw Self.parameterResetError("The host parameter action API is unavailable.")
+        }
+        action.startAction(self)
+        defer { action.endAction(self) }
+        guard let setting = apiManager.api(for: (any FxParameterSettingAPI_v5).self) as? any FxParameterSettingAPI_v5,
+              let keyframes = apiManager.api(for: (any FxKeyframeAPI_v3).self) as? any FxKeyframeAPI_v3 else {
+            throw Self.parameterResetError("The host parameter or keyframe API is unavailable.")
+        }
+        let undo = apiManager.api(for: (any FxUndoAPI).self) as? any FxUndoAPI
+        let grouped = undo?.startUndoGroup("Reset All Parameters") == true
+        defer { if grouped { _ = undo?.endUndoGroup() } }
+        let defaults = PluginStateData()
+        let time = action.currentTime()
+        let toggles: [(UInt32, Bool)] = [
+            (ParameterIdentifier.showSubjectMarker, defaults.showSubjectMarker),
+            (ParameterIdentifier.sourcePassthrough, defaults.sourcePassthroughEnabled),
+            (ParameterIdentifier.autoDespeckle, defaults.autoDespeckleEnabled),
+            (ParameterIdentifier.lightWrapEnabled, defaults.lightWrapEnabled),
+            (ParameterIdentifier.edgeDecontaminateEnabled, defaults.edgeDecontaminateEnabled),
+            (ParameterIdentifier.temporalStabilityEnabled, defaults.temporalStabilityEnabled),
+            (ParameterIdentifier.inputIsLinear, defaults.video.inputIsLinear),
+            (ParameterIdentifier.linearizeOutput, defaults.video.linearizeOutput),
+            (ParameterIdentifier.keepOriginalInSolidAreas, defaults.video.keepOriginalInSolidAreas),
+            (ParameterIdentifier.lowGPUMemory, defaults.video.lowGPUMemory),
+            (ParameterIdentifier.useAlphaHint, defaults.video.useAlphaHint)
+        ]
+        let integers: [(UInt32, Int)] = [
+            (ParameterIdentifier.screenColor, defaults.screenColor.rawValue),
+            (ParameterIdentifier.qualityMode, defaults.qualityMode.rawValue),
+            (ParameterIdentifier.hintMode, defaults.hintMode.rawValue),
+            (ParameterIdentifier.spillMethod, defaults.spillMethod.rawValue),
+            (ParameterIdentifier.outputMode, defaults.outputMode.rawValue),
+            (ParameterIdentifier.upscaleMethod, defaults.upscaleMethod.rawValue),
+            (ParameterIdentifier.despeckleSize, defaults.despeckleSize),
+            (ParameterIdentifier.timeAwareness, defaults.video.timeAwareness.rawValue),
+            (ParameterIdentifier.hintFrames, defaults.video.hintFrames.rawValue),
+            (ParameterIdentifier.referenceFrame, defaults.video.referenceFrame)
+        ]
+        let scalars: [(UInt32, Double)] = [
+            (ParameterIdentifier.passthroughErode, defaults.passthroughErodeNormalized),
+            (ParameterIdentifier.passthroughBlur, defaults.passthroughBlurNormalized),
+            (ParameterIdentifier.alphaBlackPoint, defaults.alphaBlackPoint),
+            (ParameterIdentifier.alphaWhitePoint, defaults.alphaWhitePoint),
+            (ParameterIdentifier.alphaErode, defaults.alphaErodeNormalized),
+            (ParameterIdentifier.alphaSoftness, defaults.alphaSoftnessNormalized),
+            (ParameterIdentifier.alphaGamma, defaults.alphaGamma),
+            (ParameterIdentifier.refinerStrength, defaults.refinerStrength),
+            (ParameterIdentifier.despillStrength, defaults.despillStrength),
+            (ParameterIdentifier.lightWrapStrength, defaults.lightWrapStrength),
+            (ParameterIdentifier.lightWrapRadius, defaults.lightWrapRadius),
+            (ParameterIdentifier.edgeDecontaminateStrength, defaults.edgeDecontaminateStrength),
+            (ParameterIdentifier.temporalStabilityStrength, defaults.temporalStabilityStrength),
+            (ParameterIdentifier.alphaHintStrength, defaults.video.alphaHintStrength),
+            (ParameterIdentifier.internalHintStrength, defaults.video.internalHintStrength)
+        ]
+        let identifiers = toggles.map(\.0) + integers.map(\.0) + scalars.map(\.0)
+            + [ParameterIdentifier.customScreenColor, ParameterIdentifier.subjectPosition]
+        for identifier in identifiers {
+            var channelCount: UInt = 0
+            if let error = keyframes.channelCount(&channelCount, forParameter: UInt(identifier)) { throw error }
+            for channel in 0..<channelCount {
+                var count: UInt = 0
+                if let error = keyframes.keyframeCount(&count, forParameter: UInt(identifier), andChannel: channel) { throw error }
+                if count > 0, let error = keyframes.removeAllKeyframes(forParameter: UInt(identifier), andChannel: channel) { throw error }
+            }
+        }
+        for (identifier, value) in toggles {
+            guard setting.setBoolValue(value, toParameter: identifier, at: time) else { throw Self.parameterResetError("Could not reset parameter \(identifier).") }
+        }
+        for (identifier, value) in integers {
+            guard setting.setIntValue(Int32(value), toParameter: identifier, at: time) else { throw Self.parameterResetError("Could not reset parameter \(identifier).") }
+        }
+        for (identifier, value) in scalars {
+            guard setting.setFloatValue(value, toParameter: identifier, at: time) else { throw Self.parameterResetError("Could not reset parameter \(identifier).") }
+        }
+        let color = defaults.video.customScreenColor
+        guard setting.setRedValue(color.x, greenValue: color.y, blueValue: color.z, toParameter: ParameterIdentifier.customScreenColor, at: time),
+              setting.setXValue(defaults.subjectPositionX, yValue: defaults.subjectPositionY, toParameter: ParameterIdentifier.subjectPosition, at: time),
+              setting.setCustomParameterValue(NSDictionary(), toParameter: ParameterIdentifier.headerSummary, at: time) else {
+            throw Self.parameterResetError("Could not reset screen colour, subject position or saved hints.")
+        }
+        analysisSession.lock.lock()
+        analysisSession.resetLocked()
+        analysisSession.lock.unlock()
+        analysisSnapshotStore.clear()
+        updateDependentParameterEnablement(at: time)
+    }
+
+    /// Makes failed host writes visible in the inspector rather than reporting a successful reset.
+    private static func parameterResetError(_ message: String) -> NSError {
+        NSError(domain: FxPlugErrorDomain, code: kFxError_APIUnavailable,
+                userInfo: [NSLocalizedDescriptionKey: "Reset All: " + message])
     }
 }
