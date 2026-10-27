@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="color-scheme" content="light dark">
-    <meta name="turbo-cache-control" content="no-cache" data-turbo-track="reload" data-track-token="4.5.3.831418806343">
+    <meta name="turbo-cache-control" content="no-cache" data-turbo-track="reload" data-track-token="4.6.0.846390635207">
 
     <!-- See retype.com -->
-    <meta name="generator" content="Retype 4.5.3">
+    <meta name="generator" content="Retype 4.6.0">
 
     <!-- Primary Meta Tags -->
     <title>How To Use</title>
@@ -44,11 +44,11 @@
     <script data-cfasync="false">(function(){var cl=document.documentElement.classList,ls=localStorage.getItem("retype_scheme"),hd=cl.contains("dark"),hl=cl.contains("light"),wm=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;if(ls==="dark"||(!ls&&wm&&!hd&&!hl)){cl.remove("light");cl.add("dark")}else if(ls==="light"||(!ls&&!wm&&!hd&&!hl)){cl.remove("dark");cl.add("light")}})();</script>
 
     <link id="retype-favicon" rel="icon" href="../static/favicon.ico" />
-    <link href="../resources/css/retype.css?v=4.5.3.831418806343" rel="stylesheet">
+    <link href="../resources/css/retype.css?v=4.6.0.846390635207" rel="stylesheet">
 
-    <script data-cfasync="false" src="../resources/js/config.js?v=4.5.3.831418806343" data-turbo-eval="false" defer></script>
-    <script data-cfasync="false" src="../resources/js/retype.js?v=4.5.3" data-turbo-eval="false" defer></script>
-    <script id="lunr-js" data-cfasync="false" src="../resources/js/lunr.js?v=4.5.3.831418806343" data-turbo-eval="false" defer></script>
+    <script data-cfasync="false" src="../resources/js/config.js?v=4.6.0.846390635207" data-turbo-eval="false" defer></script>
+    <script data-cfasync="false" src="../resources/js/retype.js?v=4.6.0" data-turbo-eval="false" defer></script>
+    <script id="lunr-js" data-cfasync="false" src="../resources/js/lunr.js?v=4.6.0.846390635207" data-turbo-eval="false" defer></script>
 </head>
 <body>
     <div id="retype-app" class="relative text-base antialiased text-base-text bg-base-bg font-body">
@@ -260,34 +260,47 @@
 </div>
 <h2 id="standalone-editor">Standalone Editor</h2>
 <p>Run <strong>CorridorKey by LateNite</strong> from your <code translate="no" v-pre>/Applications</code> folder.</p>
-<p>Click <strong>Open Standalone Editor</strong>.</p>
+<p>Click <strong>Open Standalone Editor</strong>. The neural model starts loading in the background immediately; you can import and preview media while it loads.</p>
 <figure class="content-center">
     <img src="../static/wrapper-app.png" alt="" class="max-w-full h-auto rounded-image-rounded border-image-border border-image-border-width" width="1100" height="984" />
     <figcaption class="caption"></figcaption>
 </figure>
-<p>You can now load in a clip.</p>
+<p>Choose <strong>Import Media…</strong> or drop a video or still image into the editor. Still-image formats include PNG, TIFF, JPEG, and HEIC. Images open at their original pixel resolution with embedded orientation applied. Files containing multiple images use the primary image.</p>
 <figure class="content-center">
     <img src="../static/standalone-editor.png" alt="" class="max-w-full h-auto rounded-image-rounded border-image-border border-image-border-width" width="2858" height="1738" />
     <figcaption class="caption"></figcaption>
 </figure>
 <p>First pick your:</p>
 <ul>
-<li><strong>Quality</strong> (it defaults to <strong>Recommended</strong>)</li>
-<li>Screen Colour (it defaults to <strong>Green</strong>)</li>
-<li>Upscale Method (it defaults to <strong>Lanczos</strong>)</li>
-<li>If you want to use Apple&#x27;s Vision Framework to do the hint tick <strong>Auto Subject Hint</strong></li>
-<li>Alternatively, you can use <strong>Show Subject Marker</strong> to manually select the foreground object in your Viewer</li>
+<li><strong>Quality</strong> defaults to <strong>Recommended</strong>, which chooses a model resolution for your source and Mac.</li>
+<li><strong>Screen Colour</strong> defaults to <strong>Auto</strong>.</li>
+<li><strong>Upscale Method</strong> defaults to <strong>Lanczos</strong>.</li>
+<li><strong>Generated Hint</strong> defaults to <strong>None</strong>, letting CorridorKey v2 identify the subject. <strong>Chroma</strong>, <strong>Apple Vision</strong>, and <strong>Apple Vision + Manual Points</strong> provide optional guidance.</li>
+<li><strong>Time Awareness</strong> defaults to <strong>Off</strong>. Each frame is keyed immediately during analysis. Enabling it adds a preparation pass and combines surrounding frames.</li>
 </ul>
+<p><strong>Reduce Edge Flicker</strong>, <strong>Light Wrap</strong>, and <strong>Auto Despeckle</strong> are off by default so the initial result preserves the model&#x27;s detail. Reduce Edge Flicker is an additional smoothing pass; it can soften edges or introduce trails. Try Time Awareness first when a shot flickers. Saved effects retain their explicit settings.</p>
+<p><strong>Time Awareness</strong> and <strong>Temporal Stability</strong> sit together in the inspector. <strong>Reset All</strong>, beside Analyse Clip, restores factory parameters and clears manual points and imported Alpha Hint selections. The reset supports Undo; in Final Cut Pro it also removes parameter keyframes.</p>
 <p>Then press <strong>Analyse Clip</strong>:</p>
 <figure class="content-center">
     <img src="../static/standalone-editor-result.png" alt="" class="max-w-full h-auto rounded-image-rounded border-image-border border-image-border-width" width="2858" height="1738" />
     <figcaption class="caption"></figcaption>
 </figure>
 <p>Once you&#x27;re happy to you can export your result as ProRes or HEVC (with alpha):</p>
+<p>For a still image, use the same <strong>Analyse Clip</strong> button and keying controls, then choose <strong>Export…</strong> to save a 16-bit PNG or TIFF with transparency. The export uses the current <strong>Output</strong> setting and excludes the preview backdrop. Stills display their pixel dimensions instead of playback controls.</p>
 <figure class="content-center">
     <img src="../static/standalone-export.png" alt="" class="max-w-full h-auto rounded-image-rounded border-image-border border-image-border-width" width="2858" height="1738" />
     <figcaption class="caption"></figcaption>
 </figure>
+<h3 id="playback">Playback</h3>
+<p>Press <strong>Space</strong> to play or pause, and <strong>Left Arrow</strong> or <strong>Right Arrow</strong> to step one frame. The first-frame and last-frame buttons pause playback and jump to the corresponding source sample. The FPS display shows achieved playback speed followed by the source rate, for example <code translate="no" v-pre>23fps (25fps)</code>. Source resolution and frame rate also appear below Cached mattes in the inspector.</p>
+<p>Press and hold <strong>Show Original</strong> to compare the displayed frame with its unkeyed source. Releasing it restores the keyed view without moving the playhead.</p>
+<h3 id="batch-export">Batch export</h3>
+<p>Choose <strong>Batch Import…</strong> beside <strong>Import…</strong>, or drop/import multiple videos. Add or remove shots in the queue, choose a codec and an output folder, then choose <strong>Export Shots</strong>. Each shot is analysed and exported in turn using the current keying settings. Shot-specific manual points and Alpha Hint files are excluded; Apple Vision + Manual Points uses Apple Vision for the batch.</p>
+<p>Output names end in <code translate="no" v-pre>(Keyed)</code>, with numbered suffixes when needed. Existing files are preserved. A failed shot shows its error and the queue continues. <strong>Stop Batch</strong> cancels pending work; starting again retries unfinished shots and keeps completed exports.</p>
+<h3 id="hints-and-undo">Hints and undo</h3>
+<p><strong>Generated Hint</strong> creates an optional guide from the source. <strong>Alpha Hint</strong> imports a black-and-white image, video, or image sequence: white keeps foreground, black removes background. Enable <strong>Use Alpha Hint</strong> to use that file instead of generated hints and manual points. <strong>Single Frame</strong> needs Time Awareness to propagate an image through a video; <strong>All Frames</strong> supplies a matching mask for every frame. Start with <strong>Alpha Hint Strength</strong> at 0.75.</p>
+<p>In <strong>Subject Hints</strong>, choose <strong>Mark Foreground</strong> to select a detected Vision subject; mark additional subjects to keep them too. <strong>Mark Background</strong> removes a small area. <strong>Mark Ignore</strong> (red cross) excludes the detected object under the point, or removes a small area if Vision did not detect an object there. Ignore takes precedence over Foreground on the same object. Adding a point switches to <strong>Apple Vision + Manual Points</strong>. <strong>Erase Nearest Hint</strong> removes a point. Points belong to the displayed frame and do not track; unmarked frames use the Vision matte. View <strong>Alpha Hint (Diagnostic)</strong> to inspect the guide, then choose <strong>Analyse Clip</strong> to update the key. These are model hints, so always review the resulting matte.</p>
+<p><strong>Undo</strong> and <strong>Redo</strong> restore keying settings, manual points, and their associated analysis results. A slider drag is one undo step. Output adjustments reuse the current analysis; changing model inputs requires analysis again, and Undo restores the previous results.</p>
 <hr>
 <h2 id="final-cut-pro">Final Cut Pro</h2>
 <p>Run <strong>CorridorKey by LateNite</strong> from your <code translate="no" v-pre>/Applications</code> folder.</p>
@@ -308,12 +321,14 @@
 </figure>
 <p>First pick your:</p>
 <ul>
-<li><strong>Quality</strong> (it defaults to <strong>Recommended</strong>)</li>
-<li>Screen Colour (it defaults to <strong>Green</strong>)</li>
-<li>Upscale Method (it defaults to <strong>Lanczos</strong>)</li>
-<li>If you want to use Apple&#x27;s Vision Framework to do the hint tick <strong>Auto Subject Hint</strong></li>
-<li>Alternatively, you can use <strong>Show Subject Marker</strong> to manually select the foreground object in your Viewer</li>
+<li><strong>Quality</strong> defaults to <strong>Recommended</strong>, which chooses a model resolution for your source and Mac.</li>
+<li><strong>Screen Colour</strong> defaults to <strong>Auto</strong>.</li>
+<li><strong>Upscale Method</strong> defaults to <strong>Lanczos</strong>.</li>
+<li><strong>Generated Hint</strong> defaults to <strong>None</strong>, letting CorridorKey v2 identify the subject. <strong>Chroma</strong>, <strong>Apple Vision</strong>, and <strong>Apple Vision + Manual Points</strong> provide optional guidance.</li>
+<li><strong>Time Awareness</strong> defaults to <strong>Off</strong>. Each frame is keyed immediately during analysis. Enabling it adds a preparation pass and combines surrounding frames.</li>
 </ul>
+<p><strong>Reduce Edge Flicker</strong>, <strong>Light Wrap</strong>, and <strong>Auto Despeckle</strong> are off by default so the initial result preserves the model&#x27;s detail. Reduce Edge Flicker is an additional smoothing pass; it can soften edges or introduce trails. Try Time Awareness first when a shot flickers. Saved effects retain their explicit settings.</p>
+<p><strong>Time Awareness</strong> and <strong>Temporal Stability</strong> sit together in the inspector. <strong>Reset All</strong>, beside Analyse Clip, restores factory parameters and clears manual points and imported Alpha Hint selections. The reset supports Undo; in Final Cut Pro it also removes parameter keyframes.</p>
 <p>Then press <strong>Analyse Clip</strong>:</p>
 <figure class="content-center">
     <img src="../static/default-effect.png" alt="" class="max-w-full h-auto rounded-image-rounded border-image-border border-image-border-width" width="884" height="2052" />
@@ -329,7 +344,8 @@
     <img src="../static/complete.png" alt="" class="max-w-full h-auto rounded-image-rounded border-image-border border-image-border-width" width="2304" height="864" />
     <figcaption class="caption"></figcaption>
 </figure>
-<p>You can now adjust the other properties as you want to get best results.</p>
+<p>You can now adjust the other properties as you want to get best results. Model loading in Final Cut Pro remains on demand.</p>
+<p><strong>Light Wrap</strong> adds blurred source light along the silhouette; Radius controls its reach into the subject. <strong>Edge Decontaminate</strong> removes residual screen-colour excess at translucent edges. Already-clean edges may change little. Both affect foreground colour in Processed and foreground output modes; Matte Only and Source + Matte are diagnostic/source outputs. <strong>Keep Original in Solid Areas</strong> restores source detail before these edge corrections.</p>
 <p>Setting the <strong>Output</strong> to <strong>Matte Only</strong> can be helpful initially to get suitable values:</p>
 <figure class="content-center">
     <img src="../static/matte-only.png" alt="" class="max-w-full h-auto rounded-image-rounded border-image-border border-image-border-width" width="3884" height="2526" />

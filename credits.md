@@ -2,7 +2,7 @@
 
 **CorridorKey by LateNite** has been thrown together by Chris at [LateNite](https://fcp.cafe/latenite/).
 
-This would **NOT** be possible without Niko's at [Corridor Digital's](https://www.corridordigital.com) amazing [CorridorKey](https://github.com/nikopueringer/CorridorKey) [green screen model](https://huggingface.co/nikopueringer/CorridorKey_v1.0) and [blue screen model](https://huggingface.co/nikopueringer/CorridorKeyBlue_1.0).
+This would **NOT** be possible without Niko's at [Corridor Digital's](https://www.corridordigital.com) amazing [CorridorKey v2](https://github.com/nikopueringer/CorridorKey2.0) [green- and blue-screen model](https://huggingface.co/nikopueringer/CorridorKey2.0).
 
 It also uses Apple's [MLX Swift](https://github.com/ml-explore/mlx-swift) and [Swift Numerics](https://github.com/apple/swift-numerics).
 
@@ -46,17 +46,15 @@ SOFTWARE.
 
 ## Model License
 
-When distributed, **CorridorKey by LateNite** is subject to the same license terms as the **CorridorKey** models — [CC BY-NC-SA 4.0](https://github.com/nikopueringer/CorridorKey/blob/main/LICENSE).
+This build uses [CorridorKey v2](https://huggingface.co/nikopueringer/CorridorKey2.0), including its C-RADIOv4-SO400M, MoGe-2 ViT-B, and RVM-small foundation models. The complete Corridor Key Licence 2.0 is reproduced below. Foundation model licenses and attribution are bundled in the application's Model Licenses folder.
 
-We use MLX versions of the [green screen model](https://huggingface.co/nikopueringer/CorridorKey_v1.0) and [blue screen model](https://huggingface.co/nikopueringer/CorridorKeyBlue_1.0).
-
-```
+```text
 CORRIDOR KEY LICENCE
 =======================================================================
 
-Version 1.0
+Version 2.0
 
-Copyright (c) Corridor Digital. All rights reserved.
+Copyright (c) Corridor Digital LLC. All rights reserved.
 
 
 ADDITIONAL TERMS AND CONDITIONS
@@ -69,6 +67,9 @@ to the following additional terms and conditions. These additional
 terms supplement the CC BY-NC-SA 4.0 licence and take precedence
 where they conflict.
 
+"This tool" means the CorridorKey software in this repository and
+the CorridorKey model weights distributed for use with it.
+
 By exercising any rights to the Licensed Material, You accept and
 agree to be bound by both these Additional Terms and the
 CC BY-NC-SA 4.0 Public License.
@@ -76,10 +77,14 @@ CC BY-NC-SA 4.0 Public License.
 
 1. PERMITTED USE
 
-   You may use this tool for any lawful purpose, including for
-   processing images as part of a commercial project, provided that
-   such use complies with the restrictions set out below and the
-   terms of the CC BY-NC-SA 4.0 licence.
+   a. You may use this tool for any lawful purpose, including for
+      processing images as part of a commercial project, provided
+      that such use complies with the restrictions set out below
+      and the terms of the CC BY-NC-SA 4.0 licence.
+
+   b. The images and video You produce with this tool are Yours.
+      The Licensor claims no rights in them, and You may use them
+      commercially.
 
 
 2. RESTRICTIONS
@@ -90,7 +95,8 @@ CC BY-NC-SA 4.0 Public License.
    a. NO REPACKAGING OR RESALE
       You may not repackage, redistribute, sublicense, or sell
       this tool, in whole or in part, as a standalone product or
-      as part of a competing product.
+      as part of a competing product, and You may not charge for
+      access to this tool's code or model weights.
 
    b. NO PAID API OR INFERENCE SERVICES
       You may not use this tool to provide inference as a paid
@@ -99,7 +105,15 @@ CC BY-NC-SA 4.0 Public License.
       a paywall, subscription model, or usage-based billing
       system.
 
-   c. COMMERCIAL SOFTWARE INTEGRATION
+   c. DERIVATIVES MUST BE FREELY ACCESSIBLE
+      You may build on this tool, but any project, fork,
+      derivative work, or modified version that You release and
+      that incorporates this tool must be made available to the
+      public free of charge. Voluntary donations and
+      pay-what-you-want pricing are permitted, provided that
+      paying nothing is always an available option.
+
+   d. COMMERCIAL SOFTWARE INTEGRATION
       If you operate a commercial software package or inference
       service and wish to incorporate this tool into your
       software, you must obtain a separate written agreement
@@ -108,7 +122,29 @@ CC BY-NC-SA 4.0 Public License.
           contact@corridordigital.com
 
 
-3. ATTRIBUTION
+3. LARGE ORGANISATIONS
+
+   a. If You are, or are using this tool on behalf of, a Legal
+      Entity whose total gross revenue exceeded US $20,000,000
+      (twenty million US dollars) in its most recently completed
+      fiscal year, the permissions in Section 1 do not apply
+      unless that Legal Entity has purchased a seat of the
+      CorridorKey plugin from the Licensor for each individual
+      who uses this tool.
+
+   b. "Legal Entity" means the entity using this tool together
+      with all other entities that control, are controlled by,
+      or are under common control with it. Revenue is measured
+      across the whole Legal Entity.
+
+   c. Each seat of the CorridorKey plugin includes a licence
+      for one individual to download and use this tool and its
+      model weights. Seats are available at:
+
+          https://corridorkey.com
+
+
+4. ATTRIBUTION
 
    a. In addition to the attribution requirements set out in
       Section 3(a) of the CC BY-NC-SA 4.0 licence, You must
@@ -122,14 +158,23 @@ CC BY-NC-SA 4.0 Public License.
       needed.
 
 
-4. SHARE-ALIKE
+5. SHARE-ALIKE
 
    Any variations, improvements, derivative works, or modified
    versions of this tool that are publicly released must be
    distributed under this same licence, including these Additional
    Terms, or a licence with substantially equivalent terms.
 
-5. DISCLAIMER
+
+6. THIRD-PARTY COMPONENTS
+
+   This tool depends on third-party code and model weights that
+   are not owned by the Licensor and are not covered by this
+   licence. Each remains under its own licence, as listed in
+   THIRD_PARTY_NOTICES.md.
+
+
+7. DISCLAIMER
 
    This licence is provided on an "as-is" basis. The Licensor makes
    no representations or warranties regarding the enforceability or
@@ -137,7 +182,8 @@ CC BY-NC-SA 4.0 Public License.
    independent legal advice if you have questions about the scope
    or applicability of this licence.
 
-6. CONTRIBUTIONS
+
+8. CONTRIBUTIONS
 
    By submitting any contribution (including source code,
    documentation, or images) to this repository, You agree that:
@@ -145,7 +191,7 @@ CC BY-NC-SA 4.0 Public License.
    a. Your contribution is provided under the terms of this
       Corridor Key Licence.
 
-   b. You grant the Licensor (Corridor Digital) a perpetual,
+   b. You grant the Licensor (Corridor Digital LLC) a perpetual,
       worldwide, non-exclusive, no-charge, royalty-free,
       irrevocable license to use, reproduce, prepare derivative
       works of, publicly display, and sublicense your
@@ -156,6 +202,7 @@ CC BY-NC-SA 4.0 Public License.
       these terms.
 
 =======================================================================
+
 
 https://creativecommons.org/licenses/by-nc-sa/4.0/
 https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode.txt
