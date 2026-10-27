@@ -103,16 +103,16 @@ struct CorridorKeyManualHintView: View {
 
     var body: some View {
         VStack(alignment: .leading) {
-            SubjectHintToolMenu(
-                selection: Binding(get: { bridge.subjectTool }, set: { bridge.selectSubjectTool($0) }),
-                clearCurrentFrame: { bridge.clearHints(onCurrentFrame: true) },
-                clearAllFrames: { bridge.clearHints(onCurrentFrame: false) },
-                hasAnyHints: bridge.snapshot.hintPointCount > 0
-            )
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(bridge.snapshot.isWorking || bridge.usesAlphaHint || bridge.hintStorageUnavailable)
-            CorridorKeyManualHintGuide()
+            InspectorButtonRow {
+                SubjectHintToolMenu(
+                    selection: Binding(get: { bridge.subjectTool }, set: { bridge.selectSubjectTool($0) }),
+                    clearCurrentFrame: { bridge.clearHints(onCurrentFrame: true) },
+                    clearAllFrames: { bridge.clearHints(onCurrentFrame: false) },
+                    hasAnyHints: bridge.snapshot.hintPointCount > 0
+                )
+                .disabled(bridge.snapshot.isWorking || bridge.usesAlphaHint || bridge.hintStorageUnavailable)
+                ManualHintHelpButton(showsFinalCutProInstructions: true)
+            }
             if bridge.hintStorageUnavailable {
                 Text("Final Cut Pro could not read the saved hints and analysis. Choose Reset All to clear this effect’s saved data, or remove and reapply the updated effect.")
                     .font(.caption).foregroundStyle(.orange)
@@ -129,19 +129,5 @@ struct CorridorKeyManualHintView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// Explains the same explicit Subject workflow as the standalone editor.
-private struct CorridorKeyManualHintGuide: View {
-    var body: some View {
-        VStack(alignment: .leading) {
-            Text("Turn off Use Alpha Hint, then choose a tool from Subject. Select CorridorKey by LateNite in the Video inspector and click the subject or background in the viewer. Adding a point selects Apple Vision + Manual Points automatically.")
-                .foregroundStyle(.secondary)
-            Text("Points apply to the current frame. Choose Off to stop marking, then Analyse Clip to update the result.")
-                .foregroundStyle(.secondary)
-        }
-        .font(.caption)
-        .fixedSize(horizontal: false, vertical: true)
     }
 }

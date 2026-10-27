@@ -123,8 +123,10 @@ private struct CorridorKeyInspectorRow: View {
             }
         }
         .padding(.horizontal)
-        .padding(.vertical, 4)
-        .frame(width: availableWidth, alignment: .leading)
+        // The native section heading already provides the space above Subject.
+        .padding(.top, parameterID == ParameterIdentifier.manualHintControls ? 0 : 4)
+        .padding(.bottom, 4)
+        .frame(width: availableWidth, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .task(id: ObjectIdentifier(bridge)) {
             // The static branding row needs no host polling.

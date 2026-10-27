@@ -1,6 +1,80 @@
 import AppKit
 import SwiftUI
 
+/// The two inspectors use the same help button and popover for manual points.
+struct ManualHintHelpButton: View {
+    var showsFinalCutProInstructions = false
+    @State private var showingHelp = false
+
+    var body: some View {
+        Button("About Manual Hint", systemImage: "questionmark.circle") { showingHelp = true }
+            .popover(isPresented: $showingHelp) {
+                ManualHintHelpView(showsFinalCutProInstructions: showsFinalCutProInstructions)
+            }
+    }
+}
+
+/// Explains tool selection, frame scope and analysis without expanding the inspector.
+struct ManualHintHelpView: View {
+    var showsFinalCutProInstructions = false
+
+    var body: some View {
+        InspectorHelpPopover(title: "Manual Hint", systemImage: "hand.point.up.left") {
+            InspectorHelpSection(
+                title: "Choose a tool",
+                message: "Turn off Use Alpha Hint, then choose a tool from Subject. Click the subject or background in the viewer to place a point."
+            )
+            if showsFinalCutProInstructions {
+                InspectorHelpSection(
+                    title: "In Final Cut Pro",
+                    message: "Select CorridorKey by LateNite in the Video inspector to make its viewer controls active."
+                )
+            }
+            InspectorHelpSection(
+                title: "Edit points on this frame",
+                message: "Points apply to the current frame. Choose \(OnScreenControlTool.eraseHint.menuDisplayName) and click near a point to remove it. The Subject menu also lets you clear hints on this frame or all frames."
+            )
+            Divider()
+            InspectorHelpSection(
+                title: "Update the key",
+                message: "Adding a point selects Apple Vision + Manual Points automatically. Choose Off to stop marking, then Analyse Clip to update the result."
+            )
+        }
+    }
+}
+
+/// A consistent content-sized layout for inspector help in both hosts.
+struct InspectorHelpPopover<Content: View>: View {
+    let title: String
+    let systemImage: String
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label(title, systemImage: systemImage).font(.headline)
+            content()
+        }
+        .padding()
+        .frame(width: 340, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Keeps each help topic together while leaving space between paragraphs.
+struct InspectorHelpSection: View {
+    let title: String
+    let message: String
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text(title).bold()
+            Text(message).foregroundStyle(.secondary)
+        }
+        .font(.callout)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 /// Shared Subject menu. Final Cut Pro uses explicit tools without claiming its shortcuts.
 struct SubjectHintToolMenu: View {
     @Binding var selection: OnScreenControlTool

@@ -289,19 +289,17 @@ private struct ManualHintGroup: View {
 
     var body: some View {
         InspectorGroup(title: "Manual Hint") {
-            SubjectHintToolMenu(
-                selection: $viewModel.oscTool,
-                clearCurrentFrame: viewModel.clearHintsOnCurrentFrame,
-                clearAllFrames: viewModel.clearAllHints,
-                hasCurrentFrameHints: !viewModel.currentFrameHints.isEmpty,
-                hasAnyHints: !viewModel.state.hintPointSet.isEmpty
-            )
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(viewModel.analysisStatus.inProgress || viewModel.state.video.useAlphaHint)
-            Text("Turn off Use Alpha Hint, then choose a tool from Subject and click in the viewer. Points apply to the current frame. Choose Analyse Clip to update the result.")
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            InspectorButtonRow {
+                SubjectHintToolMenu(
+                    selection: $viewModel.oscTool,
+                    clearCurrentFrame: viewModel.clearHintsOnCurrentFrame,
+                    clearAllFrames: viewModel.clearAllHints,
+                    hasCurrentFrameHints: !viewModel.currentFrameHints.isEmpty,
+                    hasAnyHints: !viewModel.state.hintPointSet.isEmpty
+                )
+                .disabled(viewModel.analysisStatus.inProgress || viewModel.state.video.useAlphaHint)
+                ManualHintHelpButton()
+            }
         }
     }
 }

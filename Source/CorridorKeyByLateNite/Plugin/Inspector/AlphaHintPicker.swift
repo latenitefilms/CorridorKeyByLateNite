@@ -10,16 +10,15 @@ struct AlphaHintPicker: View {
     @State private var errorMessage: String?
     @State private var showingHelp = false
 
-    /// Shared wording for the standalone and FxPlug inspectors.
-    static let explanation = "Import a black-and-white mask: white keeps the subject and black removes the background. Use Alpha Hint enables this file in place of Generated Hint and manual points."
-
     var body: some View {
         VStack(alignment: .leading) {
-            Button("About Alpha Hint", systemImage: "questionmark.circle") { showingHelp = true }
-                .popover(isPresented: $showingHelp) {
-                    AlphaHintHelpView()
-                }
-            Button("Import Alpha Hint", systemImage: "photo.on.rectangle") { choosingFile = true }
+            InspectorButtonRow {
+                Button("Import Alpha Hint", systemImage: "photo.on.rectangle") { choosingFile = true }
+                Button("About Alpha Hint", systemImage: "questionmark.circle") { showingHelp = true }
+                    .popover(isPresented: $showingHelp) {
+                        AlphaHintHelpView()
+                    }
+            }
             if let asset {
                 HStack {
                     Text(asset.name).font(.caption).foregroundStyle(.secondary)
@@ -53,16 +52,23 @@ struct AlphaHintPicker: View {
     }
 }
 
-/// Help sizes to its text instead of presenting a mostly empty fixed panel.
-private struct AlphaHintHelpView: View {
+/// Shared help uses distinct paragraphs and headings, sized to its content.
+struct AlphaHintHelpView: View {
     var body: some View {
-        VStack(alignment: .leading) {
-            Text("Alpha Hint").font(.headline)
-            Text(AlphaHintPicker.explanation)
-            Text("Reference Frame is zero-based. Single Frame propagates forwards and backwards using Time Awareness.")
+        InspectorHelpPopover(title: "Alpha Hint", systemImage: "photo.on.rectangle") {
+            InspectorHelpSection(
+                title: "Import a mask",
+                message: "Import a black-and-white image, movie or image sequence. White keeps the subject. Black removes the background."
+            )
+            InspectorHelpSection(
+                title: "Enable the hint",
+                message: "Turn on Use Alpha Hint to use the imported mask in place of Generated Hint and manual points."
+            )
+            Divider()
+            InspectorHelpSection(
+                title: "Choose a reference frame",
+                message: "Reference Frame counts from zero. Choose Set Current Frame as Reference to use the frame at the playhead. With Single Frame selected, Time Awareness propagates the hint forwards and backwards."
+            )
         }
-        .padding()
-        .frame(width: 320)
-        .fixedSize(horizontal: false, vertical: true)
     }
 }
