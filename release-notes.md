@@ -1,11 +1,15 @@
 # Release Notes
 
-### Unreleased
+### 2.0.0 (Build 11)
 
-- Updated the Standalone Editor and Final Cut Pro effect to CorridorKey v2, including all three foundation models. Green and blue screens share one model across all five Quality settings.
-- Existing analysed clips need to be analysed again with v2.
-- Requires macOS 26 or later on Apple Silicon.
-- Uses deterministic independent-frame inference so scrubbing, rendering and analysis share the same model behaviour. The existing Temporal Stability controls remain available.
+**🎉 Released:**
+- 27th October 2026
+
+**🔨 Improvements:**
+- CorridorKey by LateNite now uses the CorridorKey v2.0 model! HUGE thank you to Zachary Harris, Niko and Corridor Digital!
+- This release includes major performance improvements, and user interface adjustments for the new CorridorKey v2.0 model.
+- Added ability to batch export clips in the Standalone Editor.
+- Added ability to import still images into the Standalone Editor.
 
 ---
 

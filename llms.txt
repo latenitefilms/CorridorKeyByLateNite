@@ -9,7 +9,7 @@
 - [Support](https://corridorkeybylatenite.fcp.cafe/support.md): The best place to get support is the FCP Cafe Discord.
 - [Frequently Asked Questions](https://corridorkeybylatenite.fcp.cafe/faq.md): CorridorKey is an open source project created by the talented Corridor Digital team.
 - [Troubleshooting](https://corridorkeybylatenite.fcp.cafe/troubleshooting.md): Apologies in advance if you have any trouble using CorridorKey by LateNite.
-- [Release Notes](https://corridorkeybylatenite.fcp.cafe/release-notes.md): Updated the Standalone Editor and Final Cut Pro effect to CorridorKey v2, including all three foundation models. Green and blue screens share one model across all five Quality settings.
+- [Release Notes](https://corridorkeybylatenite.fcp.cafe/release-notes.md): 🎉 Released:
 - [Uninstall](https://corridorkeybylatenite.fcp.cafe/uninstall.md): To uninstall CorridorKey by LateNite, simply drag the application to the trash/bin.
 - [Credits](https://corridorkeybylatenite.fcp.cafe/credits.md): CorridorKey by LateNite has been thrown together by Chris at LateNite.
 - [Privacy Policy](https://corridorkeybylatenite.fcp.cafe/privacy.md): This is the privacy policy for the CorridorKey by LateNite, macOS Application that is available on the macOS App Store and TestFlight.
