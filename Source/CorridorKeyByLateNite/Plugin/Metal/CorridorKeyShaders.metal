@@ -726,7 +726,7 @@ struct CKHintPoint {
 // MARK: - OSC overlay rendering
 //
 // Draws the user's hint points onto Final Cut Pro's OSC destination
-// canvas. Foreground points and the subject marker are dark discs
+// canvas. Foreground points are dark discs
 // with a white person silhouette inside (matching the Standalone
 // Editor's `Image(systemName: "person.fill")` marker); background
 // points are rounded rectangles in the user's screen colour with a
@@ -876,7 +876,7 @@ fragment float4 corridorKeyDrawOSCFragment(
             continue;
         }
 
-        // Foreground hint and subject marker. Dark filled disc with
+        // Foreground hint. Dark filled disc with
         // white outline and a centred white person silhouette —
         // matches the standalone editor's `Image(systemName:
         // "person.fill")` over a circle marker so the visual language

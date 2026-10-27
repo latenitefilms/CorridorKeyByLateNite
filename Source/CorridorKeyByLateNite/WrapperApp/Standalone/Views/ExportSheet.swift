@@ -27,7 +27,7 @@ struct ExportSheet: View {
 
             Text(viewModel.isStillImage
                  ? "Saves the current output at the image’s original resolution. PNG and TIFF preserve transparency with 16-bit colour. The preview backdrop is not included."
-                 : "Renders the current parameters across every analysed frame and writes the result to a QuickTime movie. Apple ProRes carries the highest quality; HEVC keeps file sizes compact and is hardware-encoded on Apple Silicon. Choose a codec with alpha (ProRes 4444 or HEVC with Alpha) to embed the matte directly into the output file.")
+                 : "Renders the current parameters across every analysed frame and writes the result to a QuickTime movie. Apple ProRes carries the highest quality. HEVC keeps file sizes compact and is hardware-encoded on Apple Silicon. Choose a codec with alpha (ProRes 4444 or HEVC with Alpha) to embed the matte directly into the output file.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

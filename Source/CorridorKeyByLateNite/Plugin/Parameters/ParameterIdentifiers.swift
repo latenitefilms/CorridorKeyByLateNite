@@ -11,8 +11,7 @@
 import Foundation
 
 enum ParameterIdentifier {
-    /// Custom-UI parameter that hosts the inspector header (app icon,
-    /// version, Analyse/Reset buttons, analysis status). Drawn as a SwiftUI
+    /// Custom-UI parameter that hosts the app icon and version. Drawn as a SwiftUI
     /// `NSHostingView` returned from `createViewForParameterID`. The Motion
     /// Template publishes this parameter, so it also owns the nested
     /// persistence dictionary for analysis data and subject points.
@@ -21,6 +20,16 @@ enum ParameterIdentifier {
     /// Presentation-only row inside Alpha Hint. Persisted assets remain on
     /// headerSummary so existing libraries keep their selections.
     static let alphaHintControls: UInt32 = 9012
+
+    /// Presentation-only analysis actions. Saved analysis and hints
+    /// stay on headerSummary so existing libraries retain their data.
+    static let analysisControls: UInt32 = 9013
+
+    /// Presentation-only diagnostics. Analysis remains persisted on headerSummary.
+    static let analysisDetails: UInt32 = 9014
+
+    /// Subject tools and per-frame guidance in the Manual Hint section.
+    static let manualHintControls: UInt32 = 9015
 
     // Subgroups
     static let settingsGroup: UInt32 = 100
@@ -31,6 +40,9 @@ enum ParameterIdentifier {
     static let temporalStabilityGroup: UInt32 = 150
     static let timeAwarenessGroup: UInt32 = 160
     static let alphaHintGroup: UInt32 = 170
+    static let controlsGroup: UInt32 = 180
+    static let analysisDetailsGroup: UInt32 = 190
+    static let manualHintGroup: UInt32 = 200
 
     // V2 additions. Existing identifiers are never renumbered.
     static let inputIsLinear: UInt32 = 9001
@@ -53,14 +65,6 @@ enum ParameterIdentifier {
     /// picks one of three modes (Automatic / Apple Vision / Manual)
     /// — see `HintMode` for the per-case behaviour.
     static let hintMode: UInt32 = 1007
-
-    /// Show / hide the on-screen subject marker on the canvas.
-    static let showSubjectMarker: UInt32 = 1005
-
-    /// 2D point parameter for the subject marker the OSC drags. Stored
-    /// in object-normalised (0…1) coordinates; defaults to (0.5, 0.5)
-    /// — the centre of the frame.
-    static let subjectPosition: UInt32 = 1006
 
     // Interior Detail
     static let sourcePassthrough: UInt32 = 2001
@@ -112,6 +116,7 @@ enum HeaderStorageKey {
     static let analysisData = "analysisData"
     static let subjectPoints = "subjectPoints"
     static let alphaHintAsset = "alphaHintAsset"
+    static let subjectTool = "subjectTool"
 }
 
 /// Convenience wrapper that makes the raw `kFxParameterFlag_*` constants feel at

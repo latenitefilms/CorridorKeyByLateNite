@@ -43,7 +43,7 @@ enum PixelBufferTextureBridgeError: Error, CustomStringConvertible {
         case .textureCreationFailed:
             return "CorridorKey by LateNite could not wrap a pixel buffer as a Metal texture."
         case .noIOSurface:
-            return "CorridorKey by LateNite received a CVPixelBuffer without an IOSurface; the AVFoundation reader was not configured for Metal compatibility."
+            return "CorridorKey by LateNite received a CVPixelBuffer without an IOSurface. The AVFoundation reader was not configured for Metal compatibility."
         case .pixelBufferAllocationFailed(let status):
             return "CorridorKey by LateNite could not allocate a destination pixel buffer (status \(status))."
         }

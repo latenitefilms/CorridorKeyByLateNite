@@ -20,6 +20,9 @@
 		A30100000000000000000002 /* AlphaHintReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30200000000000000000001 /* AlphaHintReader.swift */; };
 		A40100000000000000000001 /* AlphaHintPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40200000000000000000001 /* AlphaHintPicker.swift */; };
 		A40100000000000000000002 /* AlphaHintPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A40200000000000000000001 /* AlphaHintPicker.swift */; };
+		A50100000000000000000001 /* InspectorComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50200000000000000000001 /* InspectorComponents.swift */; };
+		A50100000000000000000002 /* InspectorComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50200000000000000000001 /* InspectorComponents.swift */; };
+		A60100000000000000000001 /* HintHitTesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60200000000000000000001 /* HintHitTesting.swift */; };
 		AD0100000000000000000001 /* AnalysisDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0200000000000000000001 /* AnalysisDiskCache.swift */; };
 		AD0100000000000000000002 /* AnalysisDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0200000000000000000001 /* AnalysisDiskCache.swift */; };
 		AF0100000000000000000001 /* AnalysisFrameCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0200000000000000000001 /* AnalysisFrameCodec.swift */; };
@@ -150,6 +153,11 @@
 		WB0000000000000000000005 /* StandaloneRenderEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000005 /* StandaloneRenderEngineTests.swift */; };
 		WB0000000000000000000006 /* AnalysisAndExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000006 /* AnalysisAndExportTests.swift */; };
 		WB0000000000000000000007 /* EditorViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000007 /* EditorViewModelTests.swift */; };
+		A70100000000000000000001 /* OnScreenControlTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000001 /* OnScreenControlTool.swift */; };
+		A70300000000000000000001 /* OnScreenControlTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000001 /* OnScreenControlTool.swift */; };
+		A70100000000000000000002 /* CustomParameterValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000002 /* CustomParameterValue.swift */; };
+		A70300000000000000000002 /* CustomParameterValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000002 /* CustomParameterValue.swift */; };
+		A80100000000000000000001 /* HeaderCustomParameterStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80200000000000000000001 /* HeaderCustomParameterStorage.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -204,6 +212,8 @@
 		A20200000000000000000001 /* VideoInferenceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = VideoInferenceSession.swift; path = CorridorKeyByLateNite/Plugin/Inference/VideoInferenceSession.swift; sourceTree = "<group>"; };
 		A30200000000000000000001 /* AlphaHintReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AlphaHintReader.swift; path = CorridorKeyByLateNite/Plugin/Inference/AlphaHintReader.swift; sourceTree = "<group>"; };
 		A40200000000000000000001 /* AlphaHintPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AlphaHintPicker.swift; path = CorridorKeyByLateNite/Plugin/Inspector/AlphaHintPicker.swift; sourceTree = "<group>"; };
+		A50200000000000000000001 /* InspectorComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InspectorComponents.swift; path = CorridorKeyByLateNite/Plugin/Inspector/InspectorComponents.swift; sourceTree = "<group>"; };
+		A60200000000000000000001 /* HintHitTesting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HintHitTesting.swift; path = CorridorKeyByLateNite/Plugin/Inspector/HintHitTesting.swift; sourceTree = "<group>"; };
 		AD0200000000000000000001 /* AnalysisDiskCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisDiskCache.swift; path = CorridorKeyByLateNite/Plugin/Inference/AnalysisDiskCache.swift; sourceTree = "<group>"; };
 		AF0200000000000000000001 /* AnalysisFrameCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisFrameCodec.swift; path = CorridorKeyByLateNite/Plugin/Inference/AnalysisFrameCodec.swift; sourceTree = "<group>"; };
 		BE0200000000000000000001 /* BatchExportRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BatchExportRunner.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/BatchExportRunner.swift; sourceTree = "<group>"; };
@@ -308,6 +318,9 @@
 		WR0000000000000000000006 /* AnalysisAndExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisAndExportTests.swift; path = Tests/WrapperAppTests/AnalysisAndExportTests.swift; sourceTree = "<group>"; };
 		WR0000000000000000000007 /* EditorViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EditorViewModelTests.swift; path = Tests/WrapperAppTests/EditorViewModelTests.swift; sourceTree = "<group>"; };
 		WT0300000000000000000001 /* WrapperAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WrapperAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A70200000000000000000001 /* OnScreenControlTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnScreenControlTool.swift; path = CorridorKeyByLateNite/Plugin/Inspector/OnScreenControlTool.swift; sourceTree = "<group>"; };
+		A70200000000000000000002 /* CustomParameterValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CustomParameterValue.swift; path = CorridorKeyByLateNite/Plugin/Inspector/CustomParameterValue.swift; sourceTree = "<group>"; };
+		A80200000000000000000001 /* HeaderCustomParameterStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HeaderCustomParameterStorage.swift; path = CorridorKeyByLateNite/Plugin/Inspector/HeaderCustomParameterStorage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -543,6 +556,11 @@
 		CK0A00000000000000000020 /* Inspector */ = {
 			isa = PBXGroup;
 			children = (
+				A50200000000000000000001 /* InspectorComponents.swift */,
+				A60200000000000000000001 /* HintHitTesting.swift */,
+				A80200000000000000000001 /* HeaderCustomParameterStorage.swift */,
+				A70200000000000000000001 /* OnScreenControlTool.swift */,
+				A70200000000000000000002 /* CustomParameterValue.swift */,
 				CK0200000000000000000063 /* CorridorKeyAnalysisSnapshot.swift */,
 				CK0200000000000000000060 /* CorridorKeyByLateNitePlugIn+CustomViews.swift */,
 				CK0200000000000000000062 /* CorridorKeyHeaderView.swift */,
@@ -823,6 +841,9 @@
 				AF0100000000000000000002 /* AnalysisFrameCodec.swift in Sources */,
 				AD0100000000000000000002 /* AnalysisDiskCache.swift in Sources */,
 				A40100000000000000000002 /* AlphaHintPicker.swift in Sources */,
+				A50100000000000000000002 /* InspectorComponents.swift in Sources */,
+				A70300000000000000000001 /* OnScreenControlTool.swift in Sources */,
+				A70300000000000000000002 /* CustomParameterValue.swift in Sources */,
 				A30100000000000000000002 /* AlphaHintReader.swift in Sources */,
 				A20100000000000000000002 /* VideoInferenceSession.swift in Sources */,
 				A10100000000000000000002 /* VideoInferenceSettings.swift in Sources */,
@@ -876,6 +897,11 @@
 				AF0100000000000000000001 /* AnalysisFrameCodec.swift in Sources */,
 				AD0100000000000000000001 /* AnalysisDiskCache.swift in Sources */,
 				A40100000000000000000001 /* AlphaHintPicker.swift in Sources */,
+				A50100000000000000000001 /* InspectorComponents.swift in Sources */,
+				A60100000000000000000001 /* HintHitTesting.swift in Sources */,
+				A80100000000000000000001 /* HeaderCustomParameterStorage.swift in Sources */,
+				A70100000000000000000001 /* OnScreenControlTool.swift in Sources */,
+				A70100000000000000000002 /* CustomParameterValue.swift in Sources */,
 				A30100000000000000000001 /* AlphaHintReader.swift in Sources */,
 				A20100000000000000000001 /* VideoInferenceSession.swift in Sources */,
 				A10100000000000000000001 /* VideoInferenceSettings.swift in Sources */,
@@ -1069,6 +1095,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = CorridorKey;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = CorridorKeyByLateNite/WrapperApp/WrapperApp.entitlements;
+				CURRENT_PROJECT_VERSION = "$(CURRENT_PROJECT_VERSION)";
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_MOVIES_FOLDER = readwrite;
@@ -1090,6 +1117,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = "$(MARKETING_VERSION)";
 				MTL_HEADER_SEARCH_PATHS = "$(SRCROOT)/CorridorKeyByLateNite/Plugin/Shared";
 				PRODUCT_BUNDLE_IDENTIFIER = com.latenitefilms.CorridorKeyToolbox;
 				PRODUCT_MODULE_NAME = CorridorKeyByLateNiteApp;
@@ -1107,6 +1135,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = CorridorKey;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = CorridorKeyByLateNite/WrapperApp/WrapperApp.entitlements;
+				CURRENT_PROJECT_VERSION = "$(CURRENT_PROJECT_VERSION)";
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_MOVIES_FOLDER = readwrite;
@@ -1128,6 +1157,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.video";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = "$(MARKETING_VERSION)";
 				MTL_HEADER_SEARCH_PATHS = "$(SRCROOT)/CorridorKeyByLateNite/Plugin/Shared";
 				PRODUCT_BUNDLE_IDENTIFIER = com.latenitefilms.CorridorKeyToolbox;
 				PRODUCT_MODULE_NAME = CorridorKeyByLateNiteApp;
@@ -1144,6 +1174,7 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = CorridorKeyByLateNite/Plugin/CorridorKeyByLateNite.entitlements;
+				CURRENT_PROJECT_VERSION = "$(CURRENT_PROJECT_VERSION)";
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1171,6 +1202,7 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = CorridorKeyByLateNite/Plugin/CorridorKeyByLateNite.entitlements;
+				CURRENT_PROJECT_VERSION = "$(CURRENT_PROJECT_VERSION)";
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;

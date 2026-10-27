@@ -75,7 +75,7 @@ actor StandalonePreviewRenderer {
             && state.cachedMatteBlob == nil && state.cachedFrameReference == nil) {
             return try engine.renderShowingOriginal(
                 source: frame.pixelBuffer,
-                description: state.outputMode == .original ? "Original" : "Source Pass-Through — Analyse Clip to Key"
+                description: state.outputMode == .original ? "Original" : "Source Pass-Through"
             )
         }
         return try engine.render(source: frame.pixelBuffer, state: state, renderTime: frame.presentationTime)

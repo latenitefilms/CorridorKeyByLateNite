@@ -178,86 +178,16 @@ struct SubjectHintsMenu: View {
     @Bindable var viewModel: EditorViewModel
 
     var body: some View {
-        Menu {
-            Button("Off", systemImage: "circle.slash") {
-                viewModel.oscTool = .disabled
-            }
-            .keyboardShortcut("o", modifiers: [.command, .shift])
-
-            Button("Mark Foreground", systemImage: "person.fill.badge.plus") {
-                viewModel.oscTool = .foregroundHint
-            }
-            .keyboardShortcut("f", modifiers: [.command, .shift])
-
-            Button("Mark Background", systemImage: "rectangle.fill.badge.minus") {
-                viewModel.oscTool = .backgroundHint
-            }
-            .keyboardShortcut("b", modifiers: [.command, .shift])
-
-            Button("Mark Ignore", systemImage: "xmark.circle.fill") {
-                viewModel.oscTool = .ignoreHint
-            }
-            .keyboardShortcut("i", modifiers: [.command, .shift])
-
-            Button("Erase Nearest Hint", systemImage: "eraser") {
-                viewModel.oscTool = .eraseHint
-            }
-            .keyboardShortcut("e", modifiers: [.command, .shift])
-
-            Divider()
-
-            Button("Clear Hints on This Frame", systemImage: "eraser") {
-                viewModel.clearHintsOnCurrentFrame()
-            }
-            .disabled(viewModel.currentFrameHints.isEmpty)
-
-            Button("Clear All Hints", systemImage: "trash") {
-                viewModel.clearAllHints()
-            }
-            .disabled(viewModel.state.hintPointSet.isEmpty)
-            .keyboardShortcut(.delete, modifiers: [.command, .shift])
-        } label: {
-            Label(menuLabelTitle, systemImage: menuLabelIcon)
-        }
+        SubjectHintToolMenu(
+            selection: $viewModel.oscTool,
+            clearCurrentFrame: viewModel.clearHintsOnCurrentFrame,
+            clearAllFrames: viewModel.clearAllHints,
+            hasCurrentFrameHints: !viewModel.currentFrameHints.isEmpty,
+            hasAnyHints: !viewModel.state.hintPointSet.isEmpty,
+            usesKeyboardShortcuts: true
+        )
         .menuStyle(.borderlessButton)
         .controlSize(.regular)
-        .help(ManualHintGuidance.explanation)
-    }
-
-    private var menuLabelTitle: String {
-        switch viewModel.oscTool {
-        case .disabled: return "Subject"
-        case .foregroundHint: return "Marking Foreground"
-        case .backgroundHint: return "Marking Background"
-        case .ignoreHint: return "Marking Ignore"
-        case .eraseHint: return "Erasing"
-        }
-    }
-
-    private var menuLabelIcon: String {
-        switch viewModel.oscTool {
-        case .disabled: return "person.crop.rectangle"
-        case .foregroundHint: return "person.fill.badge.plus"
-        case .backgroundHint: return "rectangle.fill.badge.minus"
-        case .ignoreHint: return "xmark.circle.fill"
-        case .eraseHint: return "eraser"
-        }
-    }
-}
-
-extension OnScreenControlTool {
-    /// Menu-row title that disambiguates the four states beyond just
-    /// the enum's displayName ("Off" / "Foreground" / "Background" /
-    /// "Erase"). The transport-bar menu reads more naturally as
-    /// "Mark Foreground" than the bare "Foreground".
-    var menuDisplayName: String {
-        switch self {
-        case .disabled: return "Off"
-        case .foregroundHint: return "Mark Foreground"
-        case .backgroundHint: return "Mark Background"
-        case .ignoreHint: return "Mark Ignore"
-        case .eraseHint: return "Erase Nearest Hint"
-        }
     }
 }
 

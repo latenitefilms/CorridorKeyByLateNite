@@ -177,39 +177,6 @@ struct BackdropColor: Hashable, Sendable, Codable {
     static let `default` = BackdropColor(red: 0.18, green: 0.18, blue: 0.18)
 }
 
-/// Modes the on-screen control overlay can be in. The user picks one
-/// from the inspector; clicking the preview surface in any mode other
-/// than `.disabled` adds or removes a hint point.
-enum OnScreenControlTool: Hashable, Sendable, CaseIterable, Identifiable {
-    case disabled
-    case foregroundHint
-    case backgroundHint
-    case ignoreHint
-    case eraseHint
-
-    var id: Self { self }
-
-    var displayName: String {
-        switch self {
-        case .disabled: return "Off"
-        case .foregroundHint: return "Foreground"
-        case .backgroundHint: return "Background"
-        case .ignoreHint: return "Ignore"
-        case .eraseHint: return "Erase"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .disabled: return "circle.slash"
-        case .foregroundHint: return "plus.circle.fill"
-        case .backgroundHint: return "minus.circle.fill"
-        case .ignoreHint: return "xmark.circle.fill"
-        case .eraseHint: return "eraser"
-        }
-    }
-}
-
 /// One reversible edit retains its exact analysis and its disk-cache leases.
 private struct EditorEditSnapshot {
     let state: PluginStateData
@@ -447,7 +414,7 @@ final class EditorViewModel {
 
     /// Captures values and small disk references, never a decoded clip. Leases
     /// protect the referenced predictions from eviction until this undo expires.
-    private func registerUndo(state previousState: PluginStateData, actionName: String) {
+    private func registerUndo(state previousState: PluginStateData, actionName: String, restoreAnalysis: Bool = false) {
         guard let undoManager, undoManager.isUndoRegistrationEnabled else { return }
         let needsGroup = !undoManager.groupsByEvent && undoManager.groupingLevel == 0
             && !undoManager.isUndoing && !undoManager.isRedoing
@@ -459,20 +426,21 @@ final class EditorViewModel {
             leases: (try? AnalysisDiskCache.shared.pinSessions(for: matteCache.values.compactMap(\.reference))) ?? []
         )
         undoManager.registerUndo(withTarget: self) { target in
-            target.restoreEdit(snapshot, actionName: actionName)
+            target.restoreEdit(snapshot, actionName: actionName, restoreAnalysis: restoreAnalysis)
         }
         undoManager.setActionName(actionName)
     }
 
-    private func restoreEdit(_ snapshot: EditorEditSnapshot, actionName: String) {
+    private func restoreEdit(_ snapshot: EditorEditSnapshot, actionName: String, restoreAnalysis: Bool = false) {
         let canReuseAnalysis = state.analysisHintConfiguration == snapshot.state.analysisHintConfiguration
             && state.screenColor == snapshot.state.screenColor && state.qualityMode == snapshot.state.qualityMode
-        registerUndo(state: state, actionName: actionName)
-        if !canReuseAnalysis { cancelAnalysis() }
+        let shouldRestoreAnalysis = restoreAnalysis || !canReuseAnalysis
+        registerUndo(state: state, actionName: actionName, restoreAnalysis: restoreAnalysis)
+        if shouldRestoreAnalysis { cancelAnalysis() }
         isRestoringEdit = true
         state = snapshot.state
         isRestoringEdit = false
-        if !canReuseAnalysis {
+        if shouldRestoreAnalysis {
             matteCache = snapshot.mattes
             analysisStatus = snapshot.status
             restoredAnalysisLeases = snapshot.leases
@@ -1188,14 +1156,52 @@ final class EditorViewModel {
         parameterDidChange()
     }
 
+    /// Clears only analysis, preserving media, parameters and manual hints.
+    /// The existing edit snapshot makes this action undoable without copying frames.
+    func resetAnalysis() {
+        stopPlayback()
+        registerUndo(state: state, actionName: "Reset Analysis", restoreAnalysis: true)
+        cancelAnalysis()
+        matteCache.removeAll()
+        restoredAnalysisLeases = []
+        analysisStatus = .idle
+        renderPreview(at: playheadTime)
+    }
+
+    /// Adapts editor state to the same diagnostic presentation used by FxPlug.
+    var inspectorSnapshot: CorridorKeyAnalysisSnapshot {
+        let snapshotState: CorridorKeyAnalysisSnapshot.State
+        switch analysisStatus {
+        case .idle: snapshotState = .notAnalysed
+        case .running: snapshotState = .running
+        case .completed: snapshotState = .completed
+        case .failed, .cancelled: snapshotState = .interrupted
+        }
+        return CorridorKeyAnalysisSnapshot(
+            state: snapshotState,
+            analyzedFrameCount: matteCache.count,
+            totalFrameCount: clipInfo == nil ? 0 : totalFrames,
+            inferenceResolution: matteCache.values.first?.inferenceResolution ?? 0,
+            warmup: warmupStatus,
+            renderBackendDescription: renderBackendDescription,
+            hintPointCount: state.hintPointSet.points.count,
+            sourceWidth: clipInfo.map { Int($0.renderSize.width) },
+            sourceHeight: clipInfo.map { Int($0.renderSize.height) },
+            sourceFrameRate: clipInfo.flatMap { $0.kind == .video ? Double($0.nominalFrameRate) : nil }
+        )
+    }
+
     /// Same estimate as the analysis preflight and FxPlug inspector.
-    var videoMemoryDescription: String {
+    var videoMemoryEstimate: VideoMemoryEstimate {
         let longEdge = max(Int(clipInfo?.renderSize.width ?? 1920), Int(clipInfo?.renderSize.height ?? 1080))
         let resolution = state.qualityMode.resolvedInferenceResolution(forLongEdge: longEdge, deviceRegistryID: renderEngine.device.registryID)
         let frameCount = max(1, Int((clipInfo?.duration.seconds ?? 1) * Double(clipInfo?.nominalFrameRate ?? 1)))
-        return state.video.memoryDescription(resolution: resolution, frameCount: frameCount,
+        return state.video.memoryEstimate(resolution: resolution, frameCount: frameCount,
                                             deviceBudget: renderEngine.device.recommendedMaxWorkingSetSize)
     }
+
+    /// Short-form explanation for the Time Awareness controls.
+    var videoMemoryDescription: String { videoMemoryEstimate.summary }
 
     /// V2 settings affecting the model invalidate predictions; output controls reuse them.
     func videoParameterDidChange() {

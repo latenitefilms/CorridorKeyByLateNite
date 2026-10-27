@@ -44,7 +44,7 @@ public struct HintFrame: Hashable, Sendable, Codable {
 /// Identical guidance in the standalone and Final Cut Pro inspectors.
 public enum ManualHintGuidance {
     /// Describes the local influence and analysis workflow without promising tracking.
-    public static let explanation = "Apple Vision supplies the starting matte. Foreground selects a detected subject; mark more subjects to keep them too. Background removes a small area. Ignore (red cross) excludes a detected object, or removes a small area if no object is found. Ignore wins when the same object is also marked Foreground. Erase removes a point. Points apply only to the displayed frame and do not track; unmarked frames use Apple Vision. Choose Alpha Hint (Diagnostic) to inspect the guide, then Analyse Clip to update the result."
+    public static let explanation = "Apple Vision supplies the starting matte. Foreground selects a detected subject. Mark more subjects to keep them too. Background removes a small area. Ignore (red cross) excludes a detected object, or removes a small area if no object is found. Ignore wins when the same object is also marked Foreground. Erase removes a point. Points apply only to the displayed frame and do not track. Unmarked frames use Apple Vision. Choose Alpha Hint (Diagnostic) to inspect the guide, then Analyse Clip to update the result."
     /// Explains how to migrate annotations whose original frame was never recorded.
     public static let legacyExplanation = "Hints saved in earlier versions apply to every frame. Clear them and add new hints to make them frame-specific."
 }

@@ -49,7 +49,7 @@ public enum HintMode: Int, Sendable, CaseIterable, Codable {
     /// Shared label distinguishes an optional generated mask from an imported alpha hint.
     public static let controlName = "Generated Hint"
     /// Shared help for both hosts; imported masks take precedence over local guidance.
-    public static let explanation = "None lets CorridorKey find the subject itself. Chroma uses the screen colour; Apple Vision adds subject detection. Apple Vision + Manual Points uses detected subjects as a starting point: Foreground selects subjects, Background corrects small areas, and Ignore excludes detected objects. An enabled Alpha Hint file replaces generated hints and points."
+    public static let explanation = "None lets CorridorKey find the subject itself. Chroma uses the screen colour. Apple Vision adds subject detection. Apple Vision + Manual Points uses detected subjects as a starting point: Foreground selects subjects, Background corrects small areas, and Ignore excludes detected objects. An enabled Alpha Hint file replaces generated hints and points."
     /// Green/blue chroma prior computed by Metal, without a Vision request.
     case automatic = 0
     /// Unions Vision's foreground-instance mask with the chroma prior.

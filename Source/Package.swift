@@ -84,8 +84,10 @@ let package = Package(
                 "Inspector/CorridorKeyByLateNitePlugIn+CustomViews.swift",
                 "Inspector/CorridorKeyInspectorBridge.swift",
                 "Inspector/CorridorKeyHeaderView.swift",
+                "Inspector/InspectorComponents.swift",
                 "Inspector/AlphaHintPicker.swift",
                 "Inspector/CorridorKeyHintOSC.swift",
+                "Inspector/HeaderCustomParameterStorage.swift",
                 "Render",
                 "Metal",
                 "Resources",
@@ -105,6 +107,9 @@ let package = Package(
                 "Inference/VideoInferenceSettings.swift",
                 "Inspector/CorridorKeyAnalysisSnapshot.swift",
                 "Inspector/HintPointSet.swift",
+                "Inspector/HintHitTesting.swift",
+                "Inspector/OnScreenControlTool.swift",
+                "Inspector/CustomParameterValue.swift",
                 "Inspector/WarmupStatus.swift"
             ],
             swiftSettings: [
@@ -236,7 +241,7 @@ let package = Package(
             exclude: [
                 "BenchmarkRunner", "Benchmarks", "Configuration",
                 "CorridorKeyByLateNite.xcodeproj", "default.metallib",
-                "Tests/BenchmarkRunnerTests", "Tests/WrapperAppTests",
+                "Tests/BenchmarkRunnerTests", "Tests/WrapperAppTests", "Tests/FxPlugHostTests",
                 "Tests/CorridorKeyByLateNiteLogicTests", "Tests/CorridorKeyByLateNiteMetalStagesTests",
                 "CorridorKeyByLateNite/Plugin/Inference", "CorridorKeyByLateNite/Plugin/Inspector",
                 "CorridorKeyByLateNite/Plugin/Metal", "CorridorKeyByLateNite/Plugin/Parameters",

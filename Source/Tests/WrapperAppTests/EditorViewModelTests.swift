@@ -54,6 +54,32 @@ struct EditorViewModelTests {
         model.closeClip()
     }
 
+    @Test("Reset Analysis preserves settings and hints, and undo restores the analysed cache")
+    func resetAnalysisPreservesKeyingState() throws {
+        let model = EditorViewModel(renderEngine: try StandaloneRenderEngine())
+        model.state.alphaGamma = 1.4
+        model.state.hintPointSet.add(HintPoint(x: 0.4, y: 0.5, kind: .foreground))
+        let originalState = model.state
+        model.matteCache[0] = MatteCacheEntry(blob: Data([1]), width: 1, height: 1, inferenceResolution: 512)
+        model.analysisStatus = .completed(elapsedSeconds: 1, totalFrames: 1)
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        model.undoManager = undo
+
+        model.resetAnalysis()
+        #expect(model.state == originalState)
+        #expect(model.matteCache.isEmpty)
+        #expect(model.analysisStatus == .idle)
+        #expect(undo.undoActionName == "Reset Analysis")
+        undo.undo()
+        #expect(model.state == originalState)
+        #expect(model.matteCache.count == 1)
+        #expect(model.analysisStatus == .completed(elapsedSeconds: 1, totalFrames: 1))
+        undo.redo()
+        #expect(model.matteCache.isEmpty)
+        #expect(model.analysisStatus == .idle)
+    }
+
     @Test("Opening an empty standalone editor requests model warm-up before import")
     func editorLaunchWarmup() async throws {
         let model = EditorViewModel(renderEngine: try StandaloneRenderEngine())

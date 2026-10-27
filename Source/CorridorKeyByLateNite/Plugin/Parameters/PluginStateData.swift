@@ -42,17 +42,6 @@ struct PluginStateData: Codable, Equatable, Sendable {
     /// the three options (Automatic / Apple Vision / Manual).
     var hintMode: HintMode
 
-    /// Whether the on-screen subject marker should be drawn on the
-    /// canvas. Drawn as a small ring + crosshair the user can drag.
-    var showSubjectMarker: Bool
-
-    /// Object-normalised position (0…1) of the subject marker. The
-    /// OSC drags this; the inspector shows it as X/Y sliders. Used
-    /// as the central click-point for the diagnostic and reserved
-    /// for future SAM-style hint refinement.
-    var subjectPositionX: Double
-    var subjectPositionY: Double
-
     // Interior detail
     var sourcePassthroughEnabled: Bool
     var passthroughErodeNormalized: Double
@@ -126,9 +115,6 @@ struct PluginStateData: Codable, Equatable, Sendable {
         // Start with the v2 model prediction. Generated hints and additional
         // matte, edge, and temporal corrections are explicit creative choices.
         hintMode: HintMode = .none,
-        showSubjectMarker: Bool = false,
-        subjectPositionX: Double = 0.5,
-        subjectPositionY: Double = 0.5,
         // Source Passthrough is off by default in v1.0 because the
         // erode + blur it bakes into the matte's interior tends to
         // pull the green / blue screen colour back through translucent
@@ -175,9 +161,6 @@ struct PluginStateData: Codable, Equatable, Sendable {
         self.screenColor = screenColor
         self.qualityMode = qualityMode
         self.hintMode = hintMode
-        self.showSubjectMarker = showSubjectMarker
-        self.subjectPositionX = subjectPositionX
-        self.subjectPositionY = subjectPositionY
         self.sourcePassthroughEnabled = sourcePassthroughEnabled
         self.passthroughErodeNormalized = passthroughErodeNormalized
         self.passthroughBlurNormalized = passthroughBlurNormalized
@@ -219,9 +202,6 @@ struct PluginStateData: Codable, Equatable, Sendable {
         case screenColor
         case qualityMode
         case hintMode
-        case showSubjectMarker
-        case subjectPositionX
-        case subjectPositionY
         case sourcePassthroughEnabled
         case passthroughErodeNormalized
         case passthroughBlurNormalized
@@ -261,9 +241,6 @@ struct PluginStateData: Codable, Equatable, Sendable {
         self.screenColor = try container.decodeIfPresent(ScreenColor.self, forKey: .screenColor) ?? .automatic
         self.qualityMode = try container.decodeIfPresent(QualityMode.self, forKey: .qualityMode) ?? .automatic
         self.hintMode = try container.decodeIfPresent(HintMode.self, forKey: .hintMode) ?? .none
-        self.showSubjectMarker = try container.decodeIfPresent(Bool.self, forKey: .showSubjectMarker) ?? false
-        self.subjectPositionX = try container.decodeIfPresent(Double.self, forKey: .subjectPositionX) ?? 0.5
-        self.subjectPositionY = try container.decodeIfPresent(Double.self, forKey: .subjectPositionY) ?? 0.5
         // Decoder fallbacks must match the v1.0 product defaults (the
         // designated initialiser) so a saved plist that predates a key
         // is upgraded to the current default rather than silently
@@ -313,9 +290,6 @@ struct PluginStateData: Codable, Equatable, Sendable {
         try container.encode(screenColor, forKey: .screenColor)
         try container.encode(qualityMode, forKey: .qualityMode)
         try container.encode(hintMode, forKey: .hintMode)
-        try container.encode(showSubjectMarker, forKey: .showSubjectMarker)
-        try container.encode(subjectPositionX, forKey: .subjectPositionX)
-        try container.encode(subjectPositionY, forKey: .subjectPositionY)
         try container.encode(sourcePassthroughEnabled, forKey: .sourcePassthroughEnabled)
         try container.encode(passthroughErodeNormalized, forKey: .passthroughErodeNormalized)
         try container.encode(passthroughBlurNormalized, forKey: .passthroughBlurNormalized)

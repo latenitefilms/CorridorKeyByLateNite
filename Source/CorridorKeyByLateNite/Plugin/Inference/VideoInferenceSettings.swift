@@ -73,9 +73,13 @@ public struct VideoInferenceSettings: Codable, Equatable, Sendable {
 
     /// Shared inspector wording distinguishes estimated demand from device capacity.
     public func memoryDescription(resolution: Int, frameCount: Int, deviceBudget: UInt64) -> String {
-        let estimate = estimatedGPUBytes(resolution: resolution, frameCount: frameCount)
-        return "Estimated GPU memory: \(estimate.formatted(.byteCount(style: .memory))). Device budget: \(deviceBudget.formatted(.byteCount(style: .memory)))."
-            + (estimate > deviceBudget ? " Lower Time Awareness or Quality." : "")
+        memoryEstimate(resolution: resolution, frameCount: frameCount, deviceBudget: deviceBudget).summary
+    }
+
+    /// Structured diagnostics let each host lay out the values without parsing prose.
+    public func memoryEstimate(resolution: Int, frameCount: Int, deviceBudget: UInt64) -> VideoMemoryEstimate {
+        VideoMemoryEstimate(estimatedBytes: estimatedGPUBytes(resolution: resolution, frameCount: frameCount),
+                            deviceBudgetBytes: deviceBudget)
     }
 
     /// Rejects inconsistent hints before either host begins a costly analysis pass.
@@ -96,6 +100,29 @@ public struct VideoInferenceSettings: Codable, Equatable, Sendable {
                 }
             }
         }
+    }
+}
+
+/// Estimated GPU demand and the device's recommended working-set budget.
+public struct VideoMemoryEstimate: Equatable, Sendable {
+    /// Conservative estimate for the selected quality and temporal window.
+    public let estimatedBytes: UInt64
+    /// Recommended GPU working-set capacity, rather than currently free RAM.
+    public let deviceBudgetBytes: UInt64
+
+    /// Captures values measured for the same device and inference configuration.
+    public init(estimatedBytes: UInt64, deviceBudgetBytes: UInt64) {
+        self.estimatedBytes = estimatedBytes
+        self.deviceBudgetBytes = deviceBudgetBytes
+    }
+
+    /// Whether reducing quality or the temporal window is recommended.
+    public var exceedsDeviceBudget: Bool { estimatedBytes > deviceBudgetBytes }
+
+    /// Compact wording used outside the diagnostic rows.
+    public var summary: String {
+        "Estimated GPU memory: \(estimatedBytes.formatted(.byteCount(style: .memory))). Device budget: \(deviceBudgetBytes.formatted(.byteCount(style: .memory)))."
+            + (exceedsDeviceBudget ? " Lower Time Awareness or Quality." : "")
     }
 }
 
@@ -164,7 +191,7 @@ public enum VideoInferenceSettingsError: LocalizedError {
         case .singleHintNeedsTimeAwareness: "Single Frame alpha hints need Time Awareness to propagate through the clip."
         case .referenceOutsideClip: "Reference Frame must be a frame within this clip."
         case .staleHint: "The Alpha Hint file has moved or its permission has expired. Choose it again."
-        case .hintSequenceMismatch: "Choose a matching hint movie or image-sequence folder for All Frames, or one image for Single Frame. Movies must match the clip's duration and frame rate; sequences must match its frame count."
+        case .hintSequenceMismatch: "Choose a matching hint movie or image-sequence folder for All Frames, or one image for Single Frame. Movies must match the clip's duration and frame rate. Sequences must match its frame count."
         case .hintDimensionsMismatch: "The Alpha Hint dimensions must match the source clip."
         }
     }

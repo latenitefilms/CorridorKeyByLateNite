@@ -2,8 +2,8 @@
 //  CorridorKeyToolboxPlugIn+Parameters.swift
 //  CorridorKey by LateNite
 //
-//  Defines the entire inspector layout for the plug-in. Analyse / Reset /
-//  version live in the custom-UI header at the top, then the sliders match
+//  Defines the entire inspector layout for the plug-in. Branding sits above
+//  Controls and Analysis Details groups, then the sliders match
 //  the CorridorKey OFX panel so editors moving between Resolve and Final
 //  Cut Pro stay oriented. Enum and toggle controls are explicitly marked
 //  non-animatable — animating "Screen Colour" or "Output" flashes between
@@ -29,8 +29,11 @@ extension CorridorKeyToolboxPlugIn {
         }
 
         try addHeaderParameter(create: create)
+        addControlsGroup(create: create)
+        addAnalysisDetailsGroup(create: create)
         try addSettingsGroup(create: create)
         addAlphaHintGroup(create: create)
+        addManualHintGroup(create: create)
         addTimeAwarenessGroup(create: create)
         try addTemporalStabilityGroup(create: create)
         try addInteriorDetailGroup(create: create)
@@ -51,17 +54,10 @@ extension CorridorKeyToolboxPlugIn {
     @objc(classesForCustomParameterID:)
     func classes(forCustomParameterID parameterID: UInt32) -> Set<AnyHashable> {
         switch parameterID {
-        case ParameterIdentifier.headerSummary, ParameterIdentifier.alphaHintControls:
-            let classes: [AnyClass] = [
-                NSDictionary.self,
-                NSMutableDictionary.self,
-                NSString.self,
-                NSNumber.self,
-                NSData.self,
-                NSMutableData.self
-            ]
-            let set = NSSet(array: classes)
-            return (set as? Set<AnyHashable>) ?? []
+        case ParameterIdentifier.headerSummary, ParameterIdentifier.analysisControls,
+             ParameterIdentifier.analysisDetails, ParameterIdentifier.alphaHintControls,
+             ParameterIdentifier.manualHintControls:
+            return CustomParameterValue.allowedClassSet
         default:
             return []
         }
@@ -70,18 +66,49 @@ extension CorridorKeyToolboxPlugIn {
     // MARK: - Inspector header + hidden cache
 
     /// Custom-UI placeholder that `createViewForParameterID` swaps for the
-    /// SwiftUI header (icon, version, Analyse / Reset buttons, status).
+    /// SwiftUI branding header (icon and version). Its saved data stays here.
     private func addHeaderParameter(create: any FxParameterCreationAPI_v5) throws {
         create.addCustomParameter(
             withName: "",
             parameterID: ParameterIdentifier.headerSummary,
-            defaultValue: NSDictionary(),
+            defaultValue: CustomParameterValue.empty,
             parameterFlags: CorridorKeyParameterFlags.headerCustomUI.fxFlags
         )
     }
 
     // MARK: - Visible groups
 
+    /// Native host section keeps actions separate from the product identity.
+    private func addControlsGroup(create: any FxParameterCreationAPI_v5) {
+        create.startParameterSubGroup(
+            "Controls",
+            parameterID: ParameterIdentifier.controlsGroup,
+            parameterFlags: CorridorKeyParameterFlags.default.fxFlags
+        )
+        create.addCustomParameter(
+            withName: "",
+            parameterID: ParameterIdentifier.analysisControls,
+            defaultValue: CustomParameterValue.empty,
+            parameterFlags: CorridorKeyParameterFlags.headerCustomUI.fxFlags
+        )
+        create.endParameterSubGroup()
+    }
+
+    /// Diagnostics use a native section so editors can collapse them independently.
+    private func addAnalysisDetailsGroup(create: any FxParameterCreationAPI_v5) {
+        create.startParameterSubGroup(
+            "Analysis Details",
+            parameterID: ParameterIdentifier.analysisDetailsGroup,
+            parameterFlags: CorridorKeyParameterFlags.default.fxFlags
+        )
+        create.addCustomParameter(
+            withName: "",
+            parameterID: ParameterIdentifier.analysisDetails,
+            defaultValue: CustomParameterValue.empty,
+            parameterFlags: CorridorKeyParameterFlags.headerCustomUI.fxFlags
+        )
+        create.endParameterSubGroup()
+    }
 
     /// V2 controls use one set of labels and defaults in both hosts.
     private func addTimeAwarenessGroup(create: any FxParameterCreationAPI_v5) {
@@ -98,13 +125,23 @@ extension CorridorKeyToolboxPlugIn {
         let flags = CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         create.startParameterSubGroup("Alpha Hint", parameterID: ParameterIdentifier.alphaHintGroup, parameterFlags: CorridorKeyParameterFlags.default.fxFlags)
         create.addCustomParameter(withName: "", parameterID: ParameterIdentifier.alphaHintControls,
-                                  defaultValue: NSDictionary(),
+                                  defaultValue: CustomParameterValue.empty,
                                   parameterFlags: CorridorKeyParameterFlags.headerCustomUI.fxFlags)
         create.addToggleButton(withName: VideoInferenceSettings.Labels.useAlphaHint, parameterID: ParameterIdentifier.useAlphaHint, defaultValue: defaults.useAlphaHint, parameterFlags: flags)
         create.addPopupMenu(withName: VideoInferenceSettings.Labels.hintFrames, parameterID: ParameterIdentifier.hintFrames, defaultValue: UInt32(defaults.hintFrames.rawValue), menuEntries: AlphaHintFrames.allCases.map(\.displayName), parameterFlags: flags)
         create.addIntSlider(withName: VideoInferenceSettings.Labels.referenceFrame, parameterID: ParameterIdentifier.referenceFrame, defaultValue: 0, parameterMin: 0, parameterMax: Int32.max, sliderMin: 0, sliderMax: 1000, delta: 1, parameterFlags: flags)
         create.addFloatSlider(withName: VideoInferenceSettings.Labels.alphaHintStrength, parameterID: ParameterIdentifier.alphaHintStrength, defaultValue: defaults.alphaHintStrength, parameterMin: 0, parameterMax: 1, sliderMin: 0, sliderMax: 1, delta: 0.01, parameterFlags: flags)
         create.addFloatSlider(withName: VideoInferenceSettings.Labels.internalHintStrength, parameterID: ParameterIdentifier.internalHintStrength, defaultValue: defaults.internalHintStrength, parameterMin: 0, parameterMax: 1, sliderMin: 0, sliderMax: 1, delta: 0.01, parameterFlags: flags)
+        create.endParameterSubGroup()
+    }
+
+    /// Manual annotations have their own section, separate from imported masks.
+    private func addManualHintGroup(create: any FxParameterCreationAPI_v5) {
+        create.startParameterSubGroup("Manual Hint", parameterID: ParameterIdentifier.manualHintGroup,
+                                      parameterFlags: CorridorKeyParameterFlags.default.fxFlags)
+        create.addCustomParameter(withName: "", parameterID: ParameterIdentifier.manualHintControls,
+                                  defaultValue: CustomParameterValue.empty,
+                                  parameterFlags: CorridorKeyParameterFlags.headerCustomUI.fxFlags)
         create.endParameterSubGroup()
     }
 
@@ -164,28 +201,6 @@ extension CorridorKeyToolboxPlugIn {
         create.addToggleButton(withName: VideoInferenceSettings.Labels.inputIsLinear, parameterID: ParameterIdentifier.inputIsLinear, defaultValue: VideoInferenceSettings().inputIsLinear, parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags)
         create.addToggleButton(withName: VideoInferenceSettings.Labels.linearizeOutput, parameterID: ParameterIdentifier.linearizeOutput, defaultValue: VideoInferenceSettings().linearizeOutput, parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags)
         create.addToggleButton(withName: VideoInferenceSettings.Labels.keepOriginalInSolidAreas, parameterID: ParameterIdentifier.keepOriginalInSolidAreas, defaultValue: VideoInferenceSettings().keepOriginalInSolidAreas, parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags)
-
-        // Subject Marker: a draggable on-screen point that lets the
-        // user mark the centre of the foreground subject. Provides
-        // both a clear OSC affordance (the user can see where the
-        // marker is and drag it) and a stable Point parameter that
-        // FCP wires the OSC to natively. Defaults to centre (0.5,
-        // 0.5) in object-normalised coords. Hidden by default so
-        // the marker only appears when the user explicitly asks for
-        // the draggable on-canvas affordance.
-        create.addToggleButton(
-            withName: "Show Subject Marker",
-            parameterID: ParameterIdentifier.showSubjectMarker,
-            defaultValue: false,
-            parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
-        )
-        create.addPointParameter(
-            withName: "Subject Position",
-            parameterID: ParameterIdentifier.subjectPosition,
-            defaultX: 0.5,
-            defaultY: 0.5,
-            parameterFlags: CorridorKeyParameterFlags.default.fxFlags
-        )
 
         create.endParameterSubGroup()
     }
@@ -554,7 +569,6 @@ extension CorridorKeyToolboxPlugIn {
         let defaults = PluginStateData()
         let time = action.currentTime()
         let toggles: [(UInt32, Bool)] = [
-            (ParameterIdentifier.showSubjectMarker, defaults.showSubjectMarker),
             (ParameterIdentifier.sourcePassthrough, defaults.sourcePassthroughEnabled),
             (ParameterIdentifier.autoDespeckle, defaults.autoDespeckleEnabled),
             (ParameterIdentifier.lightWrapEnabled, defaults.lightWrapEnabled),
@@ -596,7 +610,7 @@ extension CorridorKeyToolboxPlugIn {
             (ParameterIdentifier.internalHintStrength, defaults.video.internalHintStrength)
         ]
         let identifiers = toggles.map(\.0) + integers.map(\.0) + scalars.map(\.0)
-            + [ParameterIdentifier.customScreenColor, ParameterIdentifier.subjectPosition]
+            + [ParameterIdentifier.customScreenColor]
         for identifier in identifiers {
             var channelCount: UInt = 0
             if let error = keyframes.channelCount(&channelCount, forParameter: UInt(identifier)) { throw error }
@@ -617,9 +631,8 @@ extension CorridorKeyToolboxPlugIn {
         }
         let color = defaults.video.customScreenColor
         guard setting.setRedValue(color.x, greenValue: color.y, blueValue: color.z, toParameter: ParameterIdentifier.customScreenColor, at: time),
-              setting.setXValue(defaults.subjectPositionX, yValue: defaults.subjectPositionY, toParameter: ParameterIdentifier.subjectPosition, at: time),
-              setting.setCustomParameterValue(NSDictionary(), toParameter: ParameterIdentifier.headerSummary, at: time) else {
-            throw Self.parameterResetError("Could not reset screen colour, subject position or saved hints.")
+              setting.setCustomParameterValue(CustomParameterValue.empty, toParameter: ParameterIdentifier.headerSummary, at: time) else {
+            throw Self.parameterResetError("Could not reset screen colour or saved hints.")
         }
         analysisSession.lock.lock()
         analysisSession.resetLocked()

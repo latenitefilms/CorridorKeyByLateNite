@@ -107,4 +107,28 @@ struct CorridorKeyAnalysisSnapshot: Equatable, Sendable {
             return false
         }
     }
+
+    /// Model loading and failures are visible even before analysis starts.
+    var neuralModelDescription: String {
+        switch warmup {
+        case .cold: "Not Loaded"
+        case .warming(let resolution): "Loading (\(resolution) px)…"
+        case .ready(let resolution): "Ready (\(resolution) px)"
+        case .failed(let message): "Failed: \(message)"
+        }
+    }
+
+    /// ETA uses the same duration formatting for every host, with no invented
+    /// estimate before enough frames have finished to measure throughput.
+    var remainingTimeDescription: String {
+        guard state == .running, let analysisETASeconds,
+              analysisETASeconds.isFinite, analysisETASeconds >= 0 else { return "—" }
+        return Duration.seconds(analysisETASeconds).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated))
+    }
+
+    /// Source dimensions are shown only when both axes are known.
+    var sourceResolutionDescription: String {
+        guard let sourceWidth, let sourceHeight else { return "—" }
+        return "\(sourceWidth) × \(sourceHeight)"
+    }
 }

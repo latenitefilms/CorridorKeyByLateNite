@@ -12,7 +12,7 @@ struct BatchExportSheet: View {
     var body: some View {
         VStack(alignment: .leading) {
             Text("Batch Export").font(.title2).bold()
-            Text("Each video is analysed and exported using the current keying settings. Shot-specific points and Alpha Hint files are excluded; Apple Vision + Manual Points uses Apple Vision. Existing files are kept.")
+            Text("Each video is analysed and exported using the current keying settings. Shot-specific points and Alpha Hint files are excluded. Apple Vision + Manual Points uses Apple Vision. Existing files are kept.")
                 .font(.callout).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             List {

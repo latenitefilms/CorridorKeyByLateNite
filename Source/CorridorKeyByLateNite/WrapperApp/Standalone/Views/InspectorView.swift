@@ -3,7 +3,7 @@
 //  CorridorKey by LateNite — Standalone Editor
 //
 //  Mirrors the Final Cut Pro inspector layout for the standalone
-//  editor: Settings → Alpha Hint → Time Awareness → Temporal Stability →
+//  editor: Controls → Analysis Details → Settings → Alpha Hint → Manual Hint → Time Awareness → Temporal Stability →
 //  Interior Detail → Matte → Edge & Spill → Edge Refinement. Each group is a sibling `View`
 //  struct so SwiftUI invalidates only the group whose data changed.
 //
@@ -21,11 +21,17 @@ struct InspectorView: View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 0) {
                 InspectorGroupSeparator(isFirst: true)
-                AnalysisStatusGroup(viewModel: viewModel)
+                CorridorKeyBrandingView()
+                InspectorGroupSeparator()
+                AnalysisControlsGroup(viewModel: viewModel)
+                InspectorGroupSeparator()
+                StandaloneAnalysisDetails(viewModel: viewModel)
                 InspectorGroupSeparator()
                 SettingsGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
                 VideoAlphaHintGroup(viewModel: viewModel)
+                InspectorGroupSeparator()
+                ManualHintGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
                 VideoTimeAwarenessGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
@@ -61,93 +67,39 @@ private struct InspectorGroupSeparator: View {
 
 // MARK: - Analyse / status group
 
-private struct AnalysisStatusGroup: View {
-    @Bindable var viewModel: EditorViewModel
+private struct AnalysisControlsGroup: View {
+    let viewModel: EditorViewModel
 
     var body: some View {
-        InspectorGroup(title: "Analysis") {
-            HStack(spacing: 8) {
-                Button("Analyse Clip", systemImage: "wand.and.stars", action: {
-                    viewModel.runAnalysis()
-                })
-                .buttonStyle(.borderedProminent)
-                .disabled(!viewModel.phase.isReady || viewModel.analysisStatus.inProgress)
-
+        InspectorGroup(title: "Controls") {
+            InspectorButtonRow {
+                Button("Analyse Clip", systemImage: "wand.and.stars", action: viewModel.runAnalysis)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!viewModel.phase.isReady || viewModel.analysisStatus.inProgress)
+                if viewModel.analysisStatus.inProgress {
+                    Button("Stop", systemImage: "stop.fill", action: viewModel.cancelAnalysis)
+                }
+            }
+            InspectorButtonRow {
                 Button("Reset All", systemImage: "arrow.counterclockwise", action: viewModel.resetAllParameters)
-                    .buttonStyle(.bordered)
                     .disabled(viewModel.analysisStatus.inProgress)
                     .help("Reset all keying parameters and subject hints to their factory defaults.")
-
-                if viewModel.analysisStatus.inProgress {
-                    Button("Stop", systemImage: "stop.fill") {
-                        viewModel.cancelAnalysis()
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                Spacer()
+                Button("Reset Analysis", systemImage: "trash", action: viewModel.resetAnalysis)
+                    .disabled(viewModel.analysisStatus.inProgress)
             }
+        }
+    }
+}
+
+/// The same visible diagnostic fields as the FxPlug inspector.
+private struct StandaloneAnalysisDetails: View {
+    let viewModel: EditorViewModel
+
+    var body: some View {
+        InspectorGroup(title: "Analysis Details") {
             AnalysisProgressLabel(status: viewModel.analysisStatus, totalFrames: viewModel.totalFrames)
-            HStack(spacing: 6) {
-                Image(systemName: warmupIconName)
-                    .foregroundStyle(warmupColor)
-                Text(warmupLabel)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            HStack(spacing: 6) {
-                Image(systemName: "info.circle")
-                    .foregroundStyle(.secondary)
-                Text("Backend: \(viewModel.renderBackendDescription)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            HStack(spacing: 6) {
-                Image(systemName: "square.stack.3d.up")
-                    .foregroundStyle(.secondary)
-                Text("Cached mattes: \(viewModel.matteCache.count) / \(viewModel.totalFrames)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            if let info = viewModel.clipInfo {
-                LabeledContent("Source Resolution", value: "\(Int(info.renderSize.width)) × \(Int(info.renderSize.height))")
-                    .font(.callout).foregroundStyle(.secondary)
-                if info.kind == .video {
-                    LabeledContent("Source Frame Rate", value: "\(Double(info.nominalFrameRate).formatted(.number.precision(.fractionLength(0...3))))fps")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-            }
-            Text(AnalysisDiskCache.storageExplanation)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var warmupIconName: String {
-        switch viewModel.warmupStatus {
-        case .cold: return "moon.zzz"
-        case .warming: return "clock"
-        case .ready: return "checkmark.circle.fill"
-        case .failed: return "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var warmupColor: Color {
-        switch viewModel.warmupStatus {
-        case .cold: return .secondary
-        case .warming: return .orange
-        case .ready: return .green
-        case .failed: return .red
-        }
-    }
-
-    private var warmupLabel: String {
-        switch viewModel.warmupStatus {
-        case .cold: return "Neural Model: Not Loaded"
-        case .warming(let resolution): return "Neural Model: Loading (\(resolution)px)…"
-        case .ready(let resolution): return "Neural Model: Ready (\(resolution)px)"
-        case .failed(let message): return "Neural Model Failed: \(message)"
+            AnalysisDetailsView(snapshot: viewModel.inspectorSnapshot,
+                                memoryEstimate: viewModel.videoMemoryEstimate, showsTiming: false)
         }
     }
 }
@@ -158,13 +110,13 @@ private struct AnalysisProgressLabel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ProgressView(value: progressValue)
+            if status.inProgress {
+                ProgressView(value: progressValue)
+            }
 
             switch status {
             case .idle:
-                Text("Press Analyse Clip to build the matte cache.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                AnalysisRequiredLabel()
             case .running(let processed, let total):
                 Text("Analysing frame \(processed) of \(total)…")
                     .font(.caption)
@@ -331,6 +283,29 @@ private struct VideoAlphaHintGroup: View {
     }
 }
 
+/// Mirrors the FxPlug Manual Hint section and shares the transport bar's selection.
+private struct ManualHintGroup: View {
+    @Bindable var viewModel: EditorViewModel
+
+    var body: some View {
+        InspectorGroup(title: "Manual Hint") {
+            SubjectHintToolMenu(
+                selection: $viewModel.oscTool,
+                clearCurrentFrame: viewModel.clearHintsOnCurrentFrame,
+                clearAllFrames: viewModel.clearAllHints,
+                hasCurrentFrameHints: !viewModel.currentFrameHints.isEmpty,
+                hasAnyHints: !viewModel.state.hintPointSet.isEmpty
+            )
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(viewModel.analysisStatus.inProgress || viewModel.state.video.useAlphaHint)
+            Text("Turn off Use Alpha Hint, then choose a tool from Subject and click in the viewer. Points apply to the current frame. Choose Analyse Clip to update the result.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
 private struct InteriorDetailGroup: View {
     @Bindable var viewModel: EditorViewModel
 
@@ -485,7 +460,7 @@ private struct TemporalStabilityGroup: View {
 
     var body: some View {
         InspectorGroup(title: "Temporal Stability") {
-            Text("Optional smoothing after the v2 key. It can soften detail or leave trails on moving edges. Start with it off; try Time Awareness first for flicker.")
+            Text("Optional smoothing after the v2 key. It can soften detail or leave trails on moving edges. Start with it off. Try Time Awareness first for flicker.")
                 .font(.caption).foregroundStyle(.secondary)
             ParameterToggle(
                 title: ParameterRanges.temporalStabilityName,

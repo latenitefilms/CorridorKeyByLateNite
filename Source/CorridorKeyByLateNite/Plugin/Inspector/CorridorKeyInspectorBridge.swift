@@ -61,7 +61,8 @@ final class CorridorKeyInspectorBridge {
     init(apiManager: any PROAPIAccessing, plugin: CorridorKeyToolboxPlugIn) {
         self.apiManager = apiManager
         self.plugin = plugin
-        refreshSnapshot()
+        // The view's observer performs the first read after host setup returns.
+        // Starting a custom-parameter action inside createView can deadlock FxPlug.
     }
 
     /// Whether saved hints predate per-frame annotations.
@@ -71,7 +72,13 @@ final class CorridorKeyInspectorBridge {
     /// Parameter-write failures remain visible rather than losing a file selection silently.
     private(set) var hintSelectionError: String?
     /// Estimate from the same preflight used by the standalone editor.
-    private(set) var videoMemoryDescription = ""
+    private(set) var videoMemoryEstimate: VideoMemoryEstimate?
+    /// Explicit tool selection is persisted on the same effect instance as its points.
+    private(set) var subjectTool: OnScreenControlTool = .disabled
+    /// External masks replace manual points, matching the standalone editor.
+    private(set) var usesAlphaHint = false
+    /// An unreadable value must never look like a successfully loaded empty hint set.
+    private(set) var hintStorageUnavailable = false
 
     /// Persists only the security-scoped asset; native parameters store its timing and strength.
     func saveAlphaHintAsset() {
@@ -113,6 +120,21 @@ final class CorridorKeyInspectorBridge {
 
     // MARK: - User actions
 
+    /// Changes the viewer click action in a host undo group, without changing the matte.
+    func selectSubjectTool(_ tool: OnScreenControlTool) {
+        guard let action = apiManager.api(for: (any FxCustomParameterActionAPI_v4).self) as? any FxCustomParameterActionAPI_v4 else { return }
+        action.startAction(self)
+        defer { action.endAction(self) }
+        guard HeaderCustomParameterStorage.setDictionary(
+            tool.parameterDictionary, for: HeaderStorageKey.subjectTool, using: apiManager
+        ) else {
+            hintSelectionError = "Final Cut Pro could not save the Subject tool. Choose Reset All or reapply the updated effect."
+            return
+        }
+        subjectTool = tool
+        hintSelectionError = nil
+    }
+
     /// Removes annotations on the playhead frame or throughout the clip.
     func clearHints(onCurrentFrame: Bool) {
         guard let action = apiManager.api(for: (any FxCustomParameterActionAPI_v4).self) as? any FxCustomParameterActionAPI_v4 else { return }
@@ -126,7 +148,11 @@ final class CorridorKeyInspectorBridge {
         } else {
             hints.clear()
         }
-        HeaderCustomParameterStorage.setDictionary(hints.asParameterDictionary(), for: HeaderStorageKey.subjectPoints, using: apiManager)
+        if HeaderCustomParameterStorage.setDictionary(hints.asParameterDictionary(), for: HeaderStorageKey.subjectPoints, using: apiManager) {
+            hintSelectionError = nil
+        } else {
+            hintSelectionError = "Final Cut Pro could not clear the hints. Choose Reset All or reapply the updated effect."
+        }
     }
 
     func triggerAnalysis() {
@@ -182,15 +208,24 @@ final class CorridorKeyInspectorBridge {
         actionAPI.startAction(self)
         defer { actionAPI.endAction(self) }
 
+        var hintPointCount = 0
         if let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6 {
-            hasLegacyHints = plugin?.loadHintPointSet(using: retrieval).hasLegacyPoints ?? false
-            if let video = plugin?.videoSettings(using: retrieval, at: actionAPI.currentTime()), let device = MTLCreateSystemDefaultDevice() {
+            let storage = HeaderCustomParameterStorage.storageDictionary(using: retrieval)
+            hintStorageUnavailable = storage.dictionary == nil
+            subjectTool = OnScreenControlTool(parameterDictionary: HeaderCustomParameterStorage.dictionaryValue(
+                for: HeaderStorageKey.subjectTool, using: retrieval, storage: storage
+            ))
+            let hints = plugin?.loadHintPointSet(using: retrieval, headerStorage: storage)
+            hasLegacyHints = hints?.hasLegacyPoints ?? false
+            hintPointCount = hints?.points.count ?? 0
+            if let video = plugin?.videoSettings(using: retrieval, at: actionAPI.currentTime(), headerStorage: storage), let device = MTLCreateSystemDefaultDevice() {
                 alphaHintAsset = video.alphaHintAsset
+                usesAlphaHint = video.useAlphaHint
                 var rawQuality: Int32 = 0
                 retrieval.getIntValue(&rawQuality, fromParameter: ParameterIdentifier.qualityMode, at: actionAPI.currentTime())
                 let quality = QualityMode(rawValue: Int(rawQuality)) ?? .automatic
                 let resolution = quality.resolvedInferenceResolution(forLongEdge: 1920, deviceRegistryID: device.registryID)
-                videoMemoryDescription = video.memoryDescription(resolution: resolution, frameCount: max(1, snapshot.totalFrameCount > 0 ? snapshot.totalFrameCount : video.timeAwareness.frameCount),
+                videoMemoryEstimate = video.memoryEstimate(resolution: resolution, frameCount: max(1, snapshot.totalFrameCount > 0 ? snapshot.totalFrameCount : video.timeAwareness.frameCount),
                                                                   deviceBudget: device.recommendedMaxWorkingSetSize)
             }
         }
@@ -224,6 +259,7 @@ final class CorridorKeyInspectorBridge {
             analysisETASeconds: eta,
             lastRenderMilliseconds: lastRenderForFooter,
             renderBackendDescription: backendDescription,
+            hintPointCount: hintPointCount,
             sourceWidth: sourceWidth > 0 ? Int(sourceWidth) : nil,
             sourceHeight: sourceHeight > 0 ? Int(sourceHeight) : nil,
             sourceFrameRate: sourceFrameRate
@@ -331,44 +367,5 @@ final class CorridorKeyInspectorBridge {
             return (0, 0, 0)
         }
         return (data.analyzedCount, data.frameCount, data.inferenceResolution)
-    }
-}
-
-/// Returns the wrapper app icon bundled alongside the FxPlug service. Walks
-/// up from the main bundle to find the owning `.app`, matching the lookup
-/// Final Cut Pro uses so we get the same artwork the Finder would show.
-@MainActor
-enum CorridorKeyInspectorAssets {
-    static func containingApplicationURL() -> URL? {
-        var current = Bundle.main.bundleURL
-        while current.path != "/" {
-            if current.pathExtension == "app" {
-                return current
-            }
-            current = current.deletingLastPathComponent()
-        }
-        return nil
-    }
-
-    static func containingApplicationBundle() -> Bundle? {
-        guard let url = containingApplicationURL() else { return nil }
-        return Bundle(url: url)
-    }
-
-    static func applicationIcon() -> NSImage {
-        if let url = containingApplicationURL() {
-            return NSWorkspace.shared.icon(forFile: url.path)
-        }
-        return NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
-    }
-
-    static func versionString() -> String {
-        let bundle = containingApplicationBundle() ?? .main
-        return (bundle.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0"
-    }
-
-    static func buildString() -> String {
-        let bundle = containingApplicationBundle() ?? .main
-        return (bundle.infoDictionary?["CFBundleVersion"] as? String) ?? "1"
     }
 }

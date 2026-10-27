@@ -11,63 +11,6 @@
 import Foundation
 import CoreMedia
 
-enum HeaderCustomParameterStorage {
-    /// A failed read is distinct from a successfully retrieved empty parameter.
-    /// Passing this value also prevents retrying failed IPC in each decoder.
-    struct Snapshot {
-        let dictionary: NSDictionary?
-    }
-
-    static func dictionaryValue(
-        for key: String,
-        using retrieval: any FxParameterRetrievalAPI_v6,
-        storage: Snapshot? = nil
-    ) -> NSDictionary? {
-        guard let storage = (storage ?? storageDictionary(using: retrieval)).dictionary else { return nil }
-        if let dictionary = storage[NSString(string: key)] as? NSDictionary {
-            return dictionary
-        }
-        return storage[key] as? NSDictionary
-    }
-
-    @discardableResult
-    static func setDictionary(
-        _ dictionary: NSDictionary,
-        for key: String,
-        using apiManager: any PROAPIAccessing
-    ) -> Bool {
-        guard let settingAPI = apiManager.api(for: (any FxParameterSettingAPI_v5).self) as? any FxParameterSettingAPI_v5 else {
-            return false
-        }
-
-        let storage = NSMutableDictionary()
-        if let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6 {
-            for (existingKey, existingValue) in storageDictionary(using: retrieval).dictionary ?? NSDictionary() {
-                storage[existingKey] = existingValue
-            }
-        }
-        storage[NSString(string: HeaderStorageKey.schemaVersion)] = NSNumber(value: 1)
-        storage[NSString(string: key)] = dictionary
-
-        let value = storage.copy() as? NSDictionary ?? NSDictionary()
-        return settingAPI.setCustomParameterValue(
-            value,
-            toParameter: ParameterIdentifier.headerSummary,
-            at: CMTime.zero
-        )
-    }
-
-    /// Read once per state capture, then share the immutable dictionary across decoders.
-    static func storageDictionary(using retrieval: any FxParameterRetrievalAPI_v6) -> Snapshot {
-        var rawValue: (any NSCopying & NSObjectProtocol & NSSecureCoding)?
-        let succeeded = retrieval.getCustomParameterValue(
-            &rawValue,
-            fromParameter: ParameterIdentifier.headerSummary,
-            at: CMTime.zero
-        )
-        return Snapshot(dictionary: succeeded ? rawValue as? NSDictionary ?? NSDictionary() : nil)
-    }
-}
 
 extension CorridorKeyToolboxPlugIn {
 
@@ -149,22 +92,6 @@ extension CorridorKeyToolboxPlugIn {
             time: renderTime,
             default: PluginStateData().hintMode
         )
-        state.showSubjectMarker = boolValue(
-            retrieval: retrieval,
-            parameterID: ParameterIdentifier.showSubjectMarker,
-            time: renderTime,
-            default: PluginStateData().showSubjectMarker
-        )
-        let (subjectX, subjectY) = pointValue(
-            retrieval: retrieval,
-            parameterID: ParameterIdentifier.subjectPosition,
-            time: renderTime,
-            defaultX: 0.5,
-            defaultY: 0.5
-        )
-        state.subjectPositionX = subjectX
-        state.subjectPositionY = subjectY
-
         // Interior. Defaults below mirror `PluginStateData()`'s
         // designated initialiser exactly so the FxPlug and the
         // Standalone Editor land on the same matte when nothing
@@ -384,22 +311,6 @@ extension CorridorKeyToolboxPlugIn {
         var value: ObjCBool = ObjCBool(defaultValue)
         retrieval.getBoolValue(&value, fromParameter: parameterID, at: time)
         return value.boolValue
-    }
-
-    /// Reads a 2D point parameter into an `(x, y)` tuple. FxPlug stores
-    /// point parameters in object-normalised (0…1) coordinates with the
-    /// y-axis pointing UP from the bottom-left.
-    private func pointValue(
-        retrieval: any FxParameterRetrievalAPI_v6,
-        parameterID: UInt32,
-        time: CMTime,
-        defaultX: Double,
-        defaultY: Double
-    ) -> (Double, Double) {
-        var x = defaultX
-        var y = defaultY
-        retrieval.getXValue(&x, yValue: &y, fromParameter: parameterID, at: time)
-        return (x, y)
     }
 
     /// Decodes the Subject Points payload stored inside the published header

@@ -4,6 +4,19 @@ import Testing
 
 @Suite("V2 video settings and temporal scheduling")
 struct VideoInferenceSettingsTests {
+    @Test("Diagnostic memory values match preflight and warn only above the device budget")
+    func structuredMemoryEstimate() {
+        let settings = VideoInferenceSettings()
+        let demand = settings.estimatedGPUBytes(resolution: 1024, frameCount: 24)
+        let withinBudget = settings.memoryEstimate(resolution: 1024, frameCount: 24, deviceBudget: demand)
+        #expect(withinBudget.estimatedBytes == demand)
+        #expect(withinBudget.deviceBudgetBytes == demand)
+        #expect(!withinBudget.exceedsDeviceBudget)
+        let overBudget = settings.memoryEstimate(resolution: 1024, frameCount: 24, deviceBudget: demand - 1)
+        #expect(overBudget.exceedsDeviceBudget)
+        #expect(overBudget.summary == settings.memoryDescription(resolution: 1024, frameCount: 24, deviceBudget: demand - 1))
+    }
+
     @Test("Short clips avoid oversized temporal profiles and memory estimates grow with demand")
     func memoryPreflight() {
         #expect(TimeAwareness.eighty.effectiveFrameCount(for: 1) == 1)
