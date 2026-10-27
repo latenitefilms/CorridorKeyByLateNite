@@ -23,6 +23,11 @@
 		A50100000000000000000001 /* InspectorComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50200000000000000000001 /* InspectorComponents.swift */; };
 		A50100000000000000000002 /* InspectorComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A50200000000000000000001 /* InspectorComponents.swift */; };
 		A60100000000000000000001 /* HintHitTesting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A60200000000000000000001 /* HintHitTesting.swift */; };
+		A70100000000000000000001 /* OnScreenControlTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000001 /* OnScreenControlTool.swift */; };
+		A70100000000000000000002 /* CustomParameterValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000002 /* CustomParameterValue.swift */; };
+		A70300000000000000000001 /* OnScreenControlTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000001 /* OnScreenControlTool.swift */; };
+		A70300000000000000000002 /* CustomParameterValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000002 /* CustomParameterValue.swift */; };
+		A80100000000000000000001 /* HeaderCustomParameterStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80200000000000000000001 /* HeaderCustomParameterStorage.swift */; };
 		AD0100000000000000000001 /* AnalysisDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0200000000000000000001 /* AnalysisDiskCache.swift */; };
 		AD0100000000000000000002 /* AnalysisDiskCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD0200000000000000000001 /* AnalysisDiskCache.swift */; };
 		AF0100000000000000000001 /* AnalysisFrameCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF0200000000000000000001 /* AnalysisFrameCodec.swift */; };
@@ -153,11 +158,6 @@
 		WB0000000000000000000005 /* StandaloneRenderEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000005 /* StandaloneRenderEngineTests.swift */; };
 		WB0000000000000000000006 /* AnalysisAndExportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000006 /* AnalysisAndExportTests.swift */; };
 		WB0000000000000000000007 /* EditorViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = WR0000000000000000000007 /* EditorViewModelTests.swift */; };
-		A70100000000000000000001 /* OnScreenControlTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000001 /* OnScreenControlTool.swift */; };
-		A70300000000000000000001 /* OnScreenControlTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000001 /* OnScreenControlTool.swift */; };
-		A70100000000000000000002 /* CustomParameterValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000002 /* CustomParameterValue.swift */; };
-		A70300000000000000000002 /* CustomParameterValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70200000000000000000002 /* CustomParameterValue.swift */; };
-		A80100000000000000000001 /* HeaderCustomParameterStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80200000000000000000001 /* HeaderCustomParameterStorage.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -214,6 +214,9 @@
 		A40200000000000000000001 /* AlphaHintPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AlphaHintPicker.swift; path = CorridorKeyByLateNite/Plugin/Inspector/AlphaHintPicker.swift; sourceTree = "<group>"; };
 		A50200000000000000000001 /* InspectorComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = InspectorComponents.swift; path = CorridorKeyByLateNite/Plugin/Inspector/InspectorComponents.swift; sourceTree = "<group>"; };
 		A60200000000000000000001 /* HintHitTesting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HintHitTesting.swift; path = CorridorKeyByLateNite/Plugin/Inspector/HintHitTesting.swift; sourceTree = "<group>"; };
+		A70200000000000000000001 /* OnScreenControlTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnScreenControlTool.swift; path = CorridorKeyByLateNite/Plugin/Inspector/OnScreenControlTool.swift; sourceTree = "<group>"; };
+		A70200000000000000000002 /* CustomParameterValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CustomParameterValue.swift; path = CorridorKeyByLateNite/Plugin/Inspector/CustomParameterValue.swift; sourceTree = "<group>"; };
+		A80200000000000000000001 /* HeaderCustomParameterStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HeaderCustomParameterStorage.swift; path = CorridorKeyByLateNite/Plugin/Inspector/HeaderCustomParameterStorage.swift; sourceTree = "<group>"; };
 		AD0200000000000000000001 /* AnalysisDiskCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisDiskCache.swift; path = CorridorKeyByLateNite/Plugin/Inference/AnalysisDiskCache.swift; sourceTree = "<group>"; };
 		AF0200000000000000000001 /* AnalysisFrameCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisFrameCodec.swift; path = CorridorKeyByLateNite/Plugin/Inference/AnalysisFrameCodec.swift; sourceTree = "<group>"; };
 		BE0200000000000000000001 /* BatchExportRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = BatchExportRunner.swift; path = CorridorKeyByLateNite/WrapperApp/Standalone/Engine/BatchExportRunner.swift; sourceTree = "<group>"; };
@@ -318,9 +321,6 @@
 		WR0000000000000000000006 /* AnalysisAndExportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AnalysisAndExportTests.swift; path = Tests/WrapperAppTests/AnalysisAndExportTests.swift; sourceTree = "<group>"; };
 		WR0000000000000000000007 /* EditorViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = EditorViewModelTests.swift; path = Tests/WrapperAppTests/EditorViewModelTests.swift; sourceTree = "<group>"; };
 		WT0300000000000000000001 /* WrapperAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = WrapperAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		A70200000000000000000001 /* OnScreenControlTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnScreenControlTool.swift; path = CorridorKeyByLateNite/Plugin/Inspector/OnScreenControlTool.swift; sourceTree = "<group>"; };
-		A70200000000000000000002 /* CustomParameterValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CustomParameterValue.swift; path = CorridorKeyByLateNite/Plugin/Inspector/CustomParameterValue.swift; sourceTree = "<group>"; };
-		A80200000000000000000001 /* HeaderCustomParameterStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = HeaderCustomParameterStorage.swift; path = CorridorKeyByLateNite/Plugin/Inspector/HeaderCustomParameterStorage.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -385,7 +385,6 @@
 				22D0980D2F988FB70096E749 /* Motion Template */,
 				CK0A00000000000000000010 /* Configuration */,
 				CK0A00000000000000000002 /* CorridorKeyByLateNite */,
-				CK0A00000000000000000008 /* Frameworks */,
 				WT0A00000000000000000001 /* WrapperAppTests */,
 				CK0A00000000000000000009 /* Products */,
 			);
@@ -642,6 +641,7 @@
 				WR0000000000000000000006 /* AnalysisAndExportTests.swift */,
 				WR0000000000000000000007 /* EditorViewModelTests.swift */,
 				BE0200000000000000000004 /* Tests/WrapperAppTests/EditorWorkflowRegressionTests.swift */,
+				CK0A00000000000000000008 /* Frameworks */,
 			);
 			name = WrapperAppTests;
 			sourceTree = "<group>";
