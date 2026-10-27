@@ -31,6 +31,11 @@ enum RealClipFixture {
         locate(relativePath: "LLM Resources/Benchmark/NikoDruid/Niko - 4 frames.mov", from: file)
     }
 
+    /// Blue-screen counterpart for verifying the unified v2 model in both hosts.
+    static func blueFourFrameClipURL(file: StaticString = #filePath) -> URL? {
+        locate(relativePath: "LLM Resources/Benchmark/Blue Screen/Blue Screen - 4 Frames.mov", from: file)
+    }
+
     private static func locate(relativePath: String, from file: StaticString) -> URL? {
         let here = URL(fileURLWithPath: String(describing: file))
         var search = here.deletingLastPathComponent()

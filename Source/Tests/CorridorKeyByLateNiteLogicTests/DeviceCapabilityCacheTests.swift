@@ -15,6 +15,19 @@ import Testing
 @Suite("DeviceCapabilityCache")
 struct DeviceCapabilityCacheTests {
 
+    @Test("V1 latency samples cannot lift v2 quality recommendations")
+    func previousModelTimingsAreIgnored() throws {
+        let suiteName = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(["42.2048": [10.0]], forKey: "com.corridor.keytoolbox.deviceCapabilityCache")
+        let cache = DeviceCapabilityCache(userDefaultsForTesting: defaults)
+        #expect(cache.medianMilliseconds(deviceRegistryID: 42, rung: 2048) == nil)
+        defaults.set(["42.2048": [500.0]], forKey: "com.corridor.keytoolbox.deviceCapabilityCache.v2")
+        let restored = DeviceCapabilityCache(userDefaultsForTesting: defaults)
+        #expect(restored.medianMilliseconds(deviceRegistryID: 42, rung: 2048) == 500)
+    }
+
     /// Builds a cache backed by an ephemeral `UserDefaults` suite. The
     /// suite is removed in `Suite.tearDown` semantics — Swift Testing
     /// doesn't have an explicit tear-down hook, but `removeSuite` clears

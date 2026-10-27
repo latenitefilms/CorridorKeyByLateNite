@@ -147,6 +147,9 @@ struct CKAlphaEdgeParams {
 
 struct CKComposeParams {
     var outputMode: Int32
+    var inputIsLinear: Int32 = 0
+    var linearizeOutput: Int32 = 0
+    var keepOriginalInSolidAreas: Int32 = 0
 }
 
 struct CKNormalizeParams {
@@ -208,6 +211,7 @@ struct CKForegroundPostProcessParams {
     var lightWrapEnabled: Int32
     var edgeDecontaminateEnabled: Int32
     var applyInverseRotation: Int32
+    var keepOriginalInSolidAreas: Int32
 }
 
 struct CKTemporalBlendParams {

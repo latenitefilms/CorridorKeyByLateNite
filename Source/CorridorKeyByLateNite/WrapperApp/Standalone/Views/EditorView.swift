@@ -21,10 +21,12 @@ struct EditorView: View {
     @State private var viewModel: EditorViewModel
     @State private var isImporting = false
     @State private var isExporting = false
+    @State private var isBatchExporting = false
     @State private var loadFailureMessage: String?
     @State private var isDropTargeted = false
     @State private var isImportingBackdropImage = false
     @State private var backdropImportError: String?
+    @FocusState private var previewHasFocus: Bool
     /// SwiftUI hands us the hosting `NSWindow`'s `UndoManager` here.
     /// The editor pipes it into `EditorViewModel` so hint-point
     /// edits register undo/redo against the manager Cmd-Z is
@@ -47,28 +49,53 @@ struct EditorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            previewArea
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Keep the focus target alive as the viewer changes from empty
+            // to loading to ready, so focus cannot fall into the inspector.
+            ZStack {
+                previewArea
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .focusable(interactions: .edit)
+            .focusEffectDisabled()
+            .focused($previewHasFocus)
 
             Divider()
 
             TransportBar(
                 viewModel: viewModel,
                 onImport: { isImporting = true },
+                onBatchImport: presentBatchExport,
                 onClose: viewModel.closeClip,
                 onExport: { isExporting = true },
                 onPickBackdropImage: { isImportingBackdropImage = true }
             )
         }
         .navigationTitle(toolbarTitle)
+        .focusedSceneValue(viewModel)
+        .onKeyPress(.space, phases: [.down, .repeat]) { press in
+            guard viewModel.phase.isReady, !viewModel.isStillImage,
+                  !isImporting, !isExporting, !isBatchExporting, !isImportingBackdropImage,
+                  press.modifiers.isEmpty else { return .ignored }
+            if press.phase == .down { viewModel.togglePlayback() }
+            return .handled
+        }
+        .onAppear { viewModel.prepareModelForEditor() }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !viewModel.batchExport.isRunning, !urls.isEmpty else { return false }
+            handleImportedURLs(urls)
+            return true
+        } isTargeted: { isDropTargeted = $0 }
         .inspector(isPresented: .constant(true)) {
             InspectorView(viewModel: viewModel)
                 .inspectorColumnWidth(min: 300, ideal: 340, max: 400)
         }
+        // Include both panes in the default-focus region. Keep automatic
+        // priority so deliberate navigation to an inspector field still works.
+        .defaultFocus($previewHasFocus, true)
         .fileImporter(
             isPresented: $isImporting,
-            allowedContentTypes: [.movie, .video, .quickTimeMovie, .mpeg4Movie],
-            allowsMultipleSelection: false
+            allowedContentTypes: MediaSourceLoader.supportedContentTypes,
+            allowsMultipleSelection: true
         ) { result in
             handleImportResult(result)
         }
@@ -77,7 +104,13 @@ struct EditorView: View {
                 isExporting = false
             }
         }
-        .onChange(of: viewModel.phase) { _, phase in
+        .sheet(isPresented: $isBatchExporting) {
+            BatchExportSheet(model: viewModel.batchExport, state: viewModel.state)
+        }
+        .onChange(of: viewModel.phase) { previousPhase, phase in
+            if case .loadingClip = previousPhase, case .ready = phase {
+                previewHasFocus = true
+            }
             if case .loadFailed(let message) = phase {
                 loadFailureMessage = message
             }
@@ -89,7 +122,7 @@ struct EditorView: View {
             viewModel.cancelWorkForEditorShutdown()
         }
         .alert(
-            "Couldn't load clip",
+            "Couldn't load media",
             isPresented: Binding(
                 get: { loadFailureMessage != nil },
                 set: { if !$0 { loadFailureMessage = nil } }
@@ -109,8 +142,7 @@ struct EditorView: View {
         case .noClipLoaded:
             EditorEmptyState(
                 isDropTargeted: $isDropTargeted,
-                onPickFile: { isImporting = true },
-                onDrop: handleDrop(providers:)
+                onPickFile: { isImporting = true }
             )
         case .loadingClip(let url):
             VStack(spacing: 12) {
@@ -178,7 +210,7 @@ struct EditorView: View {
         case .ready:
             guard let url = viewModel.clipInfo?.url else { return "CorridorKey by LateNite" }
             return url.deletingPathExtension().lastPathComponent
-        case .loadFailed: return "Couldn't load clip"
+        case .loadFailed: return "Couldn't load media"
         }
     }
 
@@ -187,26 +219,29 @@ struct EditorView: View {
     private func handleImportResult(_ result: Result<[URL], any Error>) {
         switch result {
         case .success(let urls):
-            guard let url = urls.first else { return }
-            loadClip(at: url)
+            handleImportedURLs(urls)
         case .failure(let error):
             loadFailureMessage = error.localizedDescription
         }
     }
 
-    private func handleDrop(providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
-        _ = provider.loadObject(ofClass: URL.self) { url, _ in
-            guard let url else { return }
-            // The provider callback fires off the main actor; bounce
-            // back via structured concurrency rather than GCD so the
-            // task is cancellable alongside the rest of the editor's
-            // in-flight work.
-            Task { @MainActor in
-                self.loadClip(at: url)
-            }
+    private func handleImportedURLs(_ urls: [URL]) {
+        if urls.count > 1 {
+            viewModel.batchExport.add(urls)
+            presentBatchExport()
+        } else if let url = urls.first {
+            loadClip(at: url)
         }
-        return true
+    }
+
+    private func presentBatchExport() {
+        Task {
+            viewModel.cancelAnalysis()
+            viewModel.cancelExport()
+            for task in viewModel.cancelWorkForEditorShutdown() { await task.value }
+            if case .loadingClip = viewModel.phase { viewModel.closeClip() }
+            isBatchExporting = true
+        }
     }
 
     private func loadClip(at url: URL) {
@@ -238,23 +273,22 @@ struct EditorView: View {
 private struct EditorEmptyState: View {
     @Binding var isDropTargeted: Bool
     let onPickFile: () -> Void
-    let onDrop: ([NSItemProvider]) -> Bool
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             VStack(spacing: 18) {
-                Image(systemName: "film.stack")
+                Image(systemName: "photo.on.rectangle")
                     .font(.system(size: 64, weight: .light))
                     .foregroundStyle(.secondary)
-                Text("Drop a clip here, or import one to begin.")
+                Text("Drop a video or still image to begin. Drop multiple videos to batch export.")
                     .font(.title3)
                     .foregroundStyle(.secondary)
-                Text("Final Cut Pro–quality keying without leaving this app.\nSupports H.264, HEVC, ProRes, and more.")
+                Text("Supports ProRes, HEVC, H.264, PNG, TIFF, JPEG, HEIC, and more.")
                     .multilineTextAlignment(.center)
                     .font(.callout)
                     .foregroundStyle(.tertiary)
-                Button("Import Clip…", systemImage: "square.and.arrow.down", action: onPickFile)
+                Button("Import Media…", systemImage: "square.and.arrow.down", action: onPickFile)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .padding(.top, 8)
@@ -270,6 +304,5 @@ private struct EditorEmptyState: View {
                     .padding(28)
             )
         }
-        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted, perform: onDrop)
     }
 }

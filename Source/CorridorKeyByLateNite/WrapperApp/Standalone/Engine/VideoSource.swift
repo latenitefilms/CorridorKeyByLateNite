@@ -7,7 +7,7 @@
 //  * Inspect the clip's natural size, frame rate, duration, and
 //    transform (used to build the right preview / output dimensions).
 //  * Pull a specific frame into a Metal-compatible `CVPixelBuffer` via
-//    `AVAssetImageGenerator` (used for scrubbing and analyse).
+//    the same `AVAssetReader` decode path used for analysis and export.
 //  * Stream every frame in display order via an `AsyncThrowingStream`
 //    of `(presentationTime, pixelBuffer)` (used for the export pass).
 //
@@ -23,44 +23,6 @@ import AVFoundation
 import CoreImage
 import CoreVideo
 import CoreMedia
-
-/// Static information about a video clip — the bits the standalone
-/// editor needs to render the correct preview and lay out the timeline.
-struct VideoSourceInfo: Sendable {
-    let url: URL
-    /// Source-pixel resolution after applying any `preferredTransform`
-    /// rotation. The renderer always sees the clip the right way up.
-    let renderSize: CGSize
-    /// Display frame rate. Used to drive the transport and to sample
-    /// frames at the natural interval during analyse / export.
-    let nominalFrameRate: Float
-    /// Total clip duration. Cached so the UI does not have to wait
-    /// on `AVAsset.load(.duration)` per frame.
-    let duration: CMTime
-    /// Native pixel format of the source track's first sample. Used to
-    /// pick a matching destination pixel format on export — e.g. emit
-    /// ProRes 4444 at 16 bpc when the source is HDR / float.
-    let nativePixelFormat: OSType
-    /// Time scale of the source track. Used to build CMTimes that align
-    /// to the source frame grid (so scrubbing snaps to whole frames).
-    let timescale: CMTimeScale
-    /// AV Foundation track identifier for the video. Cached so
-    /// downstream readers reference the same track.
-    let videoTrackID: CMPersistentTrackID
-    /// Preferred transform of the source track (rotation matrix).
-    /// Applied automatically by `AVAssetImageGenerator` and the export
-    /// reader when `appliesPreferredTrackTransform` is true.
-    let preferredTransform: CGAffineTransform
-    /// Source colour-space metadata read from the track's format
-    /// description. `nil` when the source omits the extension (most
-    /// SDR Rec.709 clips do — the exporter falls back to BT.709 in
-    /// that case). When present these fields are passed through
-    /// verbatim to the export writer so HDR / wide-gamut sources
-    /// keep their tags rather than being silently re-tagged BT.709.
-    let colorPrimaries: String?
-    let transferFunction: String?
-    let yCbCrMatrix: String?
-}
 
 enum VideoSourceError: Error, CustomStringConvertible {
     case noVideoTrack(URL)
@@ -108,9 +70,9 @@ enum VideoSourceError: Error, CustomStringConvertible {
 /// `movies.read-write` entitlement) return `false` from
 /// `startAccessing…`; we still record that and skip the matching
 /// `stop…` call so we never unbalance the access count.
-final class VideoSource: @unchecked Sendable {
+final class VideoSource: EditorMediaSource, @unchecked Sendable {
 
-    let info: VideoSourceInfo
+    let info: MediaSourceInfo
     private let asset: AVURLAsset
     private let url: URL
     private let didStartAccessing: Bool
@@ -154,7 +116,7 @@ final class VideoSource: @unchecked Sendable {
     private static func loadInfo(
         for asset: AVURLAsset,
         url: URL
-    ) async throws -> VideoSourceInfo {
+    ) async throws -> MediaSourceInfo {
         let tracks = try await asset.loadTracks(withMediaType: .video)
         guard let videoTrack = tracks.first else {
             throw VideoSourceError.noVideoTrack(url)
@@ -177,10 +139,10 @@ final class VideoSource: @unchecked Sendable {
         let trackID = videoTrack.trackID
 
         // Apply the preferred transform to natural size so renderSize
-        // already accounts for portrait clips. AVAssetImageGenerator and
-        // AVAssetReader (with appliesPreferredTrackTransform = true)
-        // both rotate frames in flight; lining renderSize up with that
-        // means the renderer always sees the clip right-way-up.
+        // already accounts for portrait clips. VideoFrameReader applies
+        // this transform after decoding for both scrubbing and streaming,
+        // so the reported dimensions and decoded pixel buffers agree.
+        // The renderer always receives the clip in display orientation.
         let rotated = naturalSize.applying(preferredTransform)
         let renderSize = CGSize(width: abs(rotated.width), height: abs(rotated.height))
 
@@ -203,7 +165,7 @@ final class VideoSource: @unchecked Sendable {
             nativePixelFormat = kCVPixelFormatType_64RGBAHalf
         }
 
-        return VideoSourceInfo(
+        return MediaSourceInfo(
             url: url,
             renderSize: renderSize,
             nominalFrameRate: nominalFrameRate,
@@ -234,74 +196,24 @@ final class VideoSource: @unchecked Sendable {
         return (primaries, transfer, matrix)
     }
 
-    /// Snaps `time` to the nearest source frame and clamps to the
-    /// last valid frame index. The asset's duration is one frame
-    /// past the last frame's presentation time (because each frame
-    /// covers one frame-duration interval), so a naïve nearest-
-    /// frame mapping at `duration` would return frame N for an
-    /// N-frame clip and surface as "5/4 f" in the transport bar.
-    /// Capping to `totalFrameCount() - 1` here keeps every
-    /// downstream display lined up with the actual frame range.
-    func nearestFrameTime(to time: CMTime) -> CMTime {
-        let fps = max(Double(info.nominalFrameRate), 0.001)
-        let lastFrameIndex = max(0, totalFrameCount() - 1)
-        let rawFrameIndex = (time.seconds * fps).rounded()
-        let clampedFrameIndex = max(0, min(Double(lastFrameIndex), rawFrameIndex))
-        return CMTime(seconds: clampedFrameIndex / fps, preferredTimescale: info.timescale)
-    }
-
-    /// Returns the total whole-frame count in the clip. The transport
-    /// uses this to size the scrubber.
-    func totalFrameCount() -> Int {
-        let fps = Double(info.nominalFrameRate)
-        guard fps > 0 else { return 1 }
-        return max(1, Int((info.duration.seconds * fps).rounded()))
-    }
-
     /// Pulls a single frame at `time` as a Metal-compatible
     /// `CVPixelBuffer`. Used to drive the preview while the user is
     /// scrubbing or analysing — both want random access.
     ///
     /// `preferredPixelFormat` controls the requested decode format. The
     /// renderer is happy with RGBA16Float (default) or BGRA8Unorm; the
-    /// generator may downgrade if the source can't produce the
+    /// reader may downgrade if the source can't produce the
     /// requested format.
     func makeFrame(
         atTime time: CMTime,
         preferredPixelFormat: OSType = kCVPixelFormatType_64RGBAHalf
     ) async throws -> CVPixelBuffer {
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
-        generator.maximumSize = info.renderSize
-
-        // Image generation in the Cocoa-friendly API only emits CGImage,
-        // which requires a CPU detour. We request a CVPixelBuffer
-        // directly via the lower-level callback API for zero-copy
-        // hand-off to Metal.
-        return try await withCheckedThrowingContinuation { continuation in
-            generator.generateCGImageAsynchronously(for: time) { cgImage, _, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                guard let cgImage else {
-                    continuation.resume(throwing: VideoSourceError.pixelBufferUnavailable)
-                    return
-                }
-                do {
-                    let pixelBuffer = try Self.makePixelBuffer(
-                        from: cgImage,
-                        size: self.info.renderSize,
-                        pixelFormat: preferredPixelFormat
-                    )
-                    continuation.resume(returning: pixelBuffer)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        try Task.checkCancellation()
+        let reader = try await makeFrameReader(startTime: time, preferredPixelFormat: preferredPixelFormat)
+        defer { reader.cancel() }
+        try Task.checkCancellation()
+        guard let frame = try reader.nextFrame() else { throw VideoSourceError.pixelBufferUnavailable }
+        return frame.pixelBuffer
     }
 
     /// Builds an `AVAssetReader` that streams every frame of the clip
@@ -312,7 +224,7 @@ final class VideoSource: @unchecked Sendable {
     func makeFrameReader(
         startTime: CMTime = .zero,
         preferredPixelFormat: OSType = kCVPixelFormatType_64RGBAHalf
-    ) async throws -> VideoFrameReader {
+    ) async throws -> any MediaFrameReader {
         let reader: AVAssetReader
         do {
             reader = try AVAssetReader(asset: asset)
@@ -340,6 +252,7 @@ final class VideoSource: @unchecked Sendable {
             throw VideoSourceError.readerOutputUnavailable
         }
         reader.add(output)
+        try Task.checkCancellation()
         guard reader.startReading() else {
             throw VideoSourceError.readerSetupFailed(
                 reader.error ?? VideoSourceError.readerOutputUnavailable
@@ -352,47 +265,16 @@ final class VideoSource: @unchecked Sendable {
         )
     }
 
-    // MARK: - Helpers
-
-    private static func makePixelBuffer(
-        from cgImage: CGImage,
-        size: CGSize,
-        pixelFormat: OSType
-    ) throws -> CVPixelBuffer {
-        let width = Int(size.width.rounded())
-        let height = Int(size.height.rounded())
-        let pixelBuffer = try PixelBufferTextureBridge.makeMetalCompatiblePixelBuffer(
-            width: width,
-            height: height,
-            pixelFormat: pixelFormat
-        )
-        // Render the CGImage into the buffer via Core Image so we get
-        // colour-managed wide-gamut conversion for free. Core Image
-        // picks the right colour space based on the buffer's IOSurface
-        // metadata; we leave that nil so the system default applies.
-        let context = CIContext(options: [.useSoftwareRenderer: false])
-        let inputImage = CIImage(cgImage: cgImage)
-        let scale = CGAffineTransform(
-            scaleX: CGFloat(width) / inputImage.extent.width,
-            y: CGFloat(height) / inputImage.extent.height
-        )
-        context.render(
-            inputImage.transformed(by: scale),
-            to: pixelBuffer,
-            bounds: CGRect(x: 0, y: 0, width: width, height: height),
-            colorSpace: CGColorSpace(name: CGColorSpace.extendedSRGB)
-        )
-        return pixelBuffer
-    }
 }
 
 /// Wraps an `AVAssetReader` plus its track output so callers don't
 /// have to juggle the pair. Used by the export pass to pull frames in
 /// display order.
-final class VideoFrameReader: @unchecked Sendable {
+final class VideoFrameReader: MediaFrameReader, @unchecked Sendable {
     private let reader: AVAssetReader
     private let output: AVAssetReaderTrackOutput
     let preferredTransform: CGAffineTransform
+    private let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
 
     init(
         reader: AVAssetReader,
@@ -421,10 +303,22 @@ final class VideoFrameReader: @unchecked Sendable {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sample) else {
             throw VideoSourceError.pixelBufferUnavailable
         }
+        let orientedBuffer: CVPixelBuffer
+        if preferredTransform.isIdentity {
+            orientedBuffer = pixelBuffer
+        } else {
+            let image = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: NSNull()]).transformed(by: preferredTransform)
+            let extent = image.extent.integral
+            orientedBuffer = try PixelBufferTextureBridge.makeMetalCompatiblePixelBuffer(
+                width: Int(extent.width), height: Int(extent.height), pixelFormat: CVPixelBufferGetPixelFormatType(pixelBuffer))
+            let positioned = image.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
+            context.render(positioned, to: orientedBuffer, bounds: positioned.extent, colorSpace: nil)
+            CVBufferPropagateAttachments(pixelBuffer, orientedBuffer)
+        }
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sample)
         let duration = CMSampleBufferGetDuration(sample)
         return ReaderFrame(
-            pixelBuffer: pixelBuffer,
+            pixelBuffer: orientedBuffer,
             presentationTime: presentationTime,
             duration: duration
         )
@@ -442,4 +336,46 @@ struct ReaderFrame: @unchecked Sendable {
     let pixelBuffer: CVPixelBuffer
     let presentationTime: CMTime
     let duration: CMTime
+}
+
+/// Owns one sequential decoder per playback traversal. Blocking sample reads
+/// stay off the main actor; seeks and loop boundaries create a fresh reader.
+actor PlaybackFrameReader {
+    private let source: any EditorMediaSource
+    private var reader: (any MediaFrameReader)?
+
+    init(source: any EditorMediaSource, startTime: CMTime) async throws {
+        self.source = source
+        self.reader = try await source.makeFrameReader(startTime: startTime)
+    }
+
+    deinit { reader?.cancel() }
+
+    /// Returns the decoder's timestamp and full-precision IOSurface without copying.
+    func nextFrame() throws -> ReaderFrame? {
+        try Task.checkCancellation()
+        return try autoreleasepool { try reader?.nextFrame() }
+    }
+
+    /// AVFoundation teardown may block. Run it on the decoder actor before
+    /// releasing the last reference from the main actor at a loop boundary.
+    func close() {
+        reader?.cancel()
+        reader = nil
+    }
+}
+
+/// One traversal plus its decoded first frame. Preparing this during playback
+/// hides decoder startup at the seam without retaining a whole clip in memory.
+struct PreparedPlaybackTraversal: Sendable {
+    let reader: PlaybackFrameReader
+    let firstFrame: ReaderFrame
+
+    init(source: any EditorMediaSource, startTime: CMTime) async throws {
+        let reader = try await PlaybackFrameReader(source: source, startTime: startTime)
+        self.reader = reader
+        guard let frame = try await reader.nextFrame() else { throw VideoSourceError.sampleBufferUnavailable }
+        self.firstFrame = frame
+        try Task.checkCancellation()
+    }
 }

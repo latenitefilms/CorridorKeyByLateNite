@@ -164,12 +164,17 @@
 	<publishSettings>
 		<version>2</version>
 		<target object="10010" channel="./50" name=""/>
+		<target object="10010" channel="./180" name="Controls"/>
+		<target object="10010" channel="./190" name="Analysis Details"/>
 		<target object="10010" channel="./100" name="Settings"/>
-		<target object="10010" channel="./110" name="Interior"/>
-		<target object="10010" channel="./120" name="Matte"/>
-		<target object="10010" channel="./130" name="Edge Spill"/>
-		<target object="10010" channel="./140" name="Refinement"/>
+		<target object="10010" channel="./170" name="Alpha Hint"/>
+		<target object="10010" channel="./200" name="Manual Hint"/>
+		<target object="10010" channel="./160" name="Time Awareness"/>
 		<target object="10010" channel="./150" name="Temporal Stability"/>
+		<target object="10010" channel="./110" name="Interior Detail"/>
+		<target object="10010" channel="./120" name="Matte"/>
+		<target object="10010" channel="./130" name="Edge &amp; Spill"/>
+		<target object="10010" channel="./140" name="Edge Refinement"/>
 	</publishSettings>
 	<currentFrame>0 1 1 0</currentFrame>
 	<activeLayer>10003</activeLayer>
@@ -260,23 +265,63 @@
 			<filter name="CorridorKey by LateNite" id="10010" factoryID="6" pluginUUID="D29F6B10-4F3A-4C5E-B611-7A2E8D4C9F08" pluginVersion="1" pluginName="CorridorKey by LateNite" pluginDynamicParams="0">
 				<timing in="0 1 1 0" out="147456 153600 1 0" offset="0 1 1 0"/>
 				<baseFlags>8589934608</baseFlags>
-				<parameter name="Analysis Data" id="7003" flags="12905938992">
+				<parameter name="" id="50" flags="12901679120">
 					<numberOfKeypoints>0</numberOfKeypoints>
 					<defaultVal>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</defaultVal>
 					<dataValue>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</dataValue>
 				</parameter>
-				<parameter name="Subject Points" id="7004" flags="12905938992">
-					<numberOfKeypoints>0</numberOfKeypoints>
-					<defaultVal>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</defaultVal>
-					<dataValue>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</dataValue>
+				<parameter name="Controls" id="180" flags="8589938704">
+					<parameter name="" id="9013" flags="12901679120">
+						<numberOfKeypoints>0</numberOfKeypoints>
+						<defaultVal>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</defaultVal>
+						<dataValue>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</dataValue>
+					</parameter>
+				</parameter>
+				<parameter name="Analysis Details" id="190" flags="8589938704">
+					<parameter name="" id="9014" flags="12901679120">
+						<numberOfKeypoints>0</numberOfKeypoints>
+						<defaultVal>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</defaultVal>
+						<dataValue>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</dataValue>
+					</parameter>
 				</parameter>
 				<parameter name="Settings" id="100" flags="8589938704">
 					<parameter name="Quality" id="1002" flags="12901679120" default="0" value="0"/>
-					<parameter name="Screen Colour" id="1001" flags="12901679120" default="0" value="0"/>
+					<parameter name="Screen Colour" id="1001" flags="12901679120" default="2" value="2"/>
+					<parameter name="Custom Screen Colour" id="9011" flags="12901679120">
+						<parameter name="Red" id="1" flags="12901679120" default="0.08" value="0.08"/>
+						<parameter name="Green" id="2" flags="12901679120" default="0.84" value="0.84"/>
+						<parameter name="Blue" id="3" flags="12901679120" default="0.08" value="0.08"/>
+					</parameter>
 					<parameter name="Upscale Method" id="6002" flags="12901679120" default="1" value="1"/>
 					<parameter name="Output" id="5001" flags="12901679120" default="0" value="0"/>
-					<parameter name="Hint" id="1007" flags="12901679120" default="1" value="1"/>
-					<parameter name="Show Subject Marker" id="1005" flags="12901679120" default="0" value="0"/>
+					<!-- Generated Hint stores the stable tag: 3 = None, now first in the menu. -->
+					<parameter name="Generated Hint" id="1007" flags="12901679120" default="3" value="3"/>
+					<parameter name="Input is Linear" id="9001" flags="12901679120" default="0" value="0"/>
+					<parameter name="Linearize Output" id="9002" flags="12901679120" default="0" value="0"/>
+					<parameter name="Keep Original in Solid Areas" id="9003" flags="12901679120" default="0" value="0"/>
+				</parameter>
+				<parameter name="Time Awareness" id="160" flags="8589938704">
+					<parameter name="Time Awareness" id="9004" flags="12901679120" default="0" value="0"/>
+					<parameter name="Low GPU Memory" id="9005" flags="12901679120" default="0" value="0"/>
+				</parameter>
+				<parameter name="Alpha Hint" id="170" flags="8589938704">
+					<parameter name="" id="9012" flags="12901679120">
+						<numberOfKeypoints>0</numberOfKeypoints>
+						<defaultVal>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</defaultVal>
+						<dataValue>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</dataValue>
+					</parameter>
+					<parameter name="Use Alpha Hint" id="9006" flags="12901679120" default="0" value="0"/>
+					<parameter name="Hint Frames" id="9007" flags="12901679120" default="0" value="0"/>
+					<parameter name="Reference Frame" id="9008" flags="12901679120" default="0" value="0"/>
+					<parameter name="Alpha Hint Strength" id="9009" flags="12901679120" default="0.75" value="0.75"/>
+					<parameter name="Internal Hint Strength" id="9010" flags="12901679120" default="0.95" value="0.95"/>
+				</parameter>
+				<parameter name="Manual Hint" id="200" flags="8589938704">
+					<parameter name="" id="9015" flags="12901679120">
+						<numberOfKeypoints>0</numberOfKeypoints>
+						<defaultVal>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</defaultVal>
+						<dataValue>*********PAeMb-gOLBoA11I*E61-*I4-klM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh660Ec9L2FVR437QolZNq3XSJwE1o7gOKtYF43oMIxWOaJXR6*0U*4X1EsDJGFiRKlgHl1oMb-gOLBoA11I*E61-*I4-kdM75NZQbBdPqtN743mMqVdRaJmJ0FoPr-M74xWOaJXR5AG**44c3wE1otHGqJtNKF-QaBcOLNZQh260Jh1RLBoPqoUF43oMM*-ckgA2pIYPbJgPBAB1UwE2F7LHZAiOqJtQpdCImtjMadZMrFnJWFXP43nQu0UU*9G3-IK3pcYMqlVQrBiMKpZK0FXP43nQqJnL2tHF4ZXR4ZjPa3mSO6K43VCIoxWOaJXR*UF4WEdAXR7H3VOLaFfQru3VcS7XdaWfv6********-*E*********N********************ikU*0**F*-c*7**d*16*Bk-7*2s*Kk-h*4w*QE-p*5g-QU********6-*********-********************3n</dataValue>
+					</parameter>
 				</parameter>
 				<parameter name="Interior Detail" id="110" flags="8589938704">
 					<parameter name="Source Passthrough" id="2001" flags="12901679120" default="0" value="0"/>
@@ -289,23 +334,23 @@
 					<parameter name="Matte Erode" id="3003" flags="12901679120" default="0" value="0"/>
 					<parameter name="Softness" id="3004" flags="12901679120" default="0" value="0"/>
 					<parameter name="Gamma" id="3005" flags="12901679120" default="1" value="1"/>
-					<parameter name="Auto Despeckle" id="3006" flags="12901679120" default="1" value="1"/>
+					<parameter name="Auto Despeckle" id="3006" flags="12901679120" default="0" value="0"/>
 					<parameter name="Despeckle Size" id="3007" flags="12901679120" default="100" value="100"/>
 					<parameter name="Refiner Strength" id="3008" flags="12901679120" default="1" value="1"/>
 				</parameter>
 				<parameter name="Edge &amp; Spill" id="130" flags="8589938704">
-					<parameter name="Despill Strength" id="4001" flags="12901679120" default="0.5" value="0.5"/>
+					<parameter name="Despill Strength" id="4001" flags="12901679120" default="0" value="0"/>
 					<parameter name="Spill Method" id="4002" flags="12901679120" default="4" value="4"/>
 				</parameter>
 				<parameter name="Edge Refinement" id="140" flags="8589938704">
-					<parameter name="Light Wrap" id="8001" flags="12901679120" default="1" value="1"/>
+					<parameter name="Light Wrap" id="8001" flags="12901679120" default="0" value="0"/>
 					<parameter name="Wrap Strength" id="8002" flags="12901679120" default="0.25" value="0.25"/>
 					<parameter name="Wrap Radius" id="8003" flags="12901679120" default="10" value="10"/>
-					<parameter name="Edge Decontaminate" id="8004" flags="12901679120" default="1" value="1"/>
+					<parameter name="Edge Decontaminate" id="8004" flags="12901679120" default="0" value="0"/>
 					<parameter name="Decontam. Strength" id="8005" flags="12901679120" default="0.5" value="0.5"/>
 				</parameter>
 				<parameter name="Temporal Stability" id="150" flags="8589938704">
-					<parameter name="Reduce Edge Flicker" id="8006" flags="12901679120" default="1" value="1"/>
+					<parameter name="Reduce Edge Flicker" id="8006" flags="12901679120" default="0" value="0"/>
 					<parameter name="Stability Strength" id="8007" flags="12901679120" default="0.5" value="0.5"/>
 				</parameter>
 				<parameter name="Mix" id="10001" flags="12901679104" default="1" value="1"/>

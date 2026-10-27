@@ -23,6 +23,25 @@ import CorridorKeyToolboxLogic
 
 @Suite("FusedKernels")
 struct FusedKernelTests {
+    @Test("Custom red screen cleanup suppresses red without changing green or blue")
+    func customRedScreen() throws {
+        let entry = try TestHarness.makeEntry()
+        let queue = try #require(entry.borrowCommandQueue())
+        defer { entry.returnCommandQueue(queue) }
+        let source = try makeColourTexture(entry: entry, width: 4, height: 4, pixelFormat: .rgba32Float,
+                                           colour: SIMD4(0.8, 0.3, 0.3, 1))
+        let matte = try makeScalarTexture(entry: entry, width: 4, height: 4, value: 0.5)
+        let command = try #require(queue.makeCommandBuffer())
+        let output = try #require(try RenderStages.applyEdgeDecontamination(foreground: source, matte: matte,
+            screenColor: SIMD3(0.9, 0.1, 0.1), strength: 1, entry: entry, commandBuffer: command))
+        defer { output.returnManually() }
+        try commitAndWait(command)
+        let pixel = readFirstPixel(texture: output.texture)
+        #expect(abs(pixel.x - 0.55) < 0.001)
+        #expect(abs(pixel.y - 0.3) < 0.001)
+        #expect(abs(pixel.z - 0.3) < 0.001)
+    }
+
 
     // MARK: - Fused matte refine
 
@@ -320,6 +339,56 @@ struct FusedKernelTests {
         #expect(abs(pixel.x - fgColour.x * 2) < 1e-3)
         #expect(abs(pixel.y - fgColour.y * 2) < 1e-3)
         #expect(abs(pixel.z - fgColour.z * 2) < 1e-3)
+    }
+
+    @Test("Edge Decontaminate preserves clean edges and removes only excess of the selected screen colour",
+          arguments: ScreenColor.allCases, [Float(0), 0.5, 1])
+    func edgeDecontaminationColorSafety(screenColor: ScreenColor, matteValue: Float) throws {
+        let entry = try TestHarness.makeEntry()
+        let queue = try makeCommandQueue(entry: entry)
+        let colors: [SIMD4<Float>] = [
+            SIMD4(0.6, 0.6, 0.6, 1), // neutral hair must not become purple/yellow
+            SIMD4(1.5, 1.5, 1.5, 1), // preserve HDR highlights
+            SIMD4(0.8, 0.5, 0.3, 1), // clean warm edge
+            SIMD4(0.3, 0.8, 0.3, 1), // green contamination
+            SIMD4(0.3, 0.3, 0.8, 1)  // blue contamination
+        ]
+        for color in colors {
+            let foreground = try makeColourTexture(entry: entry, width: 4, height: 4, pixelFormat: .rgba32Float, colour: color)
+            let matte = try makeScalarTexture(entry: entry, width: 4, height: 4, value: matteValue)
+            let commandBuffer = try #require(queue.makeCommandBuffer())
+            let separate = try #require(try RenderStages.applyEdgeDecontamination(
+                foreground: foreground, matte: matte, screenColor: screenColor.canonicalScreenReference,
+                strength: 1, entry: entry, commandBuffer: commandBuffer
+            ))
+            let fused = try RenderStages.applyFusedForegroundPostProcess(
+                foreground: foreground, sourceRGB: foreground, matte: matte, blurredSource: foreground,
+                config: RenderStages.FusedForegroundConfig(
+                    sourcePassthrough: false, lightWrapEnabled: false, lightWrapStrength: 0, lightWrapEdgeBias: 0,
+                    edgeDecontaminateEnabled: true, edgeDecontaminateStrength: 1,
+                    screenColor: screenColor.canonicalScreenReference,
+                    inverseScreenMatrix: matrix_identity_float3x3, applyInverseRotation: false
+                ), entry: entry, commandBuffer: commandBuffer
+            )
+            defer { separate.returnManually(); fused.returnManually() }
+            try commitAndWait(commandBuffer)
+            let output = readFirstPixel(texture: fused.texture)
+            let unfusedOutput = readFirstPixel(texture: separate.texture)
+            #expect(simd_distance(output, unfusedOutput) < 0.0001)
+            let reference = screenColor.canonicalScreenReference
+            let screenChannel = reference.z > reference.y ? 2 : 1
+            let otherChannels = [0, 1, 2].filter { $0 != screenChannel }
+            let floor = max(color[otherChannels[0]], color[otherChannels[1]])
+            if color[screenChannel] <= floor || matteValue == 1 {
+                #expect(simd_distance(output, color) < 0.0001, "Clean colours and opaque interiors must remain unchanged")
+            } else {
+                #expect(output[screenChannel] < color[screenChannel])
+                #expect(output[screenChannel] >= floor - 0.0001, "Correction must never cross into a complementary tint")
+            }
+            for channel in otherChannels {
+                #expect(abs(output[channel] - color[channel]) < 0.0001)
+            }
+        }
     }
 
     // MARK: - Helpers

@@ -75,6 +75,8 @@ final class CorridorKeyComputePipelines: Sendable {
     let spillAlphaAttenuation: any MTLComputePipelineState
     let sourcePassthrough: any MTLComputePipelineState
     let applyScreenMatrix: any MTLComputePipelineState
+    let flipVertical: any MTLComputePipelineState
+    let colorTransform: any MTLComputePipelineState
     let resample: any MTLComputePipelineState
     let extractHint: any MTLComputePipelineState
     let refinerBlend: any MTLComputePipelineState
@@ -97,6 +99,7 @@ final class CorridorKeyComputePipelines: Sendable {
             }
             return try device.makeComputePipelineState(function: function)
         }
+        colorTransform = try compute("corridorKeyColorTransformKernel")
         combineAndNormalize = try compute("corridorKeyCombineAndNormalizeKernel")
         normalizeToBuffer = try compute("corridorKeyNormalizeToBufferKernel")
         mlxWritebackFused = try compute("corridorKeyMLXWritebackFusedKernel")
@@ -111,6 +114,7 @@ final class CorridorKeyComputePipelines: Sendable {
         spillAlphaAttenuation = try compute("corridorKeySpillAlphaAttenuationKernel")
         sourcePassthrough = try compute("corridorKeySourcePassthroughKernel")
         applyScreenMatrix = try compute("corridorKeyApplyScreenMatrixKernel")
+        flipVertical = try compute("corridorKeyFlipVerticalKernel")
         resample = try compute("corridorKeyResampleKernel")
         extractHint = try compute("corridorKeyExtractHintKernel")
         refinerBlend = try compute("corridorKeyRefinerBlendKernel")
@@ -188,6 +192,18 @@ final class CorridorKeyRenderPipelines: Sendable {
 /// by an `NSLock` (`queueLock`, `renderPipelinesLock`, `weightsLock`,
 /// `normalizedInputLock`, `mpsLock`, `sharedEventValueLock`).
 final class MetalDeviceCacheEntry: @unchecked Sendable {
+    /// The normalized input and analysis readback buffers are reused across
+    /// plug-in instances. Their complete producer/consumer interval must be
+    /// exclusive, including GPU preprocessing before the MLX engine's lock.
+    private let analysisFrameLock = NSLock()
+
+    /// Acquires the per-device analysis scratch buffers for one frame.
+    /// Pair with `endAnalysisFrame()` in a defer on the same worker thread.
+    func beginAnalysisFrame() { analysisFrameLock.lock() }
+
+    /// Releases analysis scratch buffers after inference and readback finish.
+    func endAnalysisFrame() { analysisFrameLock.unlock() }
+
     let device: any MTLDevice
     let library: any MTLLibrary
     let computePipelines: CorridorKeyComputePipelines
@@ -256,9 +272,23 @@ final class MetalDeviceCacheEntry: @unchecked Sendable {
     let sharedEventListener: MTLSharedEventListener
 
     convenience init(device: any MTLDevice) throws {
+#if CORRIDOR_KEY_SPM_MIRROR
+        let bundle = MetalStagesResourceBundleAccessor.bundle()
+        guard let shaderURL = bundle.url(forResource: "CorridorKeyShaders", withExtension: "metal"),
+              let headerURL = bundle.url(forResource: "CorridorKeyShaderTypes", withExtension: "h") else {
+            throw MetalDeviceCacheError.missingDefaultLibrary
+        }
+        let header = try String(contentsOf: headerURL, encoding: .utf8)
+        let shader = try String(contentsOf: shaderURL, encoding: .utf8)
+        let library = try device.makeLibrary(
+            source: header + "\n" + shader.replacing(#"#include "CorridorKeyShaderTypes.h""#, with: ""),
+            options: nil
+        )
+#else
         guard let library = device.makeDefaultLibrary() else {
             throw MetalDeviceCacheError.missingDefaultLibrary
         }
+#endif
         try self.init(device: device, library: library)
     }
 
@@ -761,43 +791,28 @@ final class MetalDeviceCacheEntry: @unchecked Sendable {
         analysisReadbackLock.unlock()
     }
 
-    // MARK: - Cached-alpha decode buffer
+    // MARK: - Cached-frame decode buffer
 
-    /// Per-(width, height) host-coherent MTLBuffer that the cached
-    /// matte's vImage decode writes into. Cached because the user
-    /// rotates through at most a handful of inference resolutions in a
-    /// session; allocating fresh per render-from-cache frame would
-    /// cost ~4 MB / allocation at 1024 and 67 MB at 2048, which the
-    /// autorelease pool can't reclaim fast enough during scrubbing.
-    private struct CachedAlphaBufferKey: Hashable {
-        let width: Int
-        let height: Int
-    }
-    private let cachedAlphaLock = NSLock()
-    private var cachedAlphaBuffers: [CachedAlphaBufferKey: any MTLBuffer] = [:]
+    private let cachedFrameLock = NSLock()
+    private var cachedFrameBuffer: (any MTLBuffer)?
 
-    func cachedAlphaBuffer(width: Int, height: Int) -> (any MTLBuffer)? {
-        let key = CachedAlphaBufferKey(width: width, height: height)
-        cachedAlphaLock.lock()
-        if let existing = cachedAlphaBuffers[key] {
-            cachedAlphaLock.unlock()
-            return existing
+    /// Leases a grow-only shared buffer through decompression and texture upload.
+    /// One buffer serves all quality rungs; concurrent renderers serialize only
+    /// CPU decode/upload, then independently submit pooled textures to Metal.
+    func withCachedFrameBuffer<Result>(
+        width: Int, height: Int, _ body: (any MTLBuffer) throws -> Result
+    ) throws -> Result {
+        cachedFrameLock.lock()
+        defer { cachedFrameLock.unlock() }
+        let byteCount = width * height * 10
+        if cachedFrameBuffer == nil || (cachedFrameBuffer?.length ?? 0) < byteCount {
+            cachedFrameBuffer = device.makeBuffer(length: byteCount, options: .storageModeShared)
+            cachedFrameBuffer?.label = "CK Cached Frame Decode"
         }
-        cachedAlphaLock.unlock()
-
-        let byteCount = width * height * MemoryLayout<Float>.size
-        guard let buffer = device.makeBuffer(length: byteCount, options: .storageModeShared) else {
-            return nil
+        guard let buffer = cachedFrameBuffer else {
+            throw MetalDeviceCacheError.textureAllocationFailed
         }
-        buffer.label = "CK Cached Alpha \(width)x\(height)"
-        cachedAlphaLock.lock()
-        if let existing = cachedAlphaBuffers[key] {
-            cachedAlphaLock.unlock()
-            return existing
-        }
-        cachedAlphaBuffers[key] = buffer
-        cachedAlphaLock.unlock()
-        return buffer
+        return try body(buffer)
     }
 
     // MARK: - Connected-components label-counts buffer
@@ -950,14 +965,13 @@ final class MetalDeviceCache: @unchecked Sendable {
 
     func entry(for device: any MTLDevice) throws -> MetalDeviceCacheEntry {
         entriesLock.lock()
+        defer { entriesLock.unlock() }
         let existing = entries[device.registryID]
         if let existing {
-            entriesLock.unlock()
             return existing
         }
         let newEntry = try MetalDeviceCacheEntry(device: device)
         entries[device.registryID] = newEntry
-        entriesLock.unlock()
         // First-touch MPS pre-warm runs off-thread so the calling
         // render path doesn't pay the ~50–100 ms MPS pipeline-compile
         // stall on its first frame. Best-effort; if the dispatched

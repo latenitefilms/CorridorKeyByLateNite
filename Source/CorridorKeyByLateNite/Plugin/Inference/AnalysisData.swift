@@ -2,10 +2,9 @@
 //  AnalysisData.swift
 //  CorridorKey by LateNite
 //
-//  Strongly-typed model for the analysis cache that lives inside the FxPlug
-//  custom parameter. Keeping this inside the Final Cut Pro Library (rather
-//  than a disk sidecar) matches Apple's `FxBrightnessAnalysis` reference and
-//  lets editors ship projects between machines without losing the cache.
+//  Strongly typed analysis metadata persisted in the FxPlug custom parameter.
+//  Complete frame pixels live in a bounded local sandbox cache. Moving a
+//  library to another Mac or clearing that cache requires Analyse Clip again.
 //
 //  The wire format is a single `NSDictionary` because that's what FxPlug's
 //  custom parameter API can serialise through `NSSecureCoding`. The keys and
@@ -15,6 +14,46 @@
 
 import Foundation
 import CoreMedia
+
+/// Per-instance decoded analysis metadata, protected across host callback threads.
+final class AnalysisSnapshotStore: @unchecked Sendable {
+    private let lock = NSLock()
+    private var snapshot: AnalysisData?
+    private var persistedDictionary: NSDictionary?
+
+    /// Avoid decoding a whole clip's property-list frame index for each frame.
+    /// The dictionary still comes from this request's host state, so undo and
+    /// parameter edits cannot be hidden behind a process-global cache.
+    func load(_ dictionary: NSDictionary?) -> AnalysisData? {
+        lock.withLock {
+            guard let dictionary else { return snapshot }
+            if let persistedDictionary, persistedDictionary.isEqual(dictionary) { return snapshot }
+            guard let decoded = AnalysisData.fromParameterDictionary(dictionary) else {
+                snapshot = nil
+                persistedDictionary = nil
+                return nil
+            }
+            persistedDictionary = dictionary.copy() as? NSDictionary
+            snapshot = decoded
+            return decoded
+        }
+    }
+
+    func store(_ snapshot: AnalysisData) {
+        lock.lock()
+        self.snapshot = snapshot
+        persistedDictionary = nil
+        lock.unlock()
+    }
+
+    func clear() {
+        lock.lock()
+        snapshot = nil
+        persistedDictionary = nil
+        lock.unlock()
+    }
+
+}
 
 /// Dictionary keys used when flattening `AnalysisData` into the custom
 /// parameter's `NSDictionary`. Changing any of these without bumping
@@ -31,6 +70,8 @@ enum AnalysisDataKey {
     static let matteWidth: String = "matteWidth"
     static let matteHeight: String = "matteHeight"
     static let mattes: String = "mattes"
+    static let hintConfiguration: String = "hintConfiguration"
+    static let frameReferences: String = "frameReferences"
 }
 
 /// In-memory representation of the analysis cache. Built either by the
@@ -42,8 +83,15 @@ struct AnalysisData: Sendable {
     /// older plug-in versions. Readers treat mismatched versions as "no
     /// cache" so Analyse Clip has to rebuild. Bumped to `3` after adding
     /// `qualityModeRaw` so the inspector can tell the user when a saved
-    /// cache no longer matches the Quality setting they've selected.
-    static let currentSchemaVersion: Int = 3
+    /// cache no longer matches the Quality setting they've selected. Version 4
+    /// invalidates v1 model mattes so saved clips are analysed with v2. Version 5
+    /// requires complete alpha + reconstructed foreground frames (CKF1). Version 6
+    /// records the annotations used to build the cache, including their frame times.
+    /// Version 7 stores alpha and RGB in canonical top-down rows for every host.
+    /// Version 8 moves production payloads into the bounded local disk cache.
+    /// Version 9 records temporal/color/hint controls and aspect-preserving v2 predictions.
+    /// Version 10 replaces chroma-based manual hints with selected Vision instances.
+    static let currentSchemaVersion: Int = 10
 
     let schemaVersion: Int
     let frameDuration: CMTime
@@ -60,11 +108,22 @@ struct AnalysisData: Sendable {
     let inferenceResolution: Int
     let matteWidth: Int
     let matteHeight: Int
-    /// Per-frame compressed matte payloads. Keyed by the frame's position in
-    /// the analysis range (0-based). Missing keys indicate the analyser did
-    /// not reach that frame yet — the render path treats that as a cache miss
-    /// for that specific time.
+    /// Inline complete frames for small fixtures and immediate callers.
+    /// Production analyses persist only `frameReferences`, keeping library
+    /// metadata proportional to frame count rather than image dimensions.
     let mattes: [Int: Data]
+    /// Immutable input snapshot: edits must not reuse mattes from older annotations.
+    var hintConfiguration: AnalysisHintConfiguration? = nil
+    /// Small, sandbox-relative descriptors persisted instead of complete frame pixels.
+    var frameReferences: [Int: AnalysisFrameReference] = [:]
+
+    /// Checks the entire annotation set because temporal blending can affect later frames.
+    func matchesHints(mode: HintMode, points: HintPointSet, video: VideoInferenceSettings = VideoInferenceSettings(),
+                      temporalStabilityEnabled: Bool = false, temporalStabilityStrength: Double = 0) -> Bool {
+        hintConfiguration == AnalysisHintConfiguration(mode: mode, points: points, video: video.analysisIdentity,
+            temporalStabilityEnabled: temporalStabilityEnabled,
+            temporalStabilityStrength: temporalStabilityEnabled ? temporalStabilityStrength : 0)
+    }
 
     /// Returns the 0-based frame index for the given render time, relative to
     /// the analysed range. Returns `nil` when the render time sits outside
@@ -89,11 +148,19 @@ struct AnalysisData: Sendable {
     /// analysis metadata matches the current render request.
     func cachedMatte(
         at renderTime: CMTime,
-        screenColorRaw requestedScreenColorRaw: Int
+        screenColorRaw requestedScreenColorRaw: Int,
+        qualityModeRaw requestedQualityModeRaw: Int? = nil,
+        hintConfiguration requestedHints: AnalysisHintConfiguration? = nil
     ) -> CachedAnalysisMatte? {
-        guard screenColorRaw == requestedScreenColorRaw,
-              let blob = matte(at: renderTime)
-        else { return nil }
+        guard requestedHints == nil || hintConfiguration == requestedHints,
+              requestedQualityModeRaw == nil || qualityModeRaw == requestedQualityModeRaw,
+              screenColorRaw == requestedScreenColorRaw,
+              let index = frameIndex(for: renderTime) else { return nil }
+        if let reference = frameReferences[index] {
+            if let next = frameReferences[index + 1] { AnalysisDiskCache.shared.prefetch(next) }
+            return CachedAnalysisMatte(blob: nil, inferenceResolution: inferenceResolution, reference: reference)
+        }
+        guard let blob = mattes[index] else { return nil }
         return CachedAnalysisMatte(blob: blob, inferenceResolution: inferenceResolution)
     }
 
@@ -112,6 +179,16 @@ struct AnalysisData: Sendable {
         let firstFrameTimeDict = CMTimeCopyAsDictionary(firstFrameTime, allocator: kCFAllocatorDefault) as NSDictionary?
 
         let contents = NSMutableDictionary()
+        if !frameReferences.isEmpty {
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
+            contents[AnalysisDataKey.frameReferences] = try? encoder.encode(frameReferences)
+        }
+        if let hintConfiguration {
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
+            contents[AnalysisDataKey.hintConfiguration] = try? encoder.encode(hintConfiguration)
+        }
         contents[AnalysisDataKey.schemaVersion] = NSNumber(value: schemaVersion)
         if let frameDurationDict {
             contents[AnalysisDataKey.frameDuration] = frameDurationDict
@@ -183,13 +260,38 @@ struct AnalysisData: Sendable {
             inferenceResolution: inferenceResolution,
             matteWidth: matteWidth,
             matteHeight: matteHeight,
-            mattes: mattes
+            mattes: mattes,
+            hintConfiguration: (dictionary[AnalysisDataKey.hintConfiguration] as? Data).flatMap {
+                try? PropertyListDecoder().decode(AnalysisHintConfiguration.self, from: $0)
+            },
+            frameReferences: (dictionary[AnalysisDataKey.frameReferences] as? Data).flatMap {
+                try? PropertyListDecoder().decode([Int: AnalysisFrameReference].self, from: $0)
+            } ?? [:]
         )
     }
 }
 
 /// Per-frame matte payload lifted from an `AnalysisData` snapshot.
 struct CachedAnalysisMatte: Sendable {
-    let blob: Data
+    let blob: Data?
     let inferenceResolution: Int
+    var reference: AnalysisFrameReference? = nil
+}
+
+/// The hint inputs captured at analysis start, shared by both hosts.
+struct AnalysisHintConfiguration: Equatable, Sendable, Codable {
+    let mode: HintMode
+    let points: HintPointSet
+    var video: VideoInferenceSettings = VideoInferenceSettings()
+    var temporalStabilityEnabled = false
+    var temporalStabilityStrength: Double = 0
+
+    /// Compare prediction inputs, including caches written before defaults changed.
+    /// Resource strategy and disabled controls do not change the cached pixels.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.mode == rhs.mode && lhs.points == rhs.points
+            && lhs.video.analysisIdentity == rhs.video.analysisIdentity
+            && lhs.temporalStabilityEnabled == rhs.temporalStabilityEnabled
+            && (!lhs.temporalStabilityEnabled || lhs.temporalStabilityStrength == rhs.temporalStabilityStrength)
+    }
 }

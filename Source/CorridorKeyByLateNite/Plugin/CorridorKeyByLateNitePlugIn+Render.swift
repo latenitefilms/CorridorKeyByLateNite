@@ -32,23 +32,24 @@ extension CorridorKeyToolboxPlugIn {
         let width = Int(destinationImage.imagePixelBounds.right - destinationImage.imagePixelBounds.left)
         let height = Int(destinationImage.imagePixelBounds.top - destinationImage.imagePixelBounds.bottom)
         state.destinationLongEdgePixels = max(width, height)
-        refreshCachedMatteIfAvailable(for: &state, at: renderTime)
 
-        let gamut = currentWorkingGamut()
         let alphaHint = sourceImages.count > 1 ? sourceImages[1] : nil
         let request = RenderRequest(
             destinationImage: destinationImage,
             sourceImage: sourceImage,
             alphaHintImage: alphaHint,
             state: state,
-            workingGamut: gamut,
+            workingGamut: state.workingColorGamut,
             renderTime: renderTime
         )
 
         let startTime = CACurrentMediaTime()
         do {
             let report = try renderPipeline.render(request)
-            lastRenderReport.set(report)
+            if lastRenderReport.set(report) {
+                let milliseconds = (CACurrentMediaTime() - startTime) * 1000
+                PluginLog.notice("Render backend: \(report.backendDescription); output \(width)×\(height); Quality \(state.qualityMode.displayName); \(milliseconds.formatted(.number.precision(.fractionLength(1)))) ms.")
+            }
         } catch {
             PluginLog.error("Render failed at \(CMTimeGetSeconds(renderTime))s: \(error.localizedDescription)")
             throw error
@@ -57,49 +58,4 @@ extension CorridorKeyToolboxPlugIn {
         lastFrameMilliseconds.set(elapsedMilliseconds)
     }
 
-    /// Queries the FxPlug colour gamut API. Unknown / missing → Rec.709 so
-    /// the identity transform is used and behaviour matches the pre-v1.0
-    /// implementation for SDR timelines.
-    private func currentWorkingGamut() -> WorkingColorGamut {
-        guard let gamutAPI = apiManager.api(for: (any FxColorGamutAPI_v2).self) as? any FxColorGamutAPI_v2 else {
-            return .rec709
-        }
-        let raw = UInt(gamutAPI.colorPrimaries())
-        return ColorGamutMatrix.gamut(fromColorPrimariesRaw: raw)
-    }
-
-    /// Rehydrates the per-frame matte from the in-memory analysis snapshot.
-    ///
-    /// FxPlug supplies `pluginState` as a host-managed blob. During frame
-    /// stepping we can receive a blob generated before the hidden analysis
-    /// parameter became visible for the requested time. The analysis snapshot
-    /// store is updated whenever we successfully persist or load a cache, so
-    /// prefer its current-frame lookup over the potentially stale embedded
-    /// blob. If this render instance has not seen the cache yet, load it
-    /// once from the hidden parameter and seed the same-process store.
-    private func refreshCachedMatteIfAvailable(
-        for state: inout PluginStateData,
-        at renderTime: CMTime
-    ) {
-        if let cachedMatte = analysisSnapshotStore.cachedMatte(
-            at: renderTime,
-            screenColorRaw: state.screenColor.rawValue
-        ) {
-            state.cachedMatteBlob = cachedMatte.blob
-            state.cachedMatteInferenceResolution = cachedMatte.inferenceResolution
-            return
-        }
-
-        guard let retrieval = apiManager.api(
-            for: (any FxParameterRetrievalAPI_v6).self
-        ) as? any FxParameterRetrievalAPI_v6,
-              let analysis = loadAnalysisData(using: retrieval),
-              let cachedMatte = analysis.cachedMatte(
-                  at: renderTime,
-                  screenColorRaw: state.screenColor.rawValue
-              )
-        else { return }
-        state.cachedMatteBlob = cachedMatte.blob
-        state.cachedMatteInferenceResolution = cachedMatte.inferenceResolution
-    }
 }

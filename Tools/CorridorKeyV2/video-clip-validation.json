@@ -1,0 +1,134 @@
+{
+  "passed": [
+    {
+      "resolution": 512,
+      "window": 4,
+      "frames": 4,
+      "screen": "green",
+      "metrics": [
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.006543874740600586,
+            "mean_error": 1.7341881175525486e-05,
+            "rmse": 7.294485112652183e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.006533578038215637,
+            "mean_error": 8.964489097706974e-05,
+            "rmse": 0.00021926769113633782
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.006098508834838867,
+            "mean_error": 1.7336662494926713e-05,
+            "rmse": 7.064811507007107e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.010290056467056274,
+            "mean_error": 9.296508505940437e-05,
+            "rmse": 0.00022201958927325904
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.004670858383178711,
+            "mean_error": 1.658903966017533e-05,
+            "rmse": 6.697858771076426e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.006400465965270996,
+            "mean_error": 9.850208152784035e-05,
+            "rmse": 0.00022479060862679034
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.0042321085929870605,
+            "mean_error": 1.717076520435512e-05,
+            "rmse": 6.648452836088836e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.007741212844848633,
+            "mean_error": 9.796510130399838e-05,
+            "rmse": 0.0002319839404663071
+          }
+        ]
+      ],
+      "seconds": 33.3587914169766
+    },
+    {
+      "resolution": 512,
+      "window": 4,
+      "frames": 4,
+      "screen": "blue",
+      "metrics": [
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.004299938678741455,
+            "mean_error": 8.010285091586411e-05,
+            "rmse": 0.00032911900780163705
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.011782288551330566,
+            "mean_error": 1.8649498088052496e-05,
+            "rmse": 0.00011319411714794114
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.004296839237213135,
+            "mean_error": 8.120570419123396e-05,
+            "rmse": 0.0003354524087626487
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.010767698287963867,
+            "mean_error": 1.8605171135277487e-05,
+            "rmse": 0.00011272633855696768
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.004216626286506653,
+            "mean_error": 8.520880510332063e-05,
+            "rmse": 0.00035221735015511513
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.011575698852539062,
+            "mean_error": 1.8738906874204986e-05,
+            "rmse": 0.00011333361908327788
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.004243314266204834,
+            "mean_error": 8.880058157956228e-05,
+            "rmse": 0.0003653205931186676
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.011919856071472168,
+            "mean_error": 1.8772783732856624e-05,
+            "rmse": 0.00011394414468668401
+          }
+        ]
+      ],
+      "seconds": 30.83734116703272
+    }
+  ]
+}

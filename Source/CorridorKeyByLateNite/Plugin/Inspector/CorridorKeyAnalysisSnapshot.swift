@@ -42,6 +42,11 @@ struct CorridorKeyAnalysisSnapshot: Equatable, Sendable {
     /// supplying every optional field.
     let hintPointCount: Int
 
+    /// Host-reported input dimensions and native clip frame rate, when available.
+    let sourceWidth: Int?
+    let sourceHeight: Int?
+    let sourceFrameRate: Double?
+
     /// Default-valued init so focused snapshot logic tests only need to
     /// provide fields relevant to the behaviour under test.
     init(
@@ -53,7 +58,10 @@ struct CorridorKeyAnalysisSnapshot: Equatable, Sendable {
         analysisETASeconds: Double? = nil,
         lastRenderMilliseconds: Double? = nil,
         renderBackendDescription: String = "—",
-        hintPointCount: Int = 0
+        hintPointCount: Int = 0,
+        sourceWidth: Int? = nil,
+        sourceHeight: Int? = nil,
+        sourceFrameRate: Double? = nil
     ) {
         self.state = state
         self.analyzedFrameCount = analyzedFrameCount
@@ -64,6 +72,9 @@ struct CorridorKeyAnalysisSnapshot: Equatable, Sendable {
         self.lastRenderMilliseconds = lastRenderMilliseconds
         self.renderBackendDescription = renderBackendDescription
         self.hintPointCount = hintPointCount
+        self.sourceWidth = sourceWidth
+        self.sourceHeight = sourceHeight
+        self.sourceFrameRate = sourceFrameRate
     }
 
     static let empty = CorridorKeyAnalysisSnapshot(
@@ -95,5 +106,29 @@ struct CorridorKeyAnalysisSnapshot: Equatable, Sendable {
         case .notAnalysed, .completed, .interrupted:
             return false
         }
+    }
+
+    /// Model loading and failures are visible even before analysis starts.
+    var neuralModelDescription: String {
+        switch warmup {
+        case .cold: "Not Loaded"
+        case .warming(let resolution): "Loading (\(resolution) px)…"
+        case .ready(let resolution): "Ready (\(resolution) px)"
+        case .failed(let message): "Failed: \(message)"
+        }
+    }
+
+    /// ETA uses the same duration formatting for every host, with no invented
+    /// estimate before enough frames have finished to measure throughput.
+    var remainingTimeDescription: String {
+        guard state == .running, let analysisETASeconds,
+              analysisETASeconds.isFinite, analysisETASeconds >= 0 else { return "—" }
+        return Duration.seconds(analysisETASeconds).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated))
+    }
+
+    /// Source dimensions are shown only when both axes are known.
+    var sourceResolutionDescription: String {
+        guard let sourceWidth, let sourceHeight else { return "—" }
+        return "\(sourceWidth) × \(sourceHeight)"
     }
 }

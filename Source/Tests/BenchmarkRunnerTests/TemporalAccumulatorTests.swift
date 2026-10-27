@@ -9,7 +9,7 @@
 //
 
 import Testing
-@testable import BenchmarkRunner
+@testable import BenchmarkRunnerSupport
 
 @Suite struct TemporalAccumulatorTests {
 

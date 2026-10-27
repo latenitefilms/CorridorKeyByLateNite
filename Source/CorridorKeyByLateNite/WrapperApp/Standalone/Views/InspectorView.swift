@@ -3,8 +3,8 @@
 //  CorridorKey by LateNite — Standalone Editor
 //
 //  Mirrors the Final Cut Pro inspector layout for the standalone
-//  editor: Settings → Interior Detail → Matte → Edge & Spill → Edge
-//  Refinement → Temporal Stability. Each group is a sibling `View`
+//  editor: Controls → Analysis Details → Settings → Alpha Hint → Manual Hint → Time Awareness → Temporal Stability →
+//  Interior Detail → Matte → Edge & Spill → Edge Refinement. Each group is a sibling `View`
 //  struct so SwiftUI invalidates only the group whose data changed.
 //
 //  Sliders bind to the editor's `PluginStateData` directly via
@@ -21,9 +21,21 @@ struct InspectorView: View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 0) {
                 InspectorGroupSeparator(isFirst: true)
-                AnalysisStatusGroup(viewModel: viewModel)
+                CorridorKeyBrandingView()
+                InspectorGroupSeparator()
+                AnalysisControlsGroup(viewModel: viewModel)
+                InspectorGroupSeparator()
+                StandaloneAnalysisDetails(viewModel: viewModel)
                 InspectorGroupSeparator()
                 SettingsGroup(viewModel: viewModel)
+                InspectorGroupSeparator()
+                VideoAlphaHintGroup(viewModel: viewModel)
+                InspectorGroupSeparator()
+                ManualHintGroup(viewModel: viewModel)
+                InspectorGroupSeparator()
+                VideoTimeAwarenessGroup(viewModel: viewModel)
+                InspectorGroupSeparator()
+                TemporalStabilityGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
                 InteriorDetailGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
@@ -32,8 +44,6 @@ struct InspectorView: View {
                 EdgeAndSpillGroup(viewModel: viewModel)
                 InspectorGroupSeparator()
                 EdgeRefinementGroup(viewModel: viewModel)
-                InspectorGroupSeparator()
-                TemporalStabilityGroup(viewModel: viewModel)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
@@ -57,76 +67,39 @@ private struct InspectorGroupSeparator: View {
 
 // MARK: - Analyse / status group
 
-private struct AnalysisStatusGroup: View {
-    @Bindable var viewModel: EditorViewModel
+private struct AnalysisControlsGroup: View {
+    let viewModel: EditorViewModel
 
     var body: some View {
-        InspectorGroup(title: "Analysis") {
-            HStack(spacing: 8) {
-                Button("Analyse Clip", systemImage: "wand.and.stars", action: {
-                    viewModel.runAnalysis()
-                })
-                .buttonStyle(.borderedProminent)
-                .disabled(!viewModel.phase.isReady || viewModel.analysisStatus.inProgress)
-
+        InspectorGroup(title: "Controls") {
+            InspectorButtonRow {
+                Button("Analyse Clip", systemImage: "wand.and.stars", action: viewModel.runAnalysis)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!viewModel.phase.isReady || viewModel.analysisStatus.inProgress)
                 if viewModel.analysisStatus.inProgress {
-                    Button("Stop", systemImage: "stop.fill") {
-                        viewModel.cancelAnalysis()
-                    }
-                    .buttonStyle(.bordered)
+                    Button("Stop", systemImage: "stop.fill", action: viewModel.cancelAnalysis)
                 }
-
-                Spacer()
             }
+            InspectorButtonRow {
+                Button("Reset All", systemImage: "arrow.counterclockwise", action: viewModel.resetAllParameters)
+                    .disabled(viewModel.analysisStatus.inProgress)
+                    .help("Reset all keying parameters and subject hints to their factory defaults.")
+                Button("Reset Analysis", systemImage: "trash", action: viewModel.resetAnalysis)
+                    .disabled(viewModel.analysisStatus.inProgress)
+            }
+        }
+    }
+}
+
+/// The same visible diagnostic fields as the FxPlug inspector.
+private struct StandaloneAnalysisDetails: View {
+    let viewModel: EditorViewModel
+
+    var body: some View {
+        InspectorGroup(title: "Analysis Details") {
             AnalysisProgressLabel(status: viewModel.analysisStatus, totalFrames: viewModel.totalFrames)
-            HStack(spacing: 6) {
-                Image(systemName: warmupIconName)
-                    .foregroundStyle(warmupColor)
-                Text(warmupLabel)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            HStack(spacing: 6) {
-                Image(systemName: "info.circle")
-                    .foregroundStyle(.secondary)
-                Text("Backend: \(viewModel.renderBackendDescription)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            HStack(spacing: 6) {
-                Image(systemName: "square.stack.3d.up")
-                    .foregroundStyle(.secondary)
-                Text("Cached mattes: \(viewModel.matteCache.count) / \(viewModel.totalFrames)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var warmupIconName: String {
-        switch viewModel.warmupStatus {
-        case .cold: return "moon.zzz"
-        case .warming: return "clock"
-        case .ready: return "checkmark.circle.fill"
-        case .failed: return "exclamationmark.triangle.fill"
-        }
-    }
-
-    private var warmupColor: Color {
-        switch viewModel.warmupStatus {
-        case .cold: return .secondary
-        case .warming: return .orange
-        case .ready: return .green
-        case .failed: return .red
-        }
-    }
-
-    private var warmupLabel: String {
-        switch viewModel.warmupStatus {
-        case .cold: return "Neural Model: Cold"
-        case .warming(let resolution): return "Neural Model: Loading (\(resolution)px)…"
-        case .ready(let resolution): return "Neural Model: Ready (\(resolution)px)"
-        case .failed(let message): return "Neural Model Failed: \(message)"
+            AnalysisDetailsView(snapshot: viewModel.inspectorSnapshot,
+                                memoryEstimate: viewModel.videoMemoryEstimate, showsTiming: false)
         }
     }
 }
@@ -137,13 +110,13 @@ private struct AnalysisProgressLabel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ProgressView(value: progressValue)
+            if status.inProgress {
+                ProgressView(value: progressValue)
+            }
 
             switch status {
             case .idle:
-                Text("Press Analyse Clip to build the matte cache.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                AnalysisRequiredLabel()
             case .running(let processed, let total):
                 Text("Analysing frame \(processed) of \(total)…")
                     .font(.caption)
@@ -189,25 +162,34 @@ private struct SettingsGroup: View {
                 defaultValue: ParameterRanges.Defaults.qualityMode,
                 onChange: viewModel.parameterDidChange
             )
-            // The Hint dropdown sits directly under Quality because
-            // hint generation is the second-most-impactful decision
-            // for the matte (after the inference rung). Replaces the
-            // old "Auto Subject Hint" checkbox — the dropdown's three
-            // values map cleanly to Automatic (chroma prior),
-            // Apple Vision (Neural-Engine subject mask), and Manual
-            // (user-placed dots only).
             EnumPicker(
                 title: ParameterRanges.hintModeName,
                 selection: $viewModel.state.hintMode,
                 defaultValue: ParameterRanges.Defaults.hintMode,
                 onChange: viewModel.parameterDidChange
             )
+            .disabled(viewModel.state.video.useAlphaHint)
+            Text(HintMode.explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
             EnumPicker(
                 title: ParameterRanges.screenColorName,
                 selection: $viewModel.state.screenColor,
                 defaultValue: ParameterRanges.Defaults.screenColor,
                 onChange: viewModel.parameterDidChange
             )
+            if viewModel.state.screenColor == .custom {
+                ColorPicker("Custom Screen Colour", selection: Binding(
+                    get: { Color(.sRGB, red: viewModel.state.video.customScreenColor.x,
+                                 green: viewModel.state.video.customScreenColor.y, blue: viewModel.state.video.customScreenColor.z) },
+                    set: { color in
+                        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                              let components = color.cgColor?.converted(to: space, intent: .relativeColorimetric, options: nil)?.components,
+                              components.count >= 3 else { return }
+                        viewModel.state.video.customScreenColor = SIMD3(Double(components[0]), Double(components[1]), Double(components[2]))
+                        viewModel.videoParameterDidChange()
+                    }), supportsOpacity: false)
+            }
             EnumPicker(
                 title: ParameterRanges.upscaleMethodName,
                 selection: $viewModel.state.upscaleMethod,
@@ -220,15 +202,103 @@ private struct SettingsGroup: View {
                 defaultValue: ParameterRanges.Defaults.outputMode,
                 onChange: viewModel.parameterDidChange
             )
+            ParameterToggle(title: VideoInferenceSettings.Labels.inputIsLinear,
+                            isOn: $viewModel.state.video.inputIsLinear, defaultValue: false,
+                            onChange: viewModel.videoParameterDidChange)
+            ParameterToggle(title: VideoInferenceSettings.Labels.linearizeOutput,
+                            isOn: $viewModel.state.video.linearizeOutput, defaultValue: false,
+                            onChange: viewModel.videoParameterDidChange)
+            ParameterToggle(title: VideoInferenceSettings.Labels.keepOriginalInSolidAreas,
+                            isOn: $viewModel.state.video.keepOriginalInSolidAreas, defaultValue: false,
+                            onChange: viewModel.videoParameterDidChange)
 
-            if viewModel.state.hintMode == .manual && viewModel.state.hintPointSet.isEmpty {
-                Label(
-                    "Manual Hint mode needs at least one foreground / background point — open the Subject menu in the transport bar.",
-                    systemImage: "exclamationmark.triangle.fill"
+            if viewModel.state.hintMode == .manual || !viewModel.state.hintPointSet.isEmpty {
+                Text(ManualHintGuidance.explanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if viewModel.state.hintPointSet.hasLegacyPoints {
+                Text(ManualHintGuidance.legacyExplanation)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+        }
+    }
+}
+
+private struct VideoTimeAwarenessGroup: View {
+    @Bindable var viewModel: EditorViewModel
+
+    var body: some View {
+        InspectorGroup(title: VideoInferenceSettings.Labels.timeAwareness) {
+            EnumPicker(title: VideoInferenceSettings.Labels.timeAwareness,
+                       selection: $viewModel.state.video.timeAwareness, defaultValue: .off,
+                       onChange: viewModel.videoParameterDidChange)
+            ParameterToggle(title: VideoInferenceSettings.Labels.lowGPUMemory,
+                            isOn: $viewModel.state.video.lowGPUMemory, defaultValue: VideoInferenceSettings().lowGPUMemory,
+                            onChange: viewModel.videoParameterDidChange)
+            Text("Applied during Analyse Clip. " + viewModel.videoMemoryDescription)
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct VideoAlphaHintGroup: View {
+    @Bindable var viewModel: EditorViewModel
+
+    var body: some View {
+        InspectorGroup(title: "Alpha Hint") {
+            AlphaHintPicker(asset: $viewModel.state.video.alphaHintAsset,
+                            onChange: viewModel.videoParameterDidChange,
+                            setCurrentReference: viewModel.setCurrentFrameAsHintReference)
+            ParameterToggle(title: VideoInferenceSettings.Labels.useAlphaHint,
+                            isOn: $viewModel.state.video.useAlphaHint, defaultValue: false,
+                            onChange: viewModel.videoParameterDidChange)
+            EnumPicker(title: VideoInferenceSettings.Labels.hintFrames,
+                       selection: $viewModel.state.video.hintFrames, defaultValue: .allFrames,
+                       onChange: viewModel.videoParameterDidChange)
+            ParameterIntSlider(range: .init(name: VideoInferenceSettings.Labels.referenceFrame,
+                                           defaultValue: 0, parameterMin: 0, parameterMax: Int(Int32.max),
+                                           sliderMin: 0, sliderMax: max(0, viewModel.totalFrames - 1), step: 1),
+                               value: $viewModel.state.video.referenceFrame,
+                               onChange: viewModel.videoParameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged)
+                .disabled(viewModel.state.video.hintFrames != .singleFrame)
+            ParameterFloatSlider(range: .init(name: VideoInferenceSettings.Labels.alphaHintStrength,
+                                             defaultValue: 0.75, parameterMin: 0, parameterMax: 1,
+                                             sliderMin: 0, sliderMax: 1, step: 0.01),
+                                 value: $viewModel.state.video.alphaHintStrength,
+                                 onChange: viewModel.videoParameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged)
+            ParameterFloatSlider(range: .init(name: VideoInferenceSettings.Labels.internalHintStrength,
+                                             defaultValue: 0.95, parameterMin: 0, parameterMax: 1,
+                                             sliderMin: 0, sliderMax: 1, step: 0.01),
+                                 value: $viewModel.state.video.internalHintStrength,
+                                 onChange: viewModel.videoParameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged)
+        }
+    }
+}
+
+/// Mirrors the FxPlug Manual Hint section and shares the transport bar's selection.
+private struct ManualHintGroup: View {
+    @Bindable var viewModel: EditorViewModel
+
+    var body: some View {
+        InspectorGroup(title: "Manual Hint") {
+            InspectorButtonRow {
+                SubjectHintToolMenu(
+                    selection: $viewModel.oscTool,
+                    clearCurrentFrame: viewModel.clearHintsOnCurrentFrame,
+                    clearAllFrames: viewModel.clearAllHints,
+                    hasCurrentFrameHints: !viewModel.currentFrameHints.isEmpty,
+                    hasAnyHints: !viewModel.state.hintPointSet.isEmpty
                 )
-                .font(.caption)
-                .foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
+                .disabled(viewModel.analysisStatus.inProgress || viewModel.state.video.useAlphaHint)
+                ManualHintHelpButton()
             }
         }
     }
@@ -248,12 +318,14 @@ private struct InteriorDetailGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.passthroughErode,
                 value: $viewModel.state.passthroughErodeNormalized,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterFloatSlider(
                 range: ParameterRanges.passthroughBlur,
                 value: $viewModel.state.passthroughBlurNormalized,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
         }
     }
@@ -267,27 +339,32 @@ private struct MatteGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.alphaBlackPoint,
                 value: $viewModel.state.alphaBlackPoint,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterFloatSlider(
                 range: ParameterRanges.alphaWhitePoint,
                 value: $viewModel.state.alphaWhitePoint,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterFloatSlider(
                 range: ParameterRanges.alphaErode,
                 value: $viewModel.state.alphaErodeNormalized,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterFloatSlider(
                 range: ParameterRanges.alphaSoftness,
                 value: $viewModel.state.alphaSoftnessNormalized,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterFloatSlider(
                 range: ParameterRanges.alphaGamma,
                 value: $viewModel.state.alphaGamma,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             ParameterToggle(
                 title: ParameterRanges.autoDespeckleName,
@@ -298,13 +375,15 @@ private struct MatteGroup: View {
             ParameterIntSlider(
                 range: ParameterRanges.despeckleSize,
                 value: $viewModel.state.despeckleSize,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             .disabled(!viewModel.state.autoDespeckleEnabled)
             ParameterFloatSlider(
                 range: ParameterRanges.refinerStrength,
                 value: $viewModel.state.refinerStrength,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
         }
     }
@@ -318,7 +397,8 @@ private struct EdgeAndSpillGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.despillStrength,
                 value: $viewModel.state.despillStrength,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             EnumPicker(
                 title: ParameterRanges.spillMethodName,
@@ -344,13 +424,15 @@ private struct EdgeRefinementGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.lightWrapStrength,
                 value: $viewModel.state.lightWrapStrength,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             .disabled(!viewModel.state.lightWrapEnabled)
             ParameterFloatSlider(
                 range: ParameterRanges.lightWrapRadius,
                 value: $viewModel.state.lightWrapRadius,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             .disabled(!viewModel.state.lightWrapEnabled)
 
@@ -363,7 +445,8 @@ private struct EdgeRefinementGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.edgeDecontaminateStrength,
                 value: $viewModel.state.edgeDecontaminateStrength,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             .disabled(!viewModel.state.edgeDecontaminateEnabled)
         }
@@ -375,6 +458,8 @@ private struct TemporalStabilityGroup: View {
 
     var body: some View {
         InspectorGroup(title: "Temporal Stability") {
+            Text("Optional smoothing after the v2 key. It can soften detail or leave trails on moving edges. Start with it off. Try Time Awareness first for flicker.")
+                .font(.caption).foregroundStyle(.secondary)
             ParameterToggle(
                 title: ParameterRanges.temporalStabilityName,
                 isOn: $viewModel.state.temporalStabilityEnabled,
@@ -384,7 +469,8 @@ private struct TemporalStabilityGroup: View {
             ParameterFloatSlider(
                 range: ParameterRanges.temporalStabilityStrength,
                 value: $viewModel.state.temporalStabilityStrength,
-                onChange: viewModel.parameterDidChange
+                onChange: viewModel.parameterDidChange,
+                onEditingChanged: viewModel.parameterEditingChanged
             )
             .disabled(!viewModel.state.temporalStabilityEnabled)
         }
@@ -420,6 +506,7 @@ struct ParameterFloatSlider: View {
     let range: FloatParameterRange
     @Binding var value: Double
     var onChange: () -> Void = {}
+    var onEditingChanged: (Bool) -> Void = { _ in }
 
     /// True when the current value sits within half a step of the
     /// factory default. Used to show / hide the reset affordance — a
@@ -435,7 +522,16 @@ struct ParameterFloatSlider: View {
                 Text(range.name)
                     .font(.callout)
                 Spacer()
-                Text(value, format: .number.precision(.fractionLength(2)))
+                TextField(range.name, value: Binding(
+                    get: { value },
+                    set: { candidate in
+                        guard candidate.isFinite else { return }
+                        value = min(range.parameterMax, max(range.parameterMin, candidate))
+                    }
+                ), format: .number.precision(.fractionLength(0...2)))
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.plain)
+                    .accessibilityLabel(range.name)
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
                 ResetToDefaultButton(
@@ -447,9 +543,13 @@ struct ParameterFloatSlider: View {
                 }
             }
             Slider(
-                value: $value,
+                value: Binding(
+                    get: { min(range.sliderMax, max(range.sliderMin, value)) },
+                    set: { value = $0 }
+                ),
                 in: range.sliderMin...range.sliderMax,
-                step: range.step
+                step: range.step,
+                onEditingChanged: onEditingChanged
             )
             .onChange(of: value) {
                 onChange()
@@ -466,6 +566,7 @@ struct ParameterIntSlider: View {
     let range: IntParameterRange
     @Binding var value: Int
     var onChange: () -> Void = {}
+    var onEditingChanged: (Bool) -> Void = { _ in }
 
     private var isAtDefault: Bool { value == range.defaultValue }
 
@@ -475,7 +576,13 @@ struct ParameterIntSlider: View {
                 Text(range.name)
                     .font(.callout)
                 Spacer()
-                Text(value, format: .number)
+                TextField(range.name, value: Binding(
+                    get: { value },
+                    set: { value = min(range.parameterMax, max(range.parameterMin, $0)) }
+                ), format: .number)
+                    .multilineTextAlignment(.trailing)
+                    .textFieldStyle(.plain)
+                    .accessibilityLabel(range.name)
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
                 ResetToDefaultButton(
@@ -486,14 +593,25 @@ struct ParameterIntSlider: View {
                     onChange()
                 }
             }
-            Slider(
-                value: Binding(
-                    get: { Double(value) },
-                    set: { value = Int($0.rounded()) }
-                ),
-                in: Double(range.sliderMin)...Double(range.sliderMax),
-                step: Double(range.step)
-            )
+            Group {
+                if range.sliderMin < range.sliderMax {
+                    Slider(
+                        value: Binding(
+                            get: { Double(min(range.sliderMax, max(range.sliderMin, value))) },
+                            set: { value = Int($0.rounded()) }
+                        ),
+                        in: Double(range.sliderMin)...Double(range.sliderMax),
+                        step: Double(range.step),
+                        onEditingChanged: onEditingChanged
+                    )
+                } else {
+                    // A stepped Slider traps on a zero-width range, even when
+                    // disabled. Keep an inert track for empty/single-frame media
+                    // without expanding the parameter's valid frame range.
+                    Slider(value: .constant(0), in: 0...1)
+                        .disabled(true)
+                }
+            }
             .onChange(of: value) {
                 onChange()
             }
@@ -608,6 +726,8 @@ extension OutputMode: DisplayNamed, Identifiable { public var id: Int { rawValue
 extension SpillMethod: DisplayNamed, Identifiable { public var id: Int { rawValue } }
 extension UpscaleMethod: DisplayNamed, Identifiable { public var id: Int { rawValue } }
 extension HintMode: DisplayNamed, Identifiable { public var id: Int { rawValue } }
+extension TimeAwareness: DisplayNamed, Identifiable { public var id: Int { rawValue } }
+extension AlphaHintFrames: DisplayNamed, Identifiable { public var id: Int { rawValue } }
 
 /// Formats an elapsed duration in seconds as a human-readable string
 /// for the analysis-completed badge. Replaces the earlier "187.7 s"

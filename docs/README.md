@@ -40,6 +40,26 @@ It uses Apple's [Vision Framework](https://developer.apple.com/documentation/vis
 
 ---
 
+## Apple Vision + Manual Points
+
+Apple Vision supplies the starting matte. Foreground points select detected subjects; mark each subject you want to retain. Background points correct small, soft-edged areas. Ignore points (red crosses) exclude a detected object, with a local correction when no instance is detected. Ignore takes precedence if the same instance is also marked Foreground. Vision must distinguish objects as separate instances to select them independently.
+
+New points belong to the frame where you place them. Unmarked frames use the Vision matte. Points do not track or propagate through the clip. Use **Alpha Hint (Diagnostic)** to inspect the guide and choose **Analyse Clip** after editing. The points guide CorridorKey's prediction; review the final matte. Changing points invalidates the previous analysis in both hosts.
+
+In the Standalone Editor, use **Subject Hints**. In Final Cut Pro, click for foreground, Shift-click for background, Command-click for Ignore, and Option-click to erase a nearby point. Both hosts offer **Clear Hints on This Frame** and **Clear All Hints**.
+
+Hints saved by older versions retain their frame scope, including clip-wide points without frame information. Clear and replace those points to use frame-specific hints. Existing analysis must be rebuilt after this update. Generated Hint starts with **None**, while saved selections retain their original values.
+
+---
+
+## Edge Decontaminate
+
+**Edge Decontaminate** reduces residual green or blue spill in partially transparent edges, using the selected **Screen Colour**. It removes only excess of that colour, preserving neutral edges and opaque interiors.
+
+The control is off by default in the Standalone Editor and Final Cut Pro. Enable it when an edge still contains screen spill; naturally green or blue details may also be affected. Existing saved settings retain their chosen value.
+
+---
+
 ## What is CorridorKey?
 
 [CorridorKey](https://github.com/nikopueringer/CorridorKey) is an open source project created by the talented [Corridor Digital](https://www.corridordigital.com) team.

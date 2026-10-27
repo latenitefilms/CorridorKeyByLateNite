@@ -34,6 +34,25 @@ import Metal
 import CoreMedia
 import simd
 
+#if CORRIDOR_KEY_HEADLESS_TESTS
+@testable import CorridorKeyToolboxLogic
+@testable import CorridorKeyToolboxMetalStages
+#endif
+
+/// Physical row order supplied by a host surface. Neural inputs and cached
+/// alpha/foreground always use top-to-bottom rows, independently of the host.
+enum ImageRowOrder: Sendable, CaseIterable {
+    case topToBottom
+    case bottomToTop
+
+#if FXPLUG_HOST
+    /// Resolves each tile separately: analysis, source and destination can differ.
+    init(imageOrigin: FxImageOrigin) {
+        self = imageOrigin == kFxImageOrigin_BOTTOM_LEFT ? .bottomToTop : .topToBottom
+    }
+#endif
+}
+
 #if FXPLUG_HOST
 /// Input bundle for an FxPlug render. Value-type keeps the orchestrator
 /// easy to reason about; `FxImageTile` is passed along because we only
@@ -95,10 +114,26 @@ final class RenderPipeline: @unchecked Sendable {
     /// FxPlug layer can update the runtime status fields.
     func render(_ request: RenderRequest) throws -> RenderReport {
         let context = try makeDeviceContext(for: request)
-        defer { context.entry.returnCommandQueue(context.commandQueue) }
+        defer {
+            context.normalizedSource?.returnManually()
+            context.entry.returnCommandQueue(context.commandQueue)
+        }
+        let hintTexture = request.alphaHintImage?.metalTexture(for: context.device)
+        let normalizedHint: PooledTexture?
+        if let hintTexture, let hintImage = request.alphaHintImage {
+            normalizedHint = try normalizeSourceRows(
+                hintTexture,
+                rowOrder: ImageRowOrder(imageOrigin: hintImage.imageOrigin),
+                entry: context.entry,
+                commandQueue: context.commandQueue
+            )
+        } else {
+            normalizedHint = nil
+        }
+        defer { normalizedHint?.returnManually() }
         let inputs = ResolvedRenderInputs(
             state: request.state,
-            alphaHintTexture: request.alphaHintImage?.metalTexture(for: context.device),
+            alphaHintTexture: normalizedHint?.texture ?? hintTexture,
             workingGamut: request.workingGamut,
             renderTime: request.renderTime
         )
@@ -117,13 +152,20 @@ final class RenderPipeline: @unchecked Sendable {
         alphaHint: (any MTLTexture)? = nil,
         state: PluginStateData,
         workingGamut: WorkingColorGamut = .rec709,
-        renderTime: CMTime = .zero
+        renderTime: CMTime = .zero,
+        sourceRowOrder: ImageRowOrder = .topToBottom,
+        destinationRowOrder: ImageRowOrder = .topToBottom
     ) throws -> RenderReport {
         let context = try makeDeviceContext(
             sourceTexture: source,
-            destinationTexture: destination
+            destinationTexture: destination,
+            sourceRowOrder: sourceRowOrder,
+            destinationRowOrder: destinationRowOrder
         )
-        defer { context.entry.returnCommandQueue(context.commandQueue) }
+        defer {
+            context.normalizedSource?.returnManually()
+            context.entry.returnCommandQueue(context.commandQueue)
+        }
         let inputs = ResolvedRenderInputs(
             state: state,
             alphaHintTexture: alphaHint,
@@ -133,6 +175,47 @@ final class RenderPipeline: @unchecked Sendable {
         return try renderInternal(inputs: inputs, context: context)
     }
 
+    /// One small readback supplies the same screen reference in both hosts.
+    /// Border samples reduce the influence of the subject on automatic selection.
+    private func screenTransform(source: any MTLTexture, state: PluginStateData,
+                                 entry: MetalDeviceCacheEntry, queue: any MTLCommandQueue) throws -> ScreenColorTransform {
+        var reference = state.screenColor.canonicalScreenReference
+        if state.screenColor == .custom {
+            reference = SIMD3<Float>(state.video.customScreenColor)
+        } else if state.screenColor == .automatic {
+            guard let command = queue.makeCommandBuffer(),
+                  let buffer = entry.device.makeBuffer(length: 32 * 32 * 8, options: .storageModeShared) else {
+                throw MetalDeviceCacheError.commandBufferCreationFailed
+            }
+            let sampled = try RenderStages.resample(source: source, targetWidth: 32, targetHeight: 32,
+                pixelFormat: .rgba16Float, method: .bilinear, entry: entry, commandBuffer: command)
+            defer { sampled?.returnManually() }
+            guard let blit = command.makeBlitCommandEncoder() else { throw MetalDeviceCacheError.commandEncoderCreationFailed }
+            blit.copy(from: sampled?.texture ?? source, sourceSlice: 0, sourceLevel: 0,
+                sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0), sourceSize: MTLSize(width: 32, height: 32, depth: 1),
+                to: buffer, destinationOffset: 0, destinationBytesPerRow: 256, destinationBytesPerImage: 8192)
+            blit.endEncoding()
+            command.commit()
+            command.waitUntilCompleted()
+            if let error = command.error { throw error }
+            let pixels = buffer.contents().assumingMemoryBound(to: Float16.self)
+            var sum = SIMD3<Float>.zero
+            var total: Float = 0
+            for row in 0..<32 {
+                for column in 0..<32 where row < 4 || row >= 28 || column < 4 || column >= 28 {
+                    let offset = (row * 32 + column) * 4
+                    let rgb = SIMD3<Float>(Float(pixels[offset]), Float(pixels[offset + 1]), Float(pixels[offset + 2]))
+                    let weight = max(0, max(rgb.y, rgb.z) - rgb.x)
+                    sum += rgb * weight
+                    total += weight
+                }
+            }
+            if total > 0.001 { reference = sum / total }
+        }
+        return ScreenColorTransform(forwardMatrix: matrix_identity_float3x3, inverseMatrix: matrix_identity_float3x3,
+                                    isIdentity: true, estimatedScreenReference: reference)
+    }
+
     /// Shared dispatch: picks the render sub-path for the given inputs and
     /// device context. Both `render(_:)` and `renderToTexture(...)` funnel
     /// through here so neither has to know about `FxImageTile`.
@@ -140,12 +223,28 @@ final class RenderPipeline: @unchecked Sendable {
         inputs: ResolvedRenderInputs,
         context: DeviceContext
     ) throws -> RenderReport {
-        let screenTransform = ScreenColorEstimator.defaultTransform(for: inputs.state.screenColor)
+        if inputs.state.outputMode == .original {
+            return try renderSourcePassThrough(inputs: inputs, context: context, backendDescription: "Original")
+        }
+        let needsScreenReference = inputs.state.outputMode == .hint || inputs.state.despillStrength > 0
+            || (inputs.state.edgeDecontaminateEnabled && inputs.state.edgeDecontaminateStrength > 0)
+        let screenTransform = needsScreenReference
+            ? try screenTransform(source: context.sourceTexture, state: inputs.state, entry: context.entry, queue: context.commandQueue)
+            : ScreenColorEstimator.defaultTransform(for: inputs.state.screenColor)
         let gamutTransform = ColorGamutMatrix.transform(for: inputs.workingGamut)
-        let inferenceResolution = inputs.state.qualityMode.resolvedInferenceResolution(
+        let requestedResolution = inputs.state.qualityMode.resolvedInferenceResolution(
             forLongEdge: context.longEdge,
             deviceRegistryID: context.entry.device.registryID
         )
+        // FCP supplies smaller source surfaces during playback. Recommended
+        // quality belongs to the analysis pass, not the current preview size.
+        // Cache lookup already validates the selected quality and prediction
+        // inputs; explicit quality selections still require their exact rung.
+        let cachedResolution = inputs.state.cachedMatteInferenceResolution
+        let hasCachedFrame = inputs.state.cachedFrameReference != nil || inputs.state.cachedMatteBlob != nil
+        let inferenceResolution = inputs.state.qualityMode == .automatic && hasCachedFrame
+            && QualityMode.inferenceLadder.contains(cachedResolution)
+            ? cachedResolution : requestedResolution
 
         // Diagnostic: when the user picks the Hint output mode, route
         // straight to a path that runs the pre-inference hint stage and
@@ -163,12 +262,25 @@ final class RenderPipeline: @unchecked Sendable {
             )
         }
 
-        // Fast path: FxAnalyzer already ran for this clip and the inference
-        // resolution matches the quality the user is asking for. Skip MLX
-        // entirely — the cache already holds a network-quality matte.
-        if let header = cachedMatteHeader(from: inputs.state, expectedResolution: inferenceResolution),
-           let blob = inputs.state.cachedMatteBlob {
-            return try renderUsingCachedAlpha(
+        // Both hosts use the original prediction and scale it to the current
+        // output surface. Playback never needs to rerun neural inference.
+        let cachedBlob: Data?
+        if let reference = inputs.state.cachedFrameReference,
+           inputs.state.cachedMatteInferenceResolution == inferenceResolution {
+            cachedBlob = try AnalysisDiskCache.shared.load(reference)
+        } else {
+            cachedBlob = inputs.state.cachedMatteBlob
+        }
+        let cachedHeader = cachedBlob.flatMap {
+            cachedFrameHeader(blob: $0, from: inputs.state, expectedResolution: inferenceResolution,
+                              sourceWidth: context.sourceWidth, sourceHeight: context.sourceHeight)
+        }
+        if inputs.state.cachedFrameReference != nil,
+           inputs.state.cachedMatteInferenceResolution == inferenceResolution, cachedHeader == nil {
+            throw AnalysisDiskCacheError.invalidFrame
+        }
+        if let blob = cachedBlob, let header = cachedHeader {
+            return try renderUsingCachedFrame(
                 inputs: inputs,
                 context: context,
                 screenTransform: screenTransform,
@@ -177,19 +289,6 @@ final class RenderPipeline: @unchecked Sendable {
                 cachedBlob: blob,
                 cachedWidth: header.width,
                 cachedHeight: header.height
-            )
-        }
-        // Manual hint mode demands at least one user-placed hint —
-        // the network can't produce a useful matte from an empty
-        // hint channel. Surface as a pass-through so the user sees
-        // their footage rather than a black frame, and label the
-        // backend so the inspector status row can explain why.
-        if inputs.state.hintMode.requiresUserHints,
-           inputs.state.hintPointSet.points.isEmpty {
-            return try renderSourcePassThrough(
-                inputs: inputs,
-                context: context,
-                backendDescription: "Manual Hint — add at least one foreground / background point"
             )
         }
         // Unanalysed → leave the source untouched. Running MLX on the render
@@ -208,6 +307,8 @@ final class RenderPipeline: @unchecked Sendable {
     /// per frame instead of guessing from the registry's current state.
     struct AnalysisExtraction {
         let alpha: [Float]
+        /// Straight model foreground, RGBA16F in the same row order as alpha.
+        let foregroundHalfRGBA: Data
         let source: [Float]?
         let width: Int
         let height: Int
@@ -215,9 +316,9 @@ final class RenderPipeline: @unchecked Sendable {
         let engineDescription: String
     }
 
-    /// Runs pre-inference + MLX (no post-processing) and returns the raw alpha
-    /// matte on the CPU. Called by `FxAnalyzer.analyzeFrame` so the matte can
-    /// be compressed and stored in the custom parameter. This path never reads
+    /// Runs pre-inference + MLX (no post-processing) and returns raw alpha and
+    /// half-float reconstructed foreground. Called by both hosts so the complete
+    /// frame can be compressed and stored. This path never reads
     /// from or writes to the per-frame cache — the custom parameter is the
     /// persistent cache.
     ///
@@ -244,96 +345,75 @@ final class RenderPipeline: @unchecked Sendable {
         device: any MTLDevice,
         entry: MetalDeviceCacheEntry,
         commandQueue: any MTLCommandQueue,
-        readbackSource: Bool = false
+        readbackSource: Bool = false,
+        sourceRowOrder: ImageRowOrder = .topToBottom
     ) throws -> AnalysisExtraction {
-        // Manual hint mode requires at least one user-placed hint —
-        // an empty hint channel would feed MLX a degenerate prior and
-        // the analyser would fill the cache with garbage. Fail fast
-        // so the caller can surface the error in the analysis status
-        // row instead of silently producing a bad matte sequence.
-        if state.hintMode.requiresUserHints, state.hintPointSet.points.isEmpty {
-            throw KeyingInferenceError.modelUnavailable(
-                "Manual Hint mode needs at least one foreground or background hint point. Open the Subject menu in the transport bar and click the preview to drop one."
-            )
+        var singleFrameState = state
+        singleFrameState.video.timeAwareness = .off
+        singleFrameState.video.referenceFrame = 0
+        let session = try makeVideoInferenceSession(sourceWidth: sourceTexture.width, sourceHeight: sourceTexture.height,
+                                                   state: singleFrameState, frameCount: 1, entry: entry,
+                                                   readbackSource: readbackSource)
+        let hintReader = state.video.useAlphaHint
+            ? try DeferredAlphaHintReader(settings: state.video, frameCount: 0, frameDuration: .invalid,
+                                          previewFrame: state.sourceFrameIndex).waitForReader() : nil
+        let hint = try hintReader?.texture(frameIndex: state.sourceFrameIndex, sourceWidth: sourceTexture.width,
+                                          sourceHeight: sourceTexture.height, device: device, commandQueue: commandQueue)
+        try appendVideoFrame(sourceTexture: sourceTexture, hintTexture: hint, state: singleFrameState,
+                             workingGamut: workingGamut, renderTime: renderTime, frameIndex: 0,
+                             session: session, entry: entry, commandQueue: commandQueue,
+                             sourceRowOrder: sourceRowOrder)
+        var extracted: AnalysisExtraction?
+        try session.finish { frame in
+            extracted = AnalysisExtraction(alpha: frame.alpha, foregroundHalfRGBA: frame.foregroundHalfRGBA,
+                                           source: frame.source, width: frame.geometry.contentWidth,
+                                           height: frame.geometry.contentHeight,
+                                           inferenceResolution: frame.geometry.resolution,
+                                           engineDescription: "CorridorKey v2 · MLX")
         }
-        let screenTransform = ScreenColorEstimator.defaultTransform(for: state.screenColor)
-        let gamutTransform = ColorGamutMatrix.transform(for: workingGamut)
-        let longEdge = max(sourceTexture.width, sourceTexture.height)
-        let inferenceResolution = state.qualityMode.resolvedInferenceResolution(
-            forLongEdge: longEdge,
-            deviceRegistryID: device.registryID
-        )
+        guard let extracted else { throw VideoAnalysisError.incompleteSequence }
+        return extracted
+    }
 
-        let pre = try runPreInference(
-            sourceTexture: sourceTexture,
-            hintTexture: nil,
-            hintMode: state.hintMode,
-            hintPoints: state.hintPointSet.points,
-            device: device,
-            entry: entry,
-            commandQueue: commandQueue,
-            screenTransform: screenTransform,
-            gamutTransform: gamutTransform,
-            inferenceResolution: inferenceResolution
-        )
+    /// Creates the common video workflow after choosing a source-aware quality rung.
+    func makeVideoInferenceSession(sourceWidth: Int, sourceHeight: Int, state: PluginStateData,
+                                   frameCount: Int, entry: MetalDeviceCacheEntry,
+                                   readbackSource: Bool) throws -> VideoInferenceSession {
+        let resolution = state.qualityMode.resolvedInferenceResolution(
+            forLongEdge: max(sourceWidth, sourceHeight), deviceRegistryID: entry.device.registryID)
+        let engine = try SharedMLXBridgeRegistry.shared.waitForReady(
+            deviceRegistryID: entry.device.registryID, rung: resolution,
+            screenColor: state.screenColor, cacheEntry: entry)
+        return try VideoInferenceSession(engine: engine, settings: state.video, hintMode: state.hintMode,
+                                         geometry: InferenceGeometry(sourceWidth: sourceWidth, sourceHeight: sourceHeight,
+                                                                     resolution: resolution),
+                                         frameCount: frameCount, device: entry.device, needsSourceReadback: readbackSource)
+    }
 
-        let cacheKey = InferenceCacheKey(
-            frameTime: renderTime,
-            screenColorRaw: state.screenColor.rawValue,
-            inferenceResolution: inferenceResolution,
-            cacheEntry: entry
-        )
-        let inferenceResult = try inferenceCoordinator.runInference(
-            request: KeyingInferenceRequest(
-                normalisedInputBuffer: pre.normalisedInputBuffer,
-                rawSourceTexture: pre.rawSourceAtInferenceResolution.texture,
-                inferenceResolution: inferenceResolution
-            ),
-            screenColor: state.screenColor,
-            cacheEntry: entry,
-            cacheKey: cacheKey
-        )
-        let inferenceOutput = inferenceResult.output
-
-        let width = inferenceOutput.alphaTexture.width
-        let height = inferenceOutput.alphaTexture.height
-        var alpha = [Float](repeating: 0, count: width * height)
-        let bytesPerRow = width * MemoryLayout<Float>.size
-        alpha.withUnsafeMutableBufferPointer { pointer in
-            if let base = pointer.baseAddress {
-                inferenceOutput.alphaTexture.getBytes(
-                    base,
-                    bytesPerRow: bytesPerRow,
-                    from: MTLRegionMake2D(0, 0, width, height),
-                    mipmapLevel: 0
-                )
-            }
+    /// Retains the per-device scratch lease until MLX has consumed this frame.
+    /// Both hosts call this path, including row normalization and reflected padding.
+    func appendVideoFrame(sourceTexture: any MTLTexture, hintTexture: (any MTLTexture)?,
+                          state: PluginStateData, workingGamut: WorkingColorGamut,
+                          renderTime: CMTime, frameIndex: Int, session: VideoInferenceSession,
+                          entry: MetalDeviceCacheEntry, commandQueue: any MTLCommandQueue,
+                          sourceRowOrder: ImageRowOrder = .topToBottom) throws {
+        entry.beginAnalysisFrame()
+        defer { entry.endAnalysisFrame() }
+        let normalized = try normalizeSourceRows(sourceTexture, rowOrder: sourceRowOrder,
+                                                 entry: entry, commandQueue: commandQueue)
+        defer { normalized?.returnManually() }
+        let pre = try runPreInference(sourceTexture: normalized?.texture ?? sourceTexture,
+                                      hintTexture: hintTexture, hintMode: state.video.useAlphaHint ? .none : state.hintMode,
+                                      hintPoints: state.video.useAlphaHint ? [] : state.hintPointSet.points(at: renderTime),
+                                      device: entry.device, entry: entry, commandQueue: commandQueue,
+                                      screenTransform: try screenTransform(source: sourceTexture, state: state, entry: entry, queue: commandQueue),
+                                      gamutTransform: ColorGamutMatrix.transform(for: workingGamut),
+                                      inferenceResolution: session.geometry.resolution, geometry: session.geometry,
+                                      suppliedHintLayout: 2, inputIsLinear: state.video.inputIsLinear)
+        defer {
+            pre.rotatedSource?.returnManually()
         }
-
-        var sourceReadback: [Float]? = nil
-        if readbackSource {
-            sourceReadback = try readbackRGBATexture(
-                pre.rawSourceAtInferenceResolution.texture,
-                entry: entry,
-                commandQueue: commandQueue
-            )
-        }
-
-        // Return pre-inference pooled textures now that we've captured the
-        // alpha. The inference output textures live outside the pool, and
-        // the normalised input buffer is cached per-rung on the entry so
-        // it is not returned here.
-        pre.rotatedSource?.returnManually()
-        pre.rawSourceAtInferenceResolution.returnManually()
-
-        return AnalysisExtraction(
-            alpha: alpha,
-            source: sourceReadback,
-            width: width,
-            height: height,
-            inferenceResolution: inferenceResolution,
-            engineDescription: inferenceResult.engineDescription
-        )
+        try session.append(normalizedInput: pre.normalisedInputBuffer, frameIndex: frameIndex)
     }
 
     /// Blits a pooled `.private`-storage texture into a reusable shared-
@@ -433,6 +513,9 @@ final class RenderPipeline: @unchecked Sendable {
         let commandQueue: any MTLCommandQueue
         let sourceTexture: any MTLTexture
         let destinationTexture: any MTLTexture
+        /// Owned only when an incoming bottom-up surface needed normalization.
+        let normalizedSource: PooledTexture?
+        let destinationRowOrder: ImageRowOrder
         let pixelFormat: MTLPixelFormat
         let sourceWidth: Int
         let sourceHeight: Int
@@ -449,43 +532,26 @@ final class RenderPipeline: @unchecked Sendable {
     private struct PreInferenceArtifacts {
         let rotatedSource: PooledTexture?
         let normalisedInputBuffer: any MTLBuffer
-        let rawSourceAtInferenceResolution: PooledTexture
     }
 
 #if FXPLUG_HOST
     private func makeDeviceContext(for request: RenderRequest) throws -> DeviceContext {
         let destinationTile = request.destinationImage
         let sourceTile = request.sourceImage
-        let pixelFormat = MetalDeviceCache.metalPixelFormat(for: destinationTile)
         guard let device = deviceCache.device(forRegistryID: destinationTile.deviceRegistryID) else {
             throw MetalDeviceCacheError.unknownDevice(destinationTile.deviceRegistryID)
         }
-        let entry = try deviceCache.entry(for: device)
-        guard let commandQueue = entry.borrowCommandQueue() else {
-            throw MetalDeviceCacheError.queueExhausted
-        }
-        guard let sourceTexture = sourceTile.metalTexture(for: device) else {
-            entry.returnCommandQueue(commandQueue)
+        guard let sourceTexture = sourceTile.metalTexture(for: device),
+              let destinationTexture = destinationTile.metalTexture(for: device) else {
             throw MetalDeviceCacheError.unknownDevice(destinationTile.deviceRegistryID)
         }
-        guard let destinationTexture = destinationTile.metalTexture(for: device) else {
-            entry.returnCommandQueue(commandQueue)
-            throw MetalDeviceCacheError.unknownDevice(destinationTile.deviceRegistryID)
-        }
-        let outputWidth = Float(destinationTile.tilePixelBounds.right - destinationTile.tilePixelBounds.left)
-        let outputHeight = Float(destinationTile.tilePixelBounds.top - destinationTile.tilePixelBounds.bottom)
-        return DeviceContext(
-            device: device,
-            entry: entry,
-            commandQueue: commandQueue,
+        return try makeDeviceContext(
             sourceTexture: sourceTexture,
             destinationTexture: destinationTexture,
-            pixelFormat: pixelFormat,
-            sourceWidth: sourceTexture.width,
-            sourceHeight: sourceTexture.height,
-            longEdge: max(sourceTexture.width, sourceTexture.height),
-            outputWidth: outputWidth,
-            outputHeight: outputHeight
+            sourceRowOrder: ImageRowOrder(imageOrigin: sourceTile.imageOrigin),
+            destinationRowOrder: ImageRowOrder(imageOrigin: destinationTile.imageOrigin),
+            outputWidth: Float(destinationTile.tilePixelBounds.right - destinationTile.tilePixelBounds.left),
+            outputHeight: Float(destinationTile.tilePixelBounds.top - destinationTile.tilePixelBounds.bottom)
         )
     }
 #endif
@@ -495,33 +561,67 @@ final class RenderPipeline: @unchecked Sendable {
     /// stage covers the entire output texture.
     private func makeDeviceContext(
         sourceTexture: any MTLTexture,
-        destinationTexture: any MTLTexture
+        destinationTexture: any MTLTexture,
+        sourceRowOrder: ImageRowOrder = .topToBottom,
+        destinationRowOrder: ImageRowOrder = .topToBottom,
+        outputWidth: Float? = nil,
+        outputHeight: Float? = nil
     ) throws -> DeviceContext {
         let device = destinationTexture.device
         let entry = try deviceCache.entry(for: device)
         guard let commandQueue = entry.borrowCommandQueue() else {
             throw MetalDeviceCacheError.queueExhausted
         }
+        let normalizedSource: PooledTexture?
+        do {
+            normalizedSource = try normalizeSourceRows(sourceTexture, rowOrder: sourceRowOrder, entry: entry, commandQueue: commandQueue)
+        } catch {
+            entry.returnCommandQueue(commandQueue)
+            throw error
+        }
         return DeviceContext(
             device: device,
             entry: entry,
             commandQueue: commandQueue,
-            sourceTexture: sourceTexture,
+            sourceTexture: normalizedSource?.texture ?? sourceTexture,
             destinationTexture: destinationTexture,
+            normalizedSource: normalizedSource,
+            destinationRowOrder: destinationRowOrder,
             pixelFormat: destinationTexture.pixelFormat,
             sourceWidth: sourceTexture.width,
             sourceHeight: sourceTexture.height,
             longEdge: max(sourceTexture.width, sourceTexture.height),
-            outputWidth: Float(destinationTexture.width),
-            outputHeight: Float(destinationTexture.height)
+            outputWidth: outputWidth ?? Float(destinationTexture.width),
+            outputHeight: outputHeight ?? Float(destinationTexture.height)
         )
+    }
+
+    /// Converts at the boundary rather than changing the model's writeback or
+    /// cache codec. Top-down sources take the zero-allocation path.
+    private func normalizeSourceRows(
+        _ source: any MTLTexture,
+        rowOrder: ImageRowOrder,
+        entry: MetalDeviceCacheEntry,
+        commandQueue: any MTLCommandQueue
+    ) throws -> PooledTexture? {
+        guard rowOrder == .bottomToTop else { return nil }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            throw MetalDeviceCacheError.commandBufferCreationFailed
+        }
+        let normalized = try RenderStages.flipVertically(source: source, entry: entry, commandBuffer: commandBuffer)
+        do {
+            try commitAndWait(commandBuffer: commandBuffer)
+            return normalized
+        } catch {
+            normalized.returnManually()
+            throw error
+        }
     }
 
     /// Writes the source tile straight through to the destination. Used when
     /// the clip hasn't been analysed yet — the plug-in stays out of the way
     /// until the cache is populated. The optional `backendDescription`
-    /// override lets the Manual Hint pass-through surface a more
-    /// specific reason in the inspector's status row.
+    /// override labels explicit Original output in the inspector's status row.
     private func renderSourcePassThrough(
         inputs: ResolvedRenderInputs,
         context: DeviceContext,
@@ -537,7 +637,7 @@ final class RenderPipeline: @unchecked Sendable {
         // source bytes through a tiny render pass so format and tile-layout
         // conversions the host expects still happen, without touching MLX.
         var passThroughState = inputs.state
-        passThroughState.outputMode = .foregroundOnly
+        passThroughState.outputMode = .original
         try compose(
             source: context.sourceTexture,
             foreground: context.sourceTexture,
@@ -576,14 +676,22 @@ final class RenderPipeline: @unchecked Sendable {
         // hint MLX would actually receive. Errors here are logged
         // (not swallowed) so users investigating "why is my hint
         // black?" can see the cause in Console.app.
+        let hintReader = inputs.state.video.useAlphaHint
+            ? try DeferredAlphaHintReader(settings: inputs.state.video, frameCount: 0, frameDuration: .invalid,
+                                          previewFrame: inputs.state.sourceFrameIndex).waitForReader() : nil
+        let externalHint = try hintReader?.texture(frameIndex: inputs.state.sourceFrameIndex,
+                                                   sourceWidth: context.sourceWidth, sourceHeight: context.sourceHeight,
+                                                   device: context.entry.device, commandQueue: context.commandQueue)
+        let suppliedHint = externalHint ?? inputs.alphaHintTexture
         var visionMask: VisionMask? = nil
         var visionFailureReason: String? = nil
-        if inputs.state.hintMode.usesVisionPrior,
+        if inputs.state.hintMode.usesVisionPrior, !inputs.state.video.useAlphaHint,
            inputs.alphaHintTexture == nil,
            #available(macOS 14.0, *) {
             if let engine = context.entry.visionHintEngine() as? VisionHintEngine {
                 do {
-                    visionMask = try engine.generateMask(source: context.sourceTexture)
+                    visionMask = try engine.generateMask(source: context.sourceTexture,
+                        points: inputs.state.hintMode == .manual ? inputs.state.hintPointSet.points(at: inputs.renderTime) : nil)
                     if visionMask == nil {
                         visionFailureReason = "Vision found no foreground instance"
                         PluginLog.notice("Hint Diagnostic: Vision returned nil — falling back to green-bias hint.")
@@ -591,6 +699,7 @@ final class RenderPipeline: @unchecked Sendable {
                         PluginLog.notice("Hint Diagnostic: Vision returned a mask, will resample and compose.")
                     }
                 } catch {
+                    if inputs.state.hintMode == .manual { throw error }
                     visionFailureReason = error.localizedDescription
                     PluginLog.notice("Hint Diagnostic: Vision threw error '\(error.localizedDescription)' — falling back to green-bias hint.")
                 }
@@ -602,6 +711,9 @@ final class RenderPipeline: @unchecked Sendable {
             PluginLog.notice("Hint Diagnostic: skipping Vision — hintMode=\(inputs.state.hintMode.displayName), externalHintAttached=\(inputs.alphaHintTexture != nil).")
         }
 
+        if inputs.state.hintMode == .manual, suppliedHint == nil, !inputs.state.video.useAlphaHint, visionMask == nil {
+            throw KeyingInferenceError.modelUnavailable("Apple Vision is unavailable. Try again or choose a different Generated Hint.")
+        }
         guard let commandBuffer = context.commandQueue.makeCommandBuffer() else {
             throw MetalDeviceCacheError.commandBufferCreationFailed
         }
@@ -620,50 +732,28 @@ final class RenderPipeline: @unchecked Sendable {
         let rotatedSource = rotatedSourcePooled?.texture ?? context.sourceTexture
 
         // Step 2: produce the hint texture exactly as the analyse path
-        // does (external > Vision > manual zero-base > green-bias).
+        // does (external > Vision + chroma > chroma).
         let hintPooled: PooledTexture
-        if let hostTexture = inputs.alphaHintTexture {
+        if let hostTexture = suppliedHint {
             hintPooled = try RenderStages.extractHint(
                 source: hostTexture,
-                layout: hintTileLayoutValue(for: hostTexture),
+                layout: externalHint != nil ? 2 : hintTileLayoutValue(for: hostTexture),
                 targetWidth: rotatedSource.width,
                 targetHeight: rotatedSource.height,
                 entry: context.entry,
                 commandBuffer: commandBuffer
             )
+        } else if inputs.state.video.useAlphaHint || inputs.state.hintMode == .none {
+            hintPooled = try RenderStages.extractHint(source: rotatedSource, layout: 3,
+                targetWidth: rotatedSource.width, targetHeight: rotatedSource.height,
+                entry: context.entry, commandBuffer: commandBuffer)
         } else if let mask = visionMask {
-            // Same union as `runPreInference` — see the long comment
-            // there for why a Vision-only hint loses foreground props.
-            // Diagnostic mode shows exactly what the network will see,
-            // so it has to mirror the production combine.
-            let visionPooled = try RenderStages.extractHint(
-                source: mask.texture,
-                layout: 1,
-                targetWidth: rotatedSource.width,
-                targetHeight: rotatedSource.height,
-                entry: context.entry,
-                commandBuffer: commandBuffer
-            )
-            mask.retainOnCompletion(of: commandBuffer)
-            let chromaPooled = try RenderStages.generateChromaHint(
-                source: rotatedSource,
+            hintPooled = try RenderStages.prepareVisionHint(
+                mask: mask.texture, source: rotatedSource, includeChroma: inputs.state.hintMode != .manual,
                 screenColor: screenTransform.estimatedScreenReference,
-                entry: context.entry,
-                commandBuffer: commandBuffer
+                entry: context.entry, commandBuffer: commandBuffer
             )
-            hintPooled = try RenderStages.unionHints(
-                primary: visionPooled.texture,
-                secondary: chromaPooled.texture,
-                entry: context.entry,
-                commandBuffer: commandBuffer
-            )
-            visionPooled.returnOnCompletion(of: commandBuffer)
-            chromaPooled.returnOnCompletion(of: commandBuffer)
         } else {
-            // Manual and Automatic share the chroma prior — see the
-            // matching branch in `runPreInference` for why a pure
-            // zero-base hint produces nonsense mattes. Manual mode's
-            // contract is enforced upstream by the empty-hint guard.
             hintPooled = try RenderStages.generateChromaHint(
                 source: rotatedSource,
                 screenColor: screenTransform.estimatedScreenReference,
@@ -675,10 +765,12 @@ final class RenderPipeline: @unchecked Sendable {
         // Step 3: layer OSC hint points on top of whichever upstream
         // hint we just produced — so the diagnostic also shows the
         // user's manual dots.
-        if !inputs.state.hintPointSet.points.isEmpty {
+        let frameHints = inputs.state.video.useAlphaHint || inputs.state.hintMode == .none
+            ? [] : (visionMask?.localCorrections ?? inputs.state.hintPointSet.points(at: inputs.renderTime))
+        if !frameHints.isEmpty {
             try RenderStages.applyHintPoints(
                 hint: hintPooled.texture,
-                points: inputs.state.hintPointSet.points,
+                points: frameHints,
                 entry: context.entry,
                 commandBuffer: commandBuffer
             )
@@ -749,7 +841,7 @@ final class RenderPipeline: @unchecked Sendable {
         )
     }
 
-    private func renderUsingCachedAlpha(
+    private func renderUsingCachedFrame(
         inputs: ResolvedRenderInputs,
         context: DeviceContext,
         screenTransform: ScreenColorTransform,
@@ -759,54 +851,45 @@ final class RenderPipeline: @unchecked Sendable {
         cachedWidth: Int,
         cachedHeight: Int
     ) throws -> RenderReport {
-        guard let preCommandBuffer = context.commandQueue.makeCommandBuffer() else {
-            throw MetalDeviceCacheError.commandBufferCreationFailed
+        // Keep native source RGB for Interior and light wrap. The separate
+        // cached model foreground supplies reconstructed edge colors.
+        var rotatedSourcePooled: PooledTexture?
+        if !screenTransform.isIdentity {
+            guard let preCommandBuffer = context.commandQueue.makeCommandBuffer() else {
+                throw MetalDeviceCacheError.commandBufferCreationFailed
+            }
+            preCommandBuffer.label = "CorridorKey by LateNite Cached Screen Transform"
+            rotatedSourcePooled = try RenderStages.applyScreenMatrix(
+                source: context.sourceTexture, matrix: screenTransform.forwardMatrix,
+                isIdentity: false, entry: context.entry, commandBuffer: preCommandBuffer
+            )
+            try commitAndWait(commandBuffer: preCommandBuffer)
         }
-        preCommandBuffer.label = "CorridorKey by LateNite Cached Pre-Inference"
-
-        let rotatedSourcePooled = try RenderStages.applyScreenMatrix(
-            source: context.sourceTexture,
-            matrix: screenTransform.forwardMatrix,
-            isIdentity: screenTransform.isIdentity,
-            entry: context.entry,
-            commandBuffer: preCommandBuffer
-        )
+        defer { rotatedSourcePooled?.returnManually() }
         let rotatedSource = rotatedSourcePooled?.texture ?? context.sourceTexture
 
-        let rawSourcePooled = try RenderStages.resample(
-            source: rotatedSource,
-            targetWidth: inferenceResolution,
-            targetHeight: inferenceResolution,
-            pixelFormat: .rgba16Float,
-            method: inputs.state.upscaleMethod,
-            entry: context.entry,
-            commandBuffer: preCommandBuffer
-        )
-        let rawSourceAtInferenceResolution = rawSourcePooled?.texture ?? rotatedSource
-
-        try commitAndWait(commandBuffer: preCommandBuffer)
-
-        rotatedSourcePooled?.returnManually()
-        // rawSourcePooled stays alive — we need it as the foreground stand-in.
-
-        let alphaPooled = try uploadCachedAlpha(
+        guard let cachedFrame = try uploadCachedFrame(
             blob: cachedBlob,
             width: cachedWidth,
             height: cachedHeight,
             entry: context.entry
-        )
+        ) else {
+            if inputs.state.cachedFrameReference != nil { throw AnalysisDiskCacheError.invalidFrame }
+            return try renderSourcePassThrough(inputs: inputs, context: context)
+        }
+        defer {
+            cachedFrame.alpha.returnManually()
+            cachedFrame.foreground.returnManually()
+        }
 
         try runPostInference(
             inputs: inputs,
             context: context,
             screenTransform: screenTransform,
             rotatedSource: rotatedSource,
-            alphaAtInferenceResolution: alphaPooled.texture,
-            foregroundAtInferenceResolution: rawSourceAtInferenceResolution
+            alphaAtInferenceResolution: cachedFrame.alpha.texture,
+            foregroundAtInferenceResolution: cachedFrame.foreground.texture
         )
-
-        rawSourcePooled?.returnManually()
-        alphaPooled.returnManually()
 
         return RenderReport(
             backendDescription: "Analysed Cache (\(inferenceResolution)px)",
@@ -826,21 +909,24 @@ final class RenderPipeline: @unchecked Sendable {
         commandQueue: any MTLCommandQueue,
         screenTransform: ScreenColorTransform,
         gamutTransform: WorkingSpaceTransform,
-        inferenceResolution: Int
+        inferenceResolution: Int,
+        geometry: InferenceGeometry? = nil,
+        suppliedHintLayout: Int32? = nil,
+        inputIsLinear: Bool? = nil
     ) throws -> PreInferenceArtifacts {
-        // Vision runs on Neural Engine in parallel with the GPU pre-pass,
-        // so kick it off BEFORE we encode the screen matrix. Vision reads
+        // Vision chooses its supported compute devices. Start the request
+        // before encoding GPU preprocessing. Vision reads
         // the original (un-rotated) source — the hint is single-channel
         // alpha, colour-space-independent, so the screen matrix is
-        // irrelevant. Fall back to the green-bias hint when Vision finds
-        // no salient subject or fails for any reason; the render path
-        // never silently degrades.
+        // irrelevant. Automatic Vision may fall back to chroma. Manual
+        // selection must not restore excluded objects when Vision is unavailable.
         var visionMask: VisionMask? = nil
-        if hintMode == .appleVision, hintTexture == nil, #available(macOS 14.0, *) {
+        if hintMode.usesVisionPrior, hintTexture == nil, #available(macOS 14.0, *) {
             if let engine = entry.visionHintEngine() as? VisionHintEngine {
                 do {
-                    visionMask = try engine.generateMask(source: sourceTexture)
+                    visionMask = try engine.generateMask(source: sourceTexture, points: hintMode == .manual ? hintPoints : nil)
                 } catch {
+                    if hintMode == .manual { throw error }
                     PluginLog.notice(
                         "Vision hint failed for analysis frame, falling back to green-bias hint: \(error.localizedDescription)"
                     )
@@ -848,6 +934,9 @@ final class RenderPipeline: @unchecked Sendable {
             }
         }
 
+        if hintMode == .manual, hintTexture == nil, visionMask == nil {
+            throw KeyingInferenceError.modelUnavailable("Apple Vision is unavailable. Try again or choose a different Generated Hint.")
+        }
         guard let preCommandBuffer = commandQueue.makeCommandBuffer() else {
             throw MetalDeviceCacheError.commandBufferCreationFailed
         }
@@ -866,57 +955,23 @@ final class RenderPipeline: @unchecked Sendable {
         if let hostTexture = hintTexture {
             hintTexturePooled = try RenderStages.extractHint(
                 source: hostTexture,
-                layout: hintTileLayoutValue(for: hostTexture),
+                layout: suppliedHintLayout ?? hintTileLayoutValue(for: hostTexture),
                 targetWidth: rotatedSource.width,
                 targetHeight: rotatedSource.height,
                 entry: entry,
                 commandBuffer: preCommandBuffer
             )
+        } else if hintMode == .none {
+            hintTexturePooled = try RenderStages.extractHint(source: rotatedSource, layout: 3,
+                targetWidth: rotatedSource.width, targetHeight: rotatedSource.height,
+                entry: entry, commandBuffer: preCommandBuffer)
         } else if let mask = visionMask {
-            // Apple Vision's foreground-instance detector is a *subject*
-            // model — it picks people, animals, and salient objects but
-            // ignores generic foreground props (a sword, a phone, a
-            // carved totem in front of the screen). On its own that
-            // means the hint says "background" everywhere a prop sits,
-            // and the network pulls the prop out of the matte too. To
-            // recover those pixels we union the Vision mask with the
-            // chroma prior: anywhere chroma says "this isn't the screen
-            // colour" gets pulled back into foreground even if Vision
-            // missed it. Vision still drives the hint where it does see
-            // a subject (people consistently key better with the binary
-            // saliency mask than with the chroma gradient), and the
-            // chroma fills in everything else.
-            let visionPooled = try RenderStages.extractHint(
-                source: mask.texture,
-                layout: 1,
-                targetWidth: rotatedSource.width,
-                targetHeight: rotatedSource.height,
-                entry: entry,
-                commandBuffer: preCommandBuffer
-            )
-            mask.retainOnCompletion(of: preCommandBuffer)
-            let chromaPooled = try RenderStages.generateChromaHint(
-                source: rotatedSource,
+            hintTexturePooled = try RenderStages.prepareVisionHint(
+                mask: mask.texture, source: rotatedSource, includeChroma: hintMode != .manual,
                 screenColor: screenTransform.estimatedScreenReference,
-                entry: entry,
-                commandBuffer: preCommandBuffer
+                entry: entry, commandBuffer: preCommandBuffer
             )
-            hintTexturePooled = try RenderStages.unionHints(
-                primary: visionPooled.texture,
-                secondary: chromaPooled.texture,
-                entry: entry,
-                commandBuffer: preCommandBuffer
-            )
-            visionPooled.returnOnCompletion(of: preCommandBuffer)
-            chromaPooled.returnOnCompletion(of: preCommandBuffer)
         } else {
-            // Manual and Automatic both use the chroma-derived prior
-            // here — the network was trained on that distribution,
-            // not on sparse user dots in isolation. The empty-hint
-            // guard in `renderInternal` / the analyser already
-            // refuses to run Manual mode without at least one user
-            // dot, so the user's clicks still gate progress; they
-            // just augment the chroma prior on top of feeding it.
             hintTexturePooled = try RenderStages.generateChromaHint(
                 source: rotatedSource,
                 screenColor: screenTransform.estimatedScreenReference,
@@ -928,10 +983,11 @@ final class RenderPipeline: @unchecked Sendable {
         // Layer user-placed foreground / background dots from the OSC
         // on top of whichever upstream hint we just produced. No-op
         // when the user hasn't placed any.
-        if !hintPoints.isEmpty {
+        let localCorrections = visionMask?.localCorrections ?? hintPoints
+        if !localCorrections.isEmpty {
             try RenderStages.applyHintPoints(
                 hint: hintTexturePooled.texture,
-                points: hintPoints,
+                points: localCorrections,
                 entry: entry,
                 commandBuffer: preCommandBuffer
             )
@@ -942,47 +998,18 @@ final class RenderPipeline: @unchecked Sendable {
             hint: hintTexturePooled.texture,
             inferenceResolution: inferenceResolution,
             workingToRec709: gamutTransform.workingToRec709,
+            geometry: geometry,
+            inputIsLinear: inputIsLinear,
             entry: entry,
             commandBuffer: preCommandBuffer
         )
-
-        let rawSourceAtInferenceResolutionPooled = try RenderStages.resample(
-            source: rotatedSource,
-            targetWidth: inferenceResolution,
-            targetHeight: inferenceResolution,
-            pixelFormat: .rgba16Float,
-            method: .bilinear,
-            entry: entry,
-            commandBuffer: preCommandBuffer
-        )
-        let rawSource: PooledTexture
-        if let rawSourceAtInferenceResolutionPooled {
-            rawSource = rawSourceAtInferenceResolutionPooled
-        } else {
-            // Rare: caller already provided a texture at the inference
-            // resolution. Acquire a throwaway copy so we still hand back a
-            // `PooledTexture` and the caller's pool bookkeeping stays
-            // consistent.
-            guard let fallback = entry.texturePool.acquire(
-                width: inferenceResolution,
-                height: inferenceResolution,
-                pixelFormat: .rgba16Float
-            ) else { throw MetalDeviceCacheError.textureAllocationFailed }
-            if let blit = preCommandBuffer.makeBlitCommandEncoder() {
-                blit.label = "CorridorKey by LateNite Pre-Inf Copy"
-                blit.copy(from: rotatedSource, to: fallback.texture)
-                blit.endEncoding()
-            }
-            rawSource = fallback
-        }
 
         try commitAndWait(commandBuffer: preCommandBuffer)
         hintTexturePooled.returnManually()
 
         return PreInferenceArtifacts(
             rotatedSource: rotatedSourcePooled,
-            normalisedInputBuffer: normalisedInputBuffer,
-            rawSourceAtInferenceResolution: rawSource
+            normalisedInputBuffer: normalisedInputBuffer
         )
     }
 
@@ -999,6 +1026,25 @@ final class RenderPipeline: @unchecked Sendable {
         }
         postCommandBuffer.label = "CorridorKey by LateNite Post-Inference"
 
+        // Inference normalizes working-space RGB into Rec.709. The complete
+        // cache retains that canonical RGB, so reverse the same transform before
+        // mixing it with the native source or applying working-space cleanup.
+        let workingForegroundPooled = inputs.workingGamut == .rec709 ? nil : try RenderStages.colorTransform(
+            source: foregroundAtInferenceResolution,
+            matrix: ColorGamutMatrix.transform(for: inputs.workingGamut).rec709ToWorking,
+            sourceIsLinear: false, outputIsLinear: false,
+            entry: context.entry,
+            commandBuffer: postCommandBuffer
+        )
+        defer { workingForegroundPooled?.returnManually() }
+        let workingForeground = workingForegroundPooled?.texture ?? foregroundAtInferenceResolution
+        let displaySourcePooled = inputs.state.video.inputIsLinear
+            ? try RenderStages.colorTransform(source: rotatedSource, matrix: matrix_identity_float3x3,
+                                               sourceIsLinear: true, outputIsLinear: false,
+                                               entry: context.entry, commandBuffer: postCommandBuffer) : nil
+        defer { displaySourcePooled?.returnManually() }
+        let displaySource = displaySourcePooled?.texture ?? rotatedSource
+
         // 1. Upscale alpha + foreground to destination resolution using the
         // user's chosen method.
         let upscaledAlphaPooled = try RenderStages.resample(
@@ -1013,7 +1059,7 @@ final class RenderPipeline: @unchecked Sendable {
         let upscaledAlpha = upscaledAlphaPooled?.texture ?? alphaAtInferenceResolution
 
         let upscaledForegroundPooled = try RenderStages.resample(
-            source: foregroundAtInferenceResolution,
+            source: workingForeground,
             targetWidth: context.sourceWidth,
             targetHeight: context.sourceHeight,
             pixelFormat: .rgba16Float,
@@ -1021,12 +1067,12 @@ final class RenderPipeline: @unchecked Sendable {
             entry: context.entry,
             commandBuffer: postCommandBuffer
         )
-        let upscaledForeground = upscaledForegroundPooled?.texture ?? foregroundAtInferenceResolution
+        let upscaledForeground = upscaledForegroundPooled?.texture ?? workingForeground
 
         // 2. Despill. The kernel takes `screenColor` and parameterises
         // its math on the dominant channel — green for green keys,
         // blue for blue keys — so the same dispatch handles both
-        // colour packs without a per-colour code path. The blue MLX
+        // screen colors without a per-color code path. The unified v2
         // model's `fg_final` head already does most of the spill
         // suppression on its own; this stage stays in the pipeline as
         // a user-controllable knob for footage that benefits from a
@@ -1035,7 +1081,7 @@ final class RenderPipeline: @unchecked Sendable {
             foreground: upscaledForeground,
             strength: Float(inputs.state.despillStrength),
             method: inputs.state.spillMethod,
-            screenColor: inputs.state.screenColor.canonicalScreenReference,
+            screenColor: screenTransform.estimatedScreenReference,
             entry: context.entry,
             commandBuffer: postCommandBuffer
         )
@@ -1063,12 +1109,25 @@ final class RenderPipeline: @unchecked Sendable {
         let attenuatedMattePooled = try RenderStages.attenuateMatteBySpill(
             matte: refinedMatteRaw,
             foreground: upscaledForeground,
-            screenColor: inputs.state.screenColor.canonicalScreenReference,
+            screenColor: screenTransform.estimatedScreenReference,
             strength: Float(inputs.state.despillStrength),
             entry: context.entry,
             commandBuffer: postCommandBuffer
         )
         let refinedMatte = attenuatedMattePooled?.texture ?? refinedMatteRaw
+
+        let passthroughMattePooled: PooledTexture?
+        if inputs.state.sourcePassthroughEnabled {
+            passthroughMattePooled = try RenderStages.makePassthroughMatte(
+                matte: refinedMatte,
+                erodeRadius: inputs.state.destinationPixelRadius(fromNormalized: inputs.state.passthroughErodeNormalized),
+                blurRadius: inputs.state.destinationPixelRadius(fromNormalized: inputs.state.passthroughBlurNormalized),
+                entry: context.entry, commandBuffer: postCommandBuffer
+            )
+        } else {
+            passthroughMattePooled = nil
+        }
+        defer { passthroughMattePooled?.returnManually() }
 
         // 4. Pre-blur the source once when light-wrap is on so the fused
         // post-process pass has a blurred RGB input to sample.
@@ -1094,7 +1153,7 @@ final class RenderPipeline: @unchecked Sendable {
                 throw MetalDeviceCacheError.textureAllocationFailed
             }
             try MatteRefiner.applyGaussianBlur(
-                source: rotatedSource,
+                source: displaySource,
                 intermediate: intermediate.texture,
                 destination: blurred.texture,
                 radiusPixels: radius,
@@ -1109,8 +1168,14 @@ final class RenderPipeline: @unchecked Sendable {
             // kernel. The shader only reads this slot when the
             // `lightWrapEnabled` flag is set, so passing `rotatedSource`
             // here is safe and avoids a dead allocation.
-            blurredSourceTexture = rotatedSource
+            blurredSourceTexture = displaySource
         }
+
+        let lightWrapMattePooled = lightWrapActive ? try RenderStages.makePassthroughMatte(
+            matte: refinedMatte, erodeRadius: 0, blurRadius: Float(inputs.state.lightWrapRadius),
+            entry: context.entry, commandBuffer: postCommandBuffer
+        ) : nil
+        defer { lightWrapMattePooled?.returnManually() }
 
         // 5. Fused foreground post-process: source-passthrough +
         // light-wrap + edge-decontam + inverse-rotation all in one
@@ -1122,38 +1187,46 @@ final class RenderPipeline: @unchecked Sendable {
         // blue for Blue) — both the green and blue MLX bridges return
         // foreground in their native screen domain, so the decontam
         // axis tracks the chosen colour rather than always being green.
-        // The inverse-rotation slot stays wired but is now identity for
-        // every supported screen colour because each colour ships its
-        // own bridge.
+        // The inverse-rotation slot stays wired but is identity for both
+        // screen colors because v2 receives their original RGB.
+        let edgeDecontaminateActive = inputs.state.edgeDecontaminateEnabled
+            && inputs.state.edgeDecontaminateStrength > 0
+        let correctsEdgeColor = lightWrapActive || edgeDecontaminateActive
         let fusedForegroundConfig = RenderStages.FusedForegroundConfig(
             sourcePassthrough: inputs.state.sourcePassthroughEnabled,
             lightWrapEnabled: lightWrapActive,
             lightWrapStrength: Float(inputs.state.lightWrapStrength),
             lightWrapEdgeBias: 0.6,
-            edgeDecontaminateEnabled: inputs.state.edgeDecontaminateEnabled
-                && inputs.state.edgeDecontaminateStrength > 0,
+            edgeDecontaminateEnabled: edgeDecontaminateActive,
             edgeDecontaminateStrength: Float(inputs.state.edgeDecontaminateStrength),
-            screenColor: inputs.state.screenColor.canonicalScreenReference,
+            screenColor: screenTransform.estimatedScreenReference,
             inverseScreenMatrix: screenTransform.inverseMatrix,
-            applyInverseRotation: !screenTransform.isIdentity
+            applyInverseRotation: !screenTransform.isIdentity,
+            keepOriginalInSolidAreas: inputs.state.video.keepOriginalInSolidAreas && correctsEdgeColor
         )
         let restoredPooled = try RenderStages.applyFusedForegroundPostProcess(
             foreground: despilled,
-            sourceRGB: rotatedSource,
+            sourceRGB: displaySource,
             matte: refinedMatte,
             blurredSource: blurredSourceTexture,
+            passthroughMatte: passthroughMattePooled?.texture,
+            blurredMatte: lightWrapMattePooled?.texture,
             config: fusedForegroundConfig,
             entry: context.entry,
             commandBuffer: postCommandBuffer
         )
 
+        // When correcting edges, restore source detail before those corrections.
+        // Otherwise retain exact source pixels in compose, including linear RGB.
+        var compositionState = inputs.state
+        compositionState.video.keepOriginalInSolidAreas = inputs.state.video.keepOriginalInSolidAreas && !correctsEdgeColor
         // 6. Final compose into FCP destination.
         try compose(
             source: context.sourceTexture,
             foreground: restoredPooled.texture,
             matte: refinedMatte,
             context: context,
-            state: inputs.state,
+            state: compositionState,
             commandBuffer: postCommandBuffer
         )
 
@@ -1281,80 +1354,57 @@ final class RenderPipeline: @unchecked Sendable {
 
     // MARK: - Cached matte helpers
 
-    /// Lightweight peek at the cache that returns just the dimensions
-    /// without doing the (relatively expensive) decompress + half→float
-    /// pass. Used by `renderUsingCachedAlpha` so it can size the GPU
-    /// upload buffer before we commit to decoding.
-    private func cachedMatteHeader(
+    /// Accepts only complete v2 frames at the requested inference resolution.
+    private func cachedFrameHeader(
+        blob: Data,
         from state: PluginStateData,
-        expectedResolution: Int
-    ) -> (width: Int, height: Int)? {
-        guard let blob = state.cachedMatteBlob,
-              state.cachedMatteInferenceResolution == expectedResolution,
-              let header = MatteCodec.parseHeader(blob)
+        expectedResolution: Int, sourceWidth: Int, sourceHeight: Int
+    ) -> AnalysisFrameCodec.Header? {
+        guard state.cachedMatteInferenceResolution == expectedResolution,
+              let header = AnalysisFrameCodec.parseHeader(blob),
+              max(header.width, header.height) == expectedResolution
         else { return nil }
+        if state.cachedFrameReference != nil {
+            let geometry = InferenceGeometry(sourceWidth: sourceWidth, sourceHeight: sourceHeight, resolution: expectedResolution)
+            // A reduced host surface can round either source dimension by a
+            // pixel. Allow that quantisation in prediction space, while still
+            // rejecting caches from a different aspect ratio.
+            let tolerance = max(1, Int(ceil(Double(expectedResolution) / Double(max(1, max(sourceWidth, sourceHeight))))))
+            guard abs(header.width - geometry.contentWidth) <= tolerance,
+                  abs(header.height - geometry.contentHeight) <= tolerance else { return nil }
+        }
         return header
     }
 
-    /// Decodes the cached alpha matte into a pooled `r32Float` texture
-    /// without an intermediate `[Float]` allocation. Saves ~5–10 ms
-    /// per render-from-cache frame on a 4K matte versus the prior
-    /// `MatteCodec.decode → texture.replace` path. vImage handles the
-    /// half→float conversion via the ARM FP16 hardware instead of
-    /// the old scalar loop.
-    private func uploadCachedAlpha(
+    /// Decompresses into shared Metal scratch memory, then uploads both half
+    /// planes without float expansion. The lease covers decode AND texture
+    /// upload so concurrent FxPlug renders cannot overwrite one another's data.
+    /// Malformed caches behave like missing analysis rather than failing a render.
+    private func uploadCachedFrame(
         blob: Data,
         width: Int,
         height: Int,
         entry: MetalDeviceCacheEntry
-    ) throws -> PooledTexture {
-        guard let pooled = entry.texturePool.acquire(
-            width: width,
-            height: height,
-            pixelFormat: .r32Float,
-            storageMode: .shared
+    ) throws -> (alpha: PooledTexture, foreground: PooledTexture)? {
+        guard let alpha = entry.texturePool.acquire(
+            width: width, height: height, pixelFormat: .r16Float, storageMode: .shared
+        ), let foreground = entry.texturePool.acquire(
+            width: width, height: height, pixelFormat: .rgba16Float, storageMode: .shared
         ) else {
             throw MetalDeviceCacheError.textureAllocationFailed
         }
-
-        // Decode straight into a per-rung-cached MTLBuffer; vImage
-        // converts half-floats with the ARM FP16 hardware so a 2048²
-        // matte costs ~4 ms instead of ~40 ms on the scalar loop.
-        guard let buffer = entry.cachedAlphaBuffer(width: width, height: height) else {
-            pooled.returnManually()
-            throw MetalDeviceCacheError.textureAllocationFailed
+        let success = try entry.withCachedFrameBuffer(width: width, height: height) { buffer in
+            let bytes = UnsafeMutableRawBufferPointer(start: buffer.contents(), count: width * height * 10)
+            guard AnalysisFrameCodec.decode(blob, into: bytes) else { return false }
+            let region = MTLRegionMake2D(0, 0, width, height)
+            alpha.texture.replace(region: region, mipmapLevel: 0,
+                                  withBytes: buffer.contents(), bytesPerRow: width * 2)
+            foreground.texture.replace(region: region, mipmapLevel: 0,
+                                       withBytes: buffer.contents().advanced(by: width * height * 2), bytesPerRow: width * 8)
+            return true
         }
-        let pixelCount = width * height
-        let bufferPointer = buffer.contents().bindMemory(to: Float.self, capacity: pixelCount)
-        let success = MatteCodec.decode(
-            blob,
-            into: bufferPointer,
-            capacity: pixelCount,
-            expectedWidth: width,
-            expectedHeight: height
-        )
-        guard success else {
-            pooled.returnManually()
-            throw MetalDeviceCacheError.textureAllocationFailed
-        }
-
-        // Copy the decoded floats into the pooled texture. On Apple
-        // Silicon's unified memory, both the buffer and the .shared
-        // texture's backing live in the same physical memory, so this
-        // is effectively a memcpy through the Metal driver. The y
-        // orientation of the cached bytes already matches the texture
-        // convention (the analyse pass wrote them via
-        // `corridorKeyMLXWritebackFusedKernel` which performs the
-        // y-flip; we read those flipped bytes back and store them, so
-        // the cache is byte-for-byte y-down).
-        let bytesPerRow = width * MemoryLayout<Float>.size
-        pooled.texture.replace(
-            region: MTLRegionMake2D(0, 0, width, height),
-            mipmapLevel: 0,
-            withBytes: bufferPointer,
-            bytesPerRow: bytesPerRow
-        )
-        return pooled
+        guard success else { return nil }
+        return (alpha, foreground)
     }
 
     // MARK: - Compose (FxPlug-specific)
@@ -1381,6 +1431,8 @@ final class RenderPipeline: @unchecked Sendable {
             tileWidth: context.outputWidth,
             tileHeight: context.outputHeight,
             outputMode: state.outputMode,
+            video: state.video,
+            destinationRowOrder: context.destinationRowOrder,
             pixelFormat: context.pixelFormat,
             entry: context.entry,
             commandBuffer: commandBuffer
@@ -1398,6 +1450,8 @@ final class RenderPipeline: @unchecked Sendable {
         tileWidth: Float,
         tileHeight: Float,
         outputMode: OutputMode,
+        video: VideoInferenceSettings = VideoInferenceSettings(),
+        destinationRowOrder: ImageRowOrder = .topToBottom,
         pixelFormat: MTLPixelFormat,
         entry: MetalDeviceCacheEntry,
         commandBuffer: any MTLCommandBuffer
@@ -1418,11 +1472,13 @@ final class RenderPipeline: @unchecked Sendable {
         let halfW = tileWidth * 0.5
         let halfH = tileHeight * 0.5
 
+        let topTextureY: Float = destinationRowOrder == .topToBottom ? 0 : 1
+        let bottomTextureY: Float = 1 - topTextureY
         var vertices: [CKVertex2D] = [
-            CKVertex2D(position: SIMD2<Float>(halfW, -halfH), textureCoordinate: SIMD2<Float>(1, 1)),
-            CKVertex2D(position: SIMD2<Float>(-halfW, -halfH), textureCoordinate: SIMD2<Float>(0, 1)),
-            CKVertex2D(position: SIMD2<Float>(halfW, halfH), textureCoordinate: SIMD2<Float>(1, 0)),
-            CKVertex2D(position: SIMD2<Float>(-halfW, halfH), textureCoordinate: SIMD2<Float>(0, 0))
+            CKVertex2D(position: SIMD2<Float>(halfW, -halfH), textureCoordinate: SIMD2<Float>(1, bottomTextureY)),
+            CKVertex2D(position: SIMD2<Float>(-halfW, -halfH), textureCoordinate: SIMD2<Float>(0, bottomTextureY)),
+            CKVertex2D(position: SIMD2<Float>(halfW, halfH), textureCoordinate: SIMD2<Float>(1, topTextureY)),
+            CKVertex2D(position: SIMD2<Float>(-halfW, halfH), textureCoordinate: SIMD2<Float>(0, topTextureY))
         ]
         var viewportSize = SIMD2<UInt32>(UInt32(tileWidth), UInt32(tileHeight))
 
@@ -1450,7 +1506,10 @@ final class RenderPipeline: @unchecked Sendable {
         encoder.setFragmentTexture(matte, index: Int(CKTextureIndexMatte.rawValue))
 
         var params = CKComposeParams(
-            outputMode: outputMode.shaderValue
+            outputMode: outputMode.shaderValue,
+            inputIsLinear: video.inputIsLinear ? 1 : 0,
+            linearizeOutput: video.linearizeOutput ? 1 : 0,
+            keepOriginalInSolidAreas: video.keepOriginalInSolidAreas ? 1 : 0
         )
         encoder.setFragmentBytes(
             &params,

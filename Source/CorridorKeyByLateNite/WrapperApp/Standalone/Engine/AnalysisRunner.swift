@@ -3,9 +3,9 @@
 //  CorridorKey by LateNite — Standalone Editor
 //
 //  Mirrors `CorridorKeyToolboxPlugIn+FxAnalyzer` for the standalone
-//  editor: walks every frame of a clip, hands the source to MLX via
-//  `StandaloneRenderEngine.extractMatteBlob`, and stores the resulting
-//  matte blobs in an in-memory cache keyed by frame index. The render
+//  editor: prepares every frame through the shared v2 video session,
+//  refines its overlapping temporal windows, and stores complete frames
+//  on disk with small in-memory references keyed by frame index. The render
 //  preview then short-circuits MLX by feeding cached mattes into
 //  `RenderPipeline.renderToTexture` exactly the way the FxPlug renders
 //  cached frames inside Final Cut Pro.
@@ -20,14 +20,47 @@ import Foundation
 import CoreMedia
 import CoreVideo
 
+#if CORRIDOR_KEY_HEADLESS_TESTS
+@testable import CorridorKeyToolboxLogic
+@testable import CorridorKeyToolboxMetalStages
+#endif
+
 /// Per-frame storage built up during the analysis pass. Exposed via
 /// `EditorProject.matteCache` so previews can reach in for a cached
 /// matte by frame index instead of triggering MLX on every scrub.
-struct MatteCacheEntry: @unchecked Sendable {
-    let blob: Data
+struct MatteCacheEntry: Sendable {
+    let inlineBlob: Data?
+    let reference: AnalysisFrameReference?
     let width: Int
     let height: Int
     let inferenceResolution: Int
+
+    /// Inline construction is retained for small fixtures and immediate single-frame callers.
+    init(blob: Data, width: Int, height: Int, inferenceResolution: Int) {
+        self.inlineBlob = blob
+        self.reference = nil
+        self.width = width
+        self.height = height
+        self.inferenceResolution = inferenceResolution
+    }
+
+    /// Production analyses retain only this small file descriptor per frame.
+    init(reference: AnalysisFrameReference, width: Int, height: Int, inferenceResolution: Int) {
+        self.inlineBlob = nil
+        self.reference = reference
+        self.width = width
+        self.height = height
+        self.inferenceResolution = inferenceResolution
+    }
+
+    /// Explicit readback for diagnostics/tests; rendering resolves references on its worker.
+    var blob: Data {
+        get throws {
+            if let reference { return try AnalysisDiskCache.shared.load(reference) }
+            guard let inlineBlob else { throw AnalysisDiskCacheError.missingFrame }
+            return inlineBlob
+        }
+    }
 }
 
 /// Status events the runner pushes during a pass. Drives the
@@ -35,9 +68,11 @@ struct MatteCacheEntry: @unchecked Sendable {
 enum AnalysisRunnerEvent: @unchecked Sendable {
     /// Total frame count became known (or changed).
     case totalFramesResolved(Int)
-    /// One frame was processed. `frameIndex` is zero-based, increasing
-    /// by one each callback. `engineDescription` reflects whether MLX
-    /// or the rough-matte fallback handled the frame.
+    /// Frozen features are ready; temporal inference and refinement follow.
+    case framePrepared(frameIndex: Int)
+    /// One frame was processed. Indices are zero-based and may arrive backwards
+    /// when propagating a single reference hint. `engineDescription` identifies
+    /// the model backend; analysis never substitutes a rough-matte fallback.
     case frameProcessed(frameIndex: Int, engineDescription: String, entry: MatteCacheEntry)
     /// Pass finished without error. Includes the total elapsed seconds.
     case completed(elapsedSeconds: Double)
@@ -50,9 +85,9 @@ enum AnalysisRunnerEvent: @unchecked Sendable {
 actor AnalysisRunner {
 
     private let renderEngine: StandaloneRenderEngine
-    private let videoSource: VideoSource
+    private let videoSource: any EditorMediaSource
 
-    init(renderEngine: StandaloneRenderEngine, videoSource: VideoSource) {
+    init(renderEngine: StandaloneRenderEngine, videoSource: any EditorMediaSource) {
         self.renderEngine = renderEngine
         self.videoSource = videoSource
     }
@@ -66,6 +101,7 @@ actor AnalysisRunner {
         state: PluginStateData,
         eventHandler: @Sendable (AnalysisRunnerEvent) -> Void
     ) async {
+        defer { renderEngine.releaseAnalysisCache() }
         let startedAt = Date()
         let info = videoSource.info
         let frameCount = videoSource.totalFrameCount()
@@ -75,7 +111,7 @@ actor AnalysisRunner {
 
         // Build the AVAssetReader once for the whole pass — far faster
         // than reseeking per frame via AVAssetImageGenerator.
-        let frameReader: VideoFrameReader
+        let frameReader: any MediaFrameReader
         do {
             frameReader = try await videoSource.makeFrameReader(startTime: .zero)
         } catch {
@@ -85,6 +121,43 @@ actor AnalysisRunner {
         defer { frameReader.cancel() }
 
         var frameIndex = 0
+        let cacheSession: AnalysisDiskCache.Session
+        do {
+            cacheSession = try AnalysisDiskCache.shared.beginSession()
+        } catch {
+            eventHandler(.failed(error.localizedDescription))
+            return
+        }
+        defer { withExtendedLifetime(cacheSession) {} }
+        let videoSession: VideoInferenceSession
+        let hintReader: AlphaHintReader?
+        do {
+            try state.video.validate(frameCount: frameCount)
+            hintReader = state.video.useAlphaHint
+                ? try await AlphaHintReader(settings: state.video, frameCount: frameCount,
+                                            frameDuration: CMTime(seconds: 1 / frameRate, preferredTimescale: timescale)) : nil
+            videoSession = try renderEngine.makeVideoSession(state: state, frameCount: frameCount, sourceSize: info.renderSize)
+        } catch {
+            eventHandler(.failed(error.localizedDescription))
+            return
+        }
+        var temporalHistory = TemporalBlender.History()
+        let temporalConfiguration = TemporalBlender.Configuration(
+            strength: state.temporalStabilityEnabled ? Float(state.temporalStabilityStrength) : 0,
+            motionThreshold: 0.05
+        )
+        func storeFrame(_ frame: VideoInferenceFrame) throws {
+            var alpha = frame.alpha
+            temporalHistory.apply(alpha: &alpha, source: frame.source,
+                                  width: frame.geometry.contentWidth, height: frame.geometry.contentHeight,
+                                  frameIndex: frame.index, configuration: temporalConfiguration)
+            let blob = try AnalysisFrameCodec.encode(alpha: alpha, foregroundHalfRGBA: frame.foregroundHalfRGBA,
+                                                     width: frame.geometry.contentWidth, height: frame.geometry.contentHeight)
+            let reference = try AnalysisDiskCache.shared.store(blob, in: cacheSession)
+            let entry = MatteCacheEntry(reference: reference, width: frame.geometry.contentWidth,
+                                        height: frame.geometry.contentHeight, inferenceResolution: frame.geometry.resolution)
+            eventHandler(.frameProcessed(frameIndex: frame.index, engineDescription: "CorridorKey v2 · MLX", entry: entry))
+        }
         while !Task.isCancelled {
             let frame: ReaderFrame?
             do {
@@ -105,29 +178,21 @@ actor AnalysisRunner {
                 )
             }
 
-            let output: AnalysisFrameOutput
             do {
-                output = try renderEngine.extractMatteBlob(
-                    source: frame.pixelBuffer,
-                    state: state,
-                    renderTime: renderTime
-                )
+                try renderEngine.appendVideoFrame(source: frame.pixelBuffer, state: state, renderTime: renderTime,
+                                                   frameIndex: frameIndex, session: videoSession, hintReader: hintReader)
+                if state.video.timeAwareness == .off {
+                    try videoSession.finishPreparedFrame(onFrame: storeFrame)
+                } else {
+                    eventHandler(.framePrepared(frameIndex: frameIndex))
+                }
+            } catch is CancellationError {
+                eventHandler(.cancelled)
+                return
             } catch {
-                eventHandler(.failed(String(describing: error)))
+                eventHandler(.failed(error.localizedDescription))
                 return
             }
-
-            let entry = MatteCacheEntry(
-                blob: output.blob,
-                width: output.width,
-                height: output.height,
-                inferenceResolution: output.inferenceResolution
-            )
-            eventHandler(.frameProcessed(
-                frameIndex: frameIndex,
-                engineDescription: output.engineDescription,
-                entry: entry
-            ))
             frameIndex += 1
             // Yield cooperative cancellation between frames; otherwise
             // a tight inference loop blocks Task.checkCancellation.
@@ -136,6 +201,15 @@ actor AnalysisRunner {
 
         if Task.isCancelled {
             eventHandler(.cancelled)
+            return
+        }
+        do {
+            try videoSession.finish(onFrame: storeFrame)
+        } catch is CancellationError {
+            eventHandler(.cancelled)
+            return
+        } catch {
+            eventHandler(.failed(error.localizedDescription))
             return
         }
         let elapsed = Date().timeIntervalSince(startedAt)

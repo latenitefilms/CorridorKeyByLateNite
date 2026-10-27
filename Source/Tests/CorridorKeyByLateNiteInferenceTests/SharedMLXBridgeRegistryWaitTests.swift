@@ -12,6 +12,7 @@ import Testing
 @testable import CorridorKeyToolboxLogic
 @testable import CorridorKeyToolboxMetalStages
 
+extension MLXInferenceTests {
 @Suite("SharedMLXBridgeRegistry wake-up")
 struct SharedMLXBridgeRegistryWaitTests {
 
@@ -56,7 +57,7 @@ struct SharedMLXBridgeRegistryWaitTests {
         // ladder rung) is unavailable. We tag a unique device id so
         // cached state from earlier tests can't satisfy the lookup.
         let untouchedDeviceID = deviceID &+ 0xFEED_FACE
-        let unbundledRung = 2048
+        let unbundledRung = 256
 
         let start = DispatchTime.now()
         var threw = false
@@ -96,7 +97,7 @@ struct SharedMLXBridgeRegistryWaitTests {
         // Use a unique device id so this test's state never collides
         // with the live registry entries set up by other tests.
         let deviceID = entry.device.registryID &+ 0xCAFE_BABE
-        let unbundledRung = 1536
+        let unbundledRung = 384
 
         let waiterCount = 4
         let allWoken = DispatchSemaphore(value: 0)
@@ -150,4 +151,6 @@ private final class ManagedAtomicInt32: @unchecked Sendable {
         storage += 1
         return storage
     }
+}
+
 }

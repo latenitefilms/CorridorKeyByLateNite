@@ -13,7 +13,27 @@ import CoreMedia
 
 /// A fully resolved render state. Contains everything the renderer and analyser
 /// need so that no parameter API calls happen off of the main FxPlug thread.
-struct PluginStateData: Codable, Sendable {
+struct PluginStateData: Codable, Equatable, Sendable {
+    /// Shared v2 video, hint and color controls.
+    var video = VideoInferenceSettings()
+    /// Zero-based source position for external hint diagnostics, not an analysis setting.
+    var sourceFrameIndex = 0
+    /// Describes encoded RGB; matte diagnostics remain coverage values.
+    var outputIsLinear: Bool {
+        switch outputMode {
+        case .original: video.inputIsLinear
+        case .matteOnly, .hint: false
+        default: video.linearizeOutput
+        }
+    }
+
+    /// Every input that changes stored predictions, including optional legacy smoothing.
+    var analysisHintConfiguration: AnalysisHintConfiguration {
+        AnalysisHintConfiguration(mode: hintMode, points: hintPointSet, video: video.analysisIdentity,
+            temporalStabilityEnabled: temporalStabilityEnabled,
+            temporalStabilityStrength: temporalStabilityEnabled ? temporalStabilityStrength : 0)
+    }
+
     // Key setup
     var screenColor: ScreenColor
     var qualityMode: QualityMode
@@ -21,17 +41,6 @@ struct PluginStateData: Codable, Sendable {
     /// How the upstream alpha hint is generated. See `HintMode` for
     /// the three options (Automatic / Apple Vision / Manual).
     var hintMode: HintMode
-
-    /// Whether the on-screen subject marker should be drawn on the
-    /// canvas. Drawn as a small ring + crosshair the user can drag.
-    var showSubjectMarker: Bool
-
-    /// Object-normalised position (0…1) of the subject marker. The
-    /// OSC drags this; the inspector shows it as X/Y sliders. Used
-    /// as the central click-point for the diagnostic and reserved
-    /// for future SAM-style hint refinement.
-    var subjectPositionX: Double
-    var subjectPositionY: Double
 
     // Interior detail
     var sourcePassthroughEnabled: Bool
@@ -80,11 +89,15 @@ struct PluginStateData: Codable, Sendable {
     /// translate normalised radii into destination pixels.
     var destinationLongEdgePixels: Int
 
-    /// When the FxAnalyzer pass has cached this frame's matte, we embed the
-    /// compressed blob directly in the state so the render callback doesn't
-    /// need to touch the custom parameter again (which would mean re-loading
-    /// the whole clip-wide cache for every render on every thread).
+    /// Captured while FxPlug host APIs are available; rendering uses only this snapshot.
+    var workingColorGamut: WorkingColorGamut = .rec709
+
+    /// Inline complete frame for fixtures and immediate callers. Production
+    /// analysis uses `cachedFrameReference`; this serialized key stays stable.
     var cachedMatteBlob: Data?
+    /// Local disposable cache reference. Production analysis stores payloads on
+    /// disk so render states and saved effects stay small.
+    var cachedFrameReference: AnalysisFrameReference? = nil
     /// Inference resolution the cached matte was produced at. `0` when no
     /// matte is cached. The render path bypasses the MLX path only when this
     /// matches the quality mode the user is currently requesting.
@@ -97,28 +110,11 @@ struct PluginStateData: Codable, Sendable {
     var hintPointSet: HintPointSet
 
     init(
-        screenColor: ScreenColor = .green,
+        screenColor: ScreenColor = .automatic,
         qualityMode: QualityMode = .automatic,
-        // Default-on quality stack — every parameter below that flips
-        // between "preserve every model pixel" and "polish the
-        // matte" defaults to polish. Users coming in cold get a comp-
-        // ready key on first frame; users tuning a tricky shot can
-        // still flip any individual stage off. The five flips:
-        //
-        //   * hintMode — Apple Vision foreground prior beats the
-        //     green-bias hint on most subjects.
-        //   * autoDespeckleEnabled — drops the salt-and-pepper noise
-        //     the model occasionally produces over moving green.
-        //   * lightWrapEnabled — inherits a touch of background
-        //     colour into the edge so composites don't look pasted.
-        //   * edgeDecontaminateEnabled — kills residual chroma fringe
-        //     on hair and feathered edges.
-        //   * temporalStabilityEnabled — dampens edge-band flicker
-        //     between frames.
-        hintMode: HintMode = .appleVision,
-        showSubjectMarker: Bool = false,
-        subjectPositionX: Double = 0.5,
-        subjectPositionY: Double = 0.5,
+        // Start with the v2 model prediction. Generated hints and additional
+        // matte, edge, and temporal corrections are explicit creative choices.
+        hintMode: HintMode = .none,
         // Source Passthrough is off by default in v1.0 because the
         // erode + blur it bakes into the matte's interior tends to
         // pull the green / blue screen colour back through translucent
@@ -134,10 +130,10 @@ struct PluginStateData: Codable, Sendable {
         alphaErodeNormalized: Double = 0.0,
         alphaSoftnessNormalized: Double = 0.0,
         alphaGamma: Double = 1.0,
-        autoDespeckleEnabled: Bool = true,
+        autoDespeckleEnabled: Bool = false,
         despeckleSize: Int = 100,
         refinerStrength: Double = 1.0,
-        despillStrength: Double = 0.5,
+        despillStrength: Double = 0,
         // Ultra is the comp-ready default — its YCbCr-projection path
         // removes the soft chroma fringe the older Average / Double
         // Limit kernels leave on hair and feathered edges, without
@@ -146,12 +142,12 @@ struct PluginStateData: Codable, Sendable {
         // better to one of the legacy methods can flip it down via
         // the inspector.
         spillMethod: SpillMethod = .ultra,
-        lightWrapEnabled: Bool = true,
+        lightWrapEnabled: Bool = false,
         lightWrapStrength: Double = 0.25,
         lightWrapRadius: Double = 10.0,
-        edgeDecontaminateEnabled: Bool = true,
+        edgeDecontaminateEnabled: Bool = false,
         edgeDecontaminateStrength: Double = 0.5,
-        temporalStabilityEnabled: Bool = true,
+        temporalStabilityEnabled: Bool = false,
         temporalStabilityStrength: Double = 0.5,
         outputMode: OutputMode = .processed,
         upscaleMethod: UpscaleMethod = .lanczos,
@@ -165,9 +161,6 @@ struct PluginStateData: Codable, Sendable {
         self.screenColor = screenColor
         self.qualityMode = qualityMode
         self.hintMode = hintMode
-        self.showSubjectMarker = showSubjectMarker
-        self.subjectPositionX = subjectPositionX
-        self.subjectPositionY = subjectPositionY
         self.sourcePassthroughEnabled = sourcePassthroughEnabled
         self.passthroughErodeNormalized = passthroughErodeNormalized
         self.passthroughBlurNormalized = passthroughBlurNormalized
@@ -204,12 +197,11 @@ struct PluginStateData: Codable, Sendable {
     /// light wrap, edge decontamination) doesn't invalidate saved documents
     /// from earlier builds. Missing keys fall back to their default values.
     enum CodingKeys: String, CodingKey {
+        case video
+        case sourceFrameIndex
         case screenColor
         case qualityMode
         case hintMode
-        case showSubjectMarker
-        case subjectPositionX
-        case subjectPositionY
         case sourcePassthroughEnabled
         case passthroughErodeNormalized
         case passthroughBlurNormalized
@@ -235,19 +227,20 @@ struct PluginStateData: Codable, Sendable {
         case renderQualityLevel
         case longEdgeBaseline
         case destinationLongEdgePixels
+        case workingColorGamut
         case cachedMatteBlob
+        case cachedFrameReference
         case cachedMatteInferenceResolution
         case hintPointSet
     }
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.screenColor = try container.decodeIfPresent(ScreenColor.self, forKey: .screenColor) ?? .green
+        self.sourceFrameIndex = try container.decodeIfPresent(Int.self, forKey: .sourceFrameIndex) ?? 0
+        self.video = try container.decodeIfPresent(VideoInferenceSettings.self, forKey: .video) ?? VideoInferenceSettings()
+        self.screenColor = try container.decodeIfPresent(ScreenColor.self, forKey: .screenColor) ?? .automatic
         self.qualityMode = try container.decodeIfPresent(QualityMode.self, forKey: .qualityMode) ?? .automatic
-        self.hintMode = try container.decodeIfPresent(HintMode.self, forKey: .hintMode) ?? .appleVision
-        self.showSubjectMarker = try container.decodeIfPresent(Bool.self, forKey: .showSubjectMarker) ?? false
-        self.subjectPositionX = try container.decodeIfPresent(Double.self, forKey: .subjectPositionX) ?? 0.5
-        self.subjectPositionY = try container.decodeIfPresent(Double.self, forKey: .subjectPositionY) ?? 0.5
+        self.hintMode = try container.decodeIfPresent(HintMode.self, forKey: .hintMode) ?? .none
         // Decoder fallbacks must match the v1.0 product defaults (the
         // designated initialiser) so a saved plist that predates a key
         // is upgraded to the current default rather than silently
@@ -263,24 +256,26 @@ struct PluginStateData: Codable, Sendable {
         self.alphaErodeNormalized = try container.decodeIfPresent(Double.self, forKey: .alphaErodeNormalized) ?? 0.0
         self.alphaSoftnessNormalized = try container.decodeIfPresent(Double.self, forKey: .alphaSoftnessNormalized) ?? 0.0
         self.alphaGamma = try container.decodeIfPresent(Double.self, forKey: .alphaGamma) ?? 1.0
-        self.autoDespeckleEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoDespeckleEnabled) ?? true
+        self.autoDespeckleEnabled = try container.decodeIfPresent(Bool.self, forKey: .autoDespeckleEnabled) ?? false
         self.despeckleSize = try container.decodeIfPresent(Int.self, forKey: .despeckleSize) ?? 100
         self.refinerStrength = try container.decodeIfPresent(Double.self, forKey: .refinerStrength) ?? 1.0
-        self.despillStrength = try container.decodeIfPresent(Double.self, forKey: .despillStrength) ?? 0.5
+        self.despillStrength = try container.decodeIfPresent(Double.self, forKey: .despillStrength) ?? 0
         self.spillMethod = try container.decodeIfPresent(SpillMethod.self, forKey: .spillMethod) ?? .ultra
-        self.lightWrapEnabled = try container.decodeIfPresent(Bool.self, forKey: .lightWrapEnabled) ?? true
+        self.lightWrapEnabled = try container.decodeIfPresent(Bool.self, forKey: .lightWrapEnabled) ?? false
         self.lightWrapStrength = try container.decodeIfPresent(Double.self, forKey: .lightWrapStrength) ?? 0.25
         self.lightWrapRadius = try container.decodeIfPresent(Double.self, forKey: .lightWrapRadius) ?? 10.0
-        self.edgeDecontaminateEnabled = try container.decodeIfPresent(Bool.self, forKey: .edgeDecontaminateEnabled) ?? true
+        self.edgeDecontaminateEnabled = try container.decodeIfPresent(Bool.self, forKey: .edgeDecontaminateEnabled) ?? false
         self.edgeDecontaminateStrength = try container.decodeIfPresent(Double.self, forKey: .edgeDecontaminateStrength) ?? 0.5
-        self.temporalStabilityEnabled = try container.decodeIfPresent(Bool.self, forKey: .temporalStabilityEnabled) ?? true
+        self.temporalStabilityEnabled = try container.decodeIfPresent(Bool.self, forKey: .temporalStabilityEnabled) ?? false
         self.temporalStabilityStrength = try container.decodeIfPresent(Double.self, forKey: .temporalStabilityStrength) ?? 0.5
         self.outputMode = try container.decodeIfPresent(OutputMode.self, forKey: .outputMode) ?? .processed
         self.upscaleMethod = try container.decodeIfPresent(UpscaleMethod.self, forKey: .upscaleMethod) ?? .lanczos
         self.renderQualityLevel = try container.decodeIfPresent(Int.self, forKey: .renderQualityLevel) ?? 2
         self.longEdgeBaseline = try container.decodeIfPresent(Double.self, forKey: .longEdgeBaseline) ?? 1920.0
         self.destinationLongEdgePixels = try container.decodeIfPresent(Int.self, forKey: .destinationLongEdgePixels) ?? 1920
+        self.workingColorGamut = try container.decodeIfPresent(WorkingColorGamut.self, forKey: .workingColorGamut) ?? .rec709
         self.cachedMatteBlob = try container.decodeIfPresent(Data.self, forKey: .cachedMatteBlob)
+        self.cachedFrameReference = try container.decodeIfPresent(AnalysisFrameReference.self, forKey: .cachedFrameReference)
         self.cachedMatteInferenceResolution = try container.decodeIfPresent(Int.self, forKey: .cachedMatteInferenceResolution) ?? 0
         self.hintPointSet = try container.decodeIfPresent(HintPointSet.self, forKey: .hintPointSet) ?? HintPointSet()
     }
@@ -290,12 +285,11 @@ struct PluginStateData: Codable, Sendable {
     /// projects without that key still load with the new default.
     func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(video, forKey: .video)
+        try container.encode(sourceFrameIndex, forKey: .sourceFrameIndex)
         try container.encode(screenColor, forKey: .screenColor)
         try container.encode(qualityMode, forKey: .qualityMode)
         try container.encode(hintMode, forKey: .hintMode)
-        try container.encode(showSubjectMarker, forKey: .showSubjectMarker)
-        try container.encode(subjectPositionX, forKey: .subjectPositionX)
-        try container.encode(subjectPositionY, forKey: .subjectPositionY)
         try container.encode(sourcePassthroughEnabled, forKey: .sourcePassthroughEnabled)
         try container.encode(passthroughErodeNormalized, forKey: .passthroughErodeNormalized)
         try container.encode(passthroughBlurNormalized, forKey: .passthroughBlurNormalized)
@@ -321,14 +315,15 @@ struct PluginStateData: Codable, Sendable {
         try container.encode(renderQualityLevel, forKey: .renderQualityLevel)
         try container.encode(longEdgeBaseline, forKey: .longEdgeBaseline)
         try container.encode(destinationLongEdgePixels, forKey: .destinationLongEdgePixels)
+        try container.encode(workingColorGamut, forKey: .workingColorGamut)
         try container.encodeIfPresent(cachedMatteBlob, forKey: .cachedMatteBlob)
+        try container.encodeIfPresent(cachedFrameReference, forKey: .cachedFrameReference)
         try container.encode(cachedMatteInferenceResolution, forKey: .cachedMatteInferenceResolution)
         try container.encode(hintPointSet, forKey: .hintPointSet)
     }
 
-    /// Encodes the snapshot for hand-off to the FxPlug host. Binary plist is
-    /// used because we need to embed a raw `Data` payload (the cached matte)
-    /// efficiently — JSON would base64 it and bloat the blob by ~33 %.
+    /// Encodes compact settings and a local frame reference for the FxPlug host.
+    /// Binary plist also preserves inline diagnostic frames without base64 expansion.
     func encodedForHost() throws -> NSData {
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary

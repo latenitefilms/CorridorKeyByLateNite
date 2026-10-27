@@ -2,11 +2,8 @@
 //  MatteCodec.swift
 //  CorridorKey by LateNite
 //
-//  Encodes and decodes single-channel alpha mattes for embedding inside the
-//  plug-in's FxPlug custom parameter. The matte is the only thing we persist
-//  per frame — the neural network's foreground is reconstructed at render
-//  time from the original source, so saving it would quadruple storage for
-//  no visible quality win once despill runs.
+//  Legacy alpha-only codec, retained for matte utilities and tests.
+//  Production analysis uses AnalysisFrameCodec to retain v2 foreground RGB.
 //
 //  Layout of a compressed frame:
 //

@@ -54,11 +54,12 @@ struct FirstFrameParityTests {
     /// non-deterministic GPU op (which we'd want to track down) or
     /// a wrapper-side bug like PixelBufferTextureBridge handing
     /// the FxPlug-equivalent path a differently-configured texture.
-    @Test("renderToTexture produces byte-identical pixels via both standalone and direct paths")
-    func standaloneAndDirectRendersAgree() async throws {
+    @Test("renderToTexture produces byte-identical pixels via both standalone and direct paths",
+          arguments: ScreenColor.allCases)
+    func standaloneAndDirectRendersAgree(screenColor: ScreenColor) async throws {
         let url = try #require(
-            RealClipFixture.fourFrameClipURL(),
-            "NikoDruid 4-frame fixture missing — see RealClipFixture for the expected path."
+            screenColor == .green ? RealClipFixture.fourFrameClipURL() : RealClipFixture.blueFourFrameClipURL(),
+            "Four-frame benchmark fixture missing — see RealClipFixture for the expected path."
         )
         let source = try await VideoSource(url: url)
         let pixelBuffer = try await source.makeFrame(atTime: .zero)
@@ -70,10 +71,26 @@ struct FirstFrameParityTests {
         // user actually sees.
         var state = PluginStateData()
         state.qualityMode = .draft512
+        state.screenColor = screenColor
         state.destinationLongEdgePixels = max(
             CVPixelBufferGetWidth(pixelBuffer),
             CVPixelBufferGetHeight(pixelBuffer)
         )
+
+        // Warm the actual neural model before comparing. Comparing two cold
+        // fallback renders would pass without exercising the v2 integration.
+        let entry = try MetalDeviceCache.shared.entry(for: engine.device)
+        _ = try await Task.detached {
+            try SharedMLXBridgeRegistry.shared.waitForReady(
+                deviceRegistryID: entry.device.registryID,
+                rung: 512,
+                screenColor: screenColor,
+                cacheEntry: entry
+            )
+        }.value
+        let analysis = try engine.extractMatteBlob(source: pixelBuffer, state: state, renderTime: .zero)
+        state.cachedMatteBlob = analysis.blob
+        state.cachedMatteInferenceResolution = analysis.inferenceResolution
 
         // Standalone path.
         let standaloneResult = try engine.render(

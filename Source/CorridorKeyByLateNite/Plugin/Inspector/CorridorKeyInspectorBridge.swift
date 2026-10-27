@@ -11,6 +11,7 @@ import Foundation
 import Observation
 import AppKit
 import CoreMedia
+import Metal
 
 /// Main-actor-isolated bridge owned by the SwiftUI header. We hold the
 /// `apiManager` weakly-ish through a retained protocol existential so the
@@ -40,13 +41,119 @@ final class CorridorKeyInspectorBridge {
     @ObservationIgnored
     private var smoothedPerFrameSeconds: Double?
 
+    @ObservationIgnored
+    private var lastPoll: ContinuousClock.Instant?
+
+    /// Each visible custom row owns a cancellable observer. Coalescing reads
+    /// keeps opening Alpha Hint from doubling host IPC and metadata decoding.
+    func observeSnapshots() async {
+        while !Task.isCancelled {
+            let now = ContinuousClock.now
+            if lastPoll.map({ $0.duration(to: now) >= .milliseconds(700) }) ?? true {
+                lastPoll = now
+                refreshSnapshot()
+            }
+            do { try await Task.sleep(for: .milliseconds(750)) }
+            catch { return }
+        }
+    }
+
     init(apiManager: any PROAPIAccessing, plugin: CorridorKeyToolboxPlugIn) {
         self.apiManager = apiManager
         self.plugin = plugin
-        refreshSnapshot()
+        // The view's observer performs the first read after host setup returns.
+        // Starting a custom-parameter action inside createView can deadlock FxPlug.
+    }
+
+    /// Whether saved hints predate per-frame annotations.
+    private(set) var hasLegacyHints = false
+    /// Saved external matte shown by the common file picker.
+    var alphaHintAsset: AlphaHintAsset?
+    /// Parameter-write failures remain visible rather than losing a file selection silently.
+    private(set) var hintSelectionError: String?
+    /// Estimate from the same preflight used by the standalone editor.
+    private(set) var videoMemoryEstimate: VideoMemoryEstimate?
+    /// Explicit tool selection is persisted on the same effect instance as its points.
+    private(set) var subjectTool: OnScreenControlTool = .disabled
+    /// External masks replace manual points, matching the standalone editor.
+    private(set) var usesAlphaHint = false
+    /// An unreadable value must never look like a successfully loaded empty hint set.
+    private(set) var hintStorageUnavailable = false
+
+    /// Persists only the security-scoped asset; native parameters store its timing and strength.
+    func saveAlphaHintAsset() {
+        guard let action = apiManager.api(for: (any FxCustomParameterActionAPI_v4).self) as? any FxCustomParameterActionAPI_v4 else { return }
+        action.startAction(self)
+        defer { action.endAction(self) }
+        do {
+            let dictionary: NSDictionary
+            if let alphaHintAsset {
+                dictionary = ["asset": try PropertyListEncoder().encode(alphaHintAsset)]
+            } else {
+                dictionary = [:]
+            }
+            guard HeaderCustomParameterStorage.setDictionary(dictionary, for: HeaderStorageKey.alphaHintAsset, using: apiManager) else {
+                hintSelectionError = "Final Cut Pro could not save the Alpha Hint selection. Choose the file again."
+                return
+            }
+            hintSelectionError = nil
+        } catch {
+            hintSelectionError = error.localizedDescription
+        }
+    }
+
+    /// Uses source-relative, zero-based timing, matching the standalone editor.
+    func setCurrentFrameAsHintReference() {
+        guard let action = apiManager.api(for: (any FxCustomParameterActionAPI_v4).self) as? any FxCustomParameterActionAPI_v4 else { return }
+        action.startAction(self)
+        defer { action.endAction(self) }
+        guard let timing = apiManager.api(for: (any FxTimingAPI_v4).self) as? any FxTimingAPI_v4,
+              let setting = apiManager.api(for: (any FxParameterSettingAPI_v5).self) as? any FxParameterSettingAPI_v5 else { return }
+        var duration = CMTime.invalid
+        var start = CMTime.invalid
+        timing.frameDuration(&duration)
+        timing.startTimeOfInput(toFilter: &start)
+        let position = CMTimeSubtract(action.currentTime(), start).seconds / duration.seconds
+        guard position.isFinite, position >= 0, position <= Double(Int32.max) else { return }
+        setting.setIntValue(Int32(position.rounded()), toParameter: ParameterIdentifier.referenceFrame, at: .zero)
     }
 
     // MARK: - User actions
+
+    /// Changes the viewer click action in a host undo group, without changing the matte.
+    func selectSubjectTool(_ tool: OnScreenControlTool) {
+        guard let action = apiManager.api(for: (any FxCustomParameterActionAPI_v4).self) as? any FxCustomParameterActionAPI_v4 else { return }
+        action.startAction(self)
+        defer { action.endAction(self) }
+        guard HeaderCustomParameterStorage.setDictionary(
+            tool.parameterDictionary, for: HeaderStorageKey.subjectTool, using: apiManager
+        ) else {
+            hintSelectionError = "Final Cut Pro could not save the Subject tool. Choose Reset All or reapply the updated effect."
+            return
+        }
+        subjectTool = tool
+        hintSelectionError = nil
+    }
+
+    /// Removes annotations on the playhead frame or throughout the clip.
+    func clearHints(onCurrentFrame: Bool) {
+        guard let action = apiManager.api(for: (any FxCustomParameterActionAPI_v4).self) as? any FxCustomParameterActionAPI_v4 else { return }
+        action.startAction(self)
+        defer { action.endAction(self) }
+        guard let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6,
+              let plugin else { return }
+        var hints = plugin.loadHintPointSet(using: retrieval)
+        if onCurrentFrame {
+            hints.clear(at: action.currentTime())
+        } else {
+            hints.clear()
+        }
+        if HeaderCustomParameterStorage.setDictionary(hints.asParameterDictionary(), for: HeaderStorageKey.subjectPoints, using: apiManager) {
+            hintSelectionError = nil
+        } else {
+            hintSelectionError = "Final Cut Pro could not clear the hints. Choose Reset All or reapply the updated effect."
+        }
+    }
 
     func triggerAnalysis() {
         plugin?.startForwardAnalysisPass()
@@ -55,6 +162,17 @@ final class CorridorKeyInspectorBridge {
 
     func resetAnalysis() {
         plugin?.clearAnalysisCache()
+        refreshSnapshot()
+    }
+
+    /// Restores the same factory state as the standalone editor in one host undo group.
+    func resetAllParameters() {
+        do {
+            try plugin?.resetAllParameters()
+            hintSelectionError = nil
+        } catch {
+            hintSelectionError = error.localizedDescription
+        }
         refreshSnapshot()
     }
 
@@ -90,13 +208,48 @@ final class CorridorKeyInspectorBridge {
         actionAPI.startAction(self)
         defer { actionAPI.endAction(self) }
 
-        let state = currentAnalysisState()
-        let (analysed, total, resolution) = currentAnalysisCounts(for: state)
+        var hintPointCount = 0
+        if let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6 {
+            let storage = HeaderCustomParameterStorage.storageDictionary(using: retrieval)
+            hintStorageUnavailable = storage.dictionary == nil
+            subjectTool = OnScreenControlTool(parameterDictionary: HeaderCustomParameterStorage.dictionaryValue(
+                for: HeaderStorageKey.subjectTool, using: retrieval, storage: storage
+            ))
+            let hints = plugin?.loadHintPointSet(using: retrieval, headerStorage: storage)
+            hasLegacyHints = hints?.hasLegacyPoints ?? false
+            hintPointCount = hints?.points.count ?? 0
+            if let video = plugin?.videoSettings(using: retrieval, at: actionAPI.currentTime(), headerStorage: storage), let device = MTLCreateSystemDefaultDevice() {
+                alphaHintAsset = video.alphaHintAsset
+                usesAlphaHint = video.useAlphaHint
+                var rawQuality: Int32 = 0
+                retrieval.getIntValue(&rawQuality, fromParameter: ParameterIdentifier.qualityMode, at: actionAPI.currentTime())
+                let quality = QualityMode(rawValue: Int(rawQuality)) ?? .automatic
+                let resolution = quality.resolvedInferenceResolution(forLongEdge: 1920, deviceRegistryID: device.registryID)
+                videoMemoryEstimate = video.memoryEstimate(resolution: resolution, frameCount: max(1, snapshot.totalFrameCount > 0 ? snapshot.totalFrameCount : video.timeAwareness.frameCount),
+                                                                  deviceBudget: device.recommendedMaxWorkingSetSize)
+            }
+        }
+        let hostState = currentAnalysisState()
+        let (analysed, total, resolution) = currentAnalysisCounts(for: hostState)
+        // The host can still report completion after an annotation edit.
+        let state: CorridorKeyAnalysisSnapshot.State = hostState == .completed && total == 0 ? .notAnalysed : hostState
         let warmup = plugin?.renderPipeline.inferenceCoordinator.warmupStatus ?? .cold
         let eta = updatedETA(forState: state, analysed: analysed, total: total)
         let lastRender = plugin?.lastFrameMilliseconds.read()
         let lastRenderForFooter: Double? = (lastRender ?? 0) > 0 ? lastRender : nil
         let backendDescription = plugin?.lastRenderReport.read()?.backendDescription ?? "—"
+        var sourceWidth: UInt = 0
+        var sourceHeight: UInt = 0
+        var pixelAspectRatio: Double = 1
+        if let inputAPI = apiManager.api(for: (any FxOnScreenControlAPI_v3).self) as? any FxOnScreenControlAPI_v3 {
+            inputAPI.inputWidth(&sourceWidth, height: &sourceHeight, pixelAspectRatio: &pixelAspectRatio)
+        }
+        var frameDuration = CMTime.invalid
+        if let timing = apiManager.api(for: (any FxTimingAPI_v4).self) as? any FxTimingAPI_v4 {
+            timing.frameDuration(&frameDuration)
+        }
+        let sourceFrameRate = frameDuration.isNumeric && frameDuration.seconds > 0
+            ? 1 / frameDuration.seconds : nil
         return CorridorKeyAnalysisSnapshot(
             state: state,
             analyzedFrameCount: analysed,
@@ -105,7 +258,11 @@ final class CorridorKeyInspectorBridge {
             warmup: warmup,
             analysisETASeconds: eta,
             lastRenderMilliseconds: lastRenderForFooter,
-            renderBackendDescription: backendDescription
+            renderBackendDescription: backendDescription,
+            hintPointCount: hintPointCount,
+            sourceWidth: sourceWidth > 0 ? Int(sourceWidth) : nil,
+            sourceHeight: sourceHeight > 0 ? Int(sourceHeight) : nil,
+            sourceFrameRate: sourceFrameRate
         )
     }
 
@@ -195,48 +352,20 @@ final class CorridorKeyInspectorBridge {
             fromParameter: ParameterIdentifier.qualityMode,
             at: CMTime.zero
         )
-        if Int(currentQualityRaw) != data.qualityModeRaw {
+        var hintModeRaw = Int32(PluginStateData().hintMode.rawValue)
+        retrieval.getIntValue(&hintModeRaw, fromParameter: ParameterIdentifier.hintMode, at: .zero)
+        var smoothing = ObjCBool(false)
+        var smoothingStrength = 0.5
+        retrieval.getBoolValue(&smoothing, fromParameter: ParameterIdentifier.temporalStabilityEnabled, at: .zero)
+        retrieval.getFloatValue(&smoothingStrength, fromParameter: ParameterIdentifier.temporalStabilityStrength, at: .zero)
+        if !data.matchesHints(
+            mode: HintMode(rawValue: Int(hintModeRaw)) ?? PluginStateData().hintMode,
+            points: plugin.loadHintPointSet(using: retrieval),
+            video: plugin.videoSettings(using: retrieval, at: .zero),
+            temporalStabilityEnabled: smoothing.boolValue, temporalStabilityStrength: smoothingStrength
+        ) || Int(currentQualityRaw) != data.qualityModeRaw {
             return (0, 0, 0)
         }
         return (data.analyzedCount, data.frameCount, data.inferenceResolution)
-    }
-}
-
-/// Returns the wrapper app icon bundled alongside the FxPlug service. Walks
-/// up from the main bundle to find the owning `.app`, matching the lookup
-/// Final Cut Pro uses so we get the same artwork the Finder would show.
-@MainActor
-enum CorridorKeyInspectorAssets {
-    static func containingApplicationURL() -> URL? {
-        var current = Bundle.main.bundleURL
-        while current.path != "/" {
-            if current.pathExtension == "app" {
-                return current
-            }
-            current = current.deletingLastPathComponent()
-        }
-        return nil
-    }
-
-    static func containingApplicationBundle() -> Bundle? {
-        guard let url = containingApplicationURL() else { return nil }
-        return Bundle(url: url)
-    }
-
-    static func applicationIcon() -> NSImage {
-        if let url = containingApplicationURL() {
-            return NSWorkspace.shared.icon(forFile: url.path)
-        }
-        return NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
-    }
-
-    static func versionString() -> String {
-        let bundle = containingApplicationBundle() ?? .main
-        return (bundle.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0"
-    }
-
-    static func buildString() -> String {
-        let bundle = containingApplicationBundle() ?? .main
-        return (bundle.infoDictionary?["CFBundleVersion"] as? String) ?? "1"
     }
 }

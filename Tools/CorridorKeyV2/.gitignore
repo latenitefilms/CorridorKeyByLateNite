@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+artifacts/
+*.pt
+*.mlxfn
+*.npz

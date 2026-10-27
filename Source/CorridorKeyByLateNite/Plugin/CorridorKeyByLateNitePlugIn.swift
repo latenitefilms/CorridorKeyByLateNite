@@ -44,10 +44,11 @@ final class CorridorKeyToolboxPlugIn: NSObject, FxTileableEffect, FxAnalyzer {
     /// registry leaked a full clip's worth of mattes per instance.
     let analysisSession = AnalysisSessionState()
 
-    /// Last persisted analysis cache for this plug-in instance. The render
-    /// callback uses it as a same-process fallback when Final Cut Pro hands
-    /// back an older `pluginState` blob after a seek.
+    /// Decoded analysis metadata reused while capturing immutable render state.
     let analysisSnapshotStore = AnalysisSnapshotStore()
+
+    /// Both custom rows observe one bridge; hosting views own its lifetime.
+    @MainActor weak var inspectorBridge: CorridorKeyInspectorBridge?
 
     // MARK: - Init
 
@@ -127,10 +128,15 @@ final class AtomicRenderReport: @unchecked Sendable {
     private let lock = NSLock()
     private var value: RenderReport?
 
-    func set(_ newValue: RenderReport) {
+    /// Reports backend transitions only, avoiding per-frame disk logging.
+    @discardableResult
+    func set(_ newValue: RenderReport) -> Bool {
         lock.lock()
+        defer { lock.unlock() }
+        let changed = value?.backendDescription != newValue.backendDescription
+            || value?.effectiveInferenceResolution != newValue.effectiveInferenceResolution
         value = newValue
-        lock.unlock()
+        return changed
     }
 
     func read() -> RenderReport? {

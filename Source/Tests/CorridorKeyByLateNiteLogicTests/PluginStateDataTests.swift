@@ -15,6 +15,15 @@ import Testing
 @Suite("PluginStateData")
 struct PluginStateDataTests {
 
+    @Test("Host colour gamut survives state transport without render-time API calls")
+    func hostColorGamutSnapshot() throws {
+        var state = PluginStateData()
+        state.workingColorGamut = .rec2020
+        let restored = PluginStateData.decoded(from: try state.encodedForHost())
+        #expect(restored.workingColorGamut == .rec2020)
+        #expect(PluginStateData.decoded(from: NSData(data: Data("{}".utf8))).workingColorGamut == .rec709)
+    }
+
     @Test("Round-trip preserves every field")
     func roundTripPreservesFields() throws {
         let matte = Data([0xFE, 0xED, 0xFA, 0xCE, 0xCA, 0xFE])
@@ -73,20 +82,17 @@ struct PluginStateDataTests {
         #expect(decoded.cachedMatteInferenceResolution == 1024)
     }
 
-    @Test("Temporal stability defaults preserve backward compatibility")
+    @Test("Temporal smoothing is opt-in and explicit saved values survive")
     func temporalStabilityDefaults() {
         let defaults = PluginStateData()
-        // Default ON in v1.0 — alongside Light Wrap, Edge Decontaminate,
-        // Auto Despeckle, and Apple Vision hinting, this lands users on
-        // a comp-ready key on first frame. Users tuning a tricky shot
-        // can flip it off via the inspector.
-        #expect(defaults.temporalStabilityEnabled == true)
+        #expect(defaults.temporalStabilityEnabled == false)
         #expect(defaults.temporalStabilityStrength == 0.5)
+        #expect(defaults.autoDespeckleEnabled == false)
+        #expect(defaults.lightWrapEnabled == false)
+        #expect(defaults.video.lowGPUMemory == false)
 
-        // Empty blobs hit the default branch which now returns an
-        // enabled stabiliser, matching the new product default.
         let decoded = PluginStateData.decoded(from: NSData())
-        #expect(decoded.temporalStabilityEnabled == true)
+        #expect(decoded.temporalStabilityEnabled == false)
         #expect(decoded.temporalStabilityStrength == 0.5)
     }
 
@@ -119,18 +125,14 @@ struct PluginStateDataTests {
         #expect(decoded.cachedMatteInferenceResolution == 0)
     }
 
-    @Test("Hint mode defaults to Apple Vision and survives round-trip")
+    @Test("Hint mode defaults to None and explicit modes survive round-trip")
     func hintModeDefaultsAndRoundTrip() throws {
         let defaults = PluginStateData()
-        // Default in v1.0: Vision's foreground prior beats the
-        // chroma prior on most footage, and the MLX network handles
-        // the harder boundaries Vision produces well enough that
-        // shipping it as the default is the right call.
-        #expect(defaults.hintMode == .appleVision)
+        #expect(defaults.hintMode == .none)
 
         // Empty blob falls back to the default mode.
         let legacyDecoded = PluginStateData.decoded(from: NSData())
-        #expect(legacyDecoded.hintMode == .appleVision)
+        #expect(legacyDecoded.hintMode == .none)
 
         // Manual should round-trip.
         let manual = PluginStateData(screenColor: .green, qualityMode: .high1024, hintMode: .manual)
@@ -200,4 +202,14 @@ struct PluginStateDataTests {
         state.destinationLongEdgePixels = 1920
         #expect(abs(state.destinationPixelRadius(fromNormalized: 10) - 10) < 0.001)
     }
+    @Test("Edge Decontaminate is opt-in while existing explicit choices survive decoding")
+    func edgeDecontaminationDefaultsOff() throws {
+        #expect(!PluginStateData().edgeDecontaminateEnabled)
+        let decoded = try JSONDecoder().decode(PluginStateData.self, from: Data("{}".utf8))
+        #expect(!decoded.edgeDecontaminateEnabled)
+        let enabled = PluginStateData(edgeDecontaminateEnabled: true)
+        let restored = PluginStateData.decoded(from: try enabled.encodedForHost())
+        #expect(restored.edgeDecontaminateEnabled)
+    }
+
 }

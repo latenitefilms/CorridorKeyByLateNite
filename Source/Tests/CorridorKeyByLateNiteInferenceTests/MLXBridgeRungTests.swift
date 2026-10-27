@@ -14,6 +14,7 @@ import Testing
 @testable import CorridorKeyToolboxLogic
 @testable import CorridorKeyToolboxMetalStages
 
+extension MLXInferenceTests {
 @Suite("MLX bridge rungs", .serialized)
 struct MLXBridgeRungTests {
 
@@ -36,11 +37,8 @@ struct MLXBridgeRungTests {
         do { entry = try InferenceTestHarness.makeEntry() }
         catch { throw XCTSkip(error) }
 
-        // Cover both colour packs at every rung — both share an
-        // architecture so every rung×colour combination must load and
-        // produce a non-degenerate matte. Skips silently when a bridge
-        // file isn't bundled (e.g. a contributor builds without the
-        // blue pack copied in yet) so the suite still passes locally.
+        // Both screen selections must dispatch successfully at every quality.
+        // Missing production assets are failures, not skipped inference.
         for screenColor in ScreenColor.allCases {
             for rung in InferenceTestHarness.allBridgeRungs {
                 try await runOneInference(rung: rung, screenColor: screenColor, entry: entry)
@@ -54,15 +52,7 @@ struct MLXBridgeRungTests {
         screenColor: ScreenColor,
         entry: MetalDeviceCacheEntry
     ) async throws {
-        let bridgeURL: URL
-        do {
-            bridgeURL = try InferenceTestHarness.bridgeURL(forRung: rung, screenColor: screenColor)
-        } catch {
-            // Optional bridge missing from the local checkout — skip
-            // this combo but keep walking the matrix.
-            print("Skipping \(screenColor.displayName) \(rung)px bridge: \(error)")
-            return
-        }
+        let bridgeURL = try InferenceTestHarness.bridgeURL(forRung: rung, screenColor: screenColor)
         let engine = MLXKeyingEngine(cacheEntry: entry)
         try await engine.prepare(bridgeURL: bridgeURL, rung: rung, screenColor: screenColor)
 
@@ -86,4 +76,6 @@ struct MLXBridgeRungTests {
         #expect(maxValue > minValue + 0.001, Comment(rawValue: "\(label) bridge produced a degenerate alpha range."))
         print("\(screenColor.displayName) \(rung)px MLX bridge alpha range: [\(minValue), \(maxValue)]")
     }
+}
+
 }

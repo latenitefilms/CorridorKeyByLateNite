@@ -1,0 +1,203 @@
+{
+  "passed": [
+    {
+      "resolution": 512,
+      "window": 2,
+      "frames": 3,
+      "screen": "green",
+      "metrics": [
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.0007681846618652344,
+            "mean_error": 4.399786121211946e-06,
+            "rmse": 1.5247671399265528e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.002763807773590088,
+            "mean_error": 3.689807635964826e-05,
+            "rmse": 0.00015180668560788035
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.0009750723838806152,
+            "mean_error": 4.426504347065929e-06,
+            "rmse": 1.5718293070676737e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.0029810667037963867,
+            "mean_error": 3.684918556245975e-05,
+            "rmse": 0.00015167413221206516
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.0007444024085998535,
+            "mean_error": 4.51717050964362e-06,
+            "rmse": 1.5676292605348863e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.002928018569946289,
+            "mean_error": 3.699170702020638e-05,
+            "rmse": 0.00015219861234072596
+          }
+        ]
+      ],
+      "seconds": 124.24924949998967
+    },
+    {
+      "resolution": 512,
+      "window": 4,
+      "frames": 4,
+      "screen": "blue",
+      "metrics": [
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.0007715523242950439,
+            "mean_error": 4.921039817418205e-06,
+            "rmse": 1.7685111743048765e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.0028194189071655273,
+            "mean_error": 3.64866282325238e-05,
+            "rmse": 0.0001504141400801018
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.000830233097076416,
+            "mean_error": 4.700111276179086e-06,
+            "rmse": 1.668909862928558e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.0035833120346069336,
+            "mean_error": 3.646646291599609e-05,
+            "rmse": 0.00015028541383799165
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.0006763041019439697,
+            "mean_error": 5.040019914304139e-06,
+            "rmse": 1.752694333845284e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.002914249897003174,
+            "mean_error": 3.62957980541978e-05,
+            "rmse": 0.00014936027582734823
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.0007302761077880859,
+            "mean_error": 4.6580189518863335e-06,
+            "rmse": 1.6064723240560852e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.0030305981636047363,
+            "mean_error": 3.6539382563205436e-05,
+            "rmse": 0.00015058457211125642
+          }
+        ]
+      ],
+      "seconds": 27.793251750001218
+    },
+    {
+      "resolution": 1024,
+      "window": 2,
+      "frames": 2,
+      "screen": "green",
+      "metrics": [
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.0008695125579833984,
+            "mean_error": 3.3698811421345454e-06,
+            "rmse": 1.143156987382099e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.0034047961235046387,
+            "mean_error": 3.610976636991836e-05,
+            "rmse": 0.00014985758753027767
+          }
+        ],
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.0007158517837524414,
+            "mean_error": 3.367227236594772e-06,
+            "rmse": 1.137084200308891e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.003557264804840088,
+            "mean_error": 3.599383126129396e-05,
+            "rmse": 0.00014925297000445426
+          }
+        ]
+      ],
+      "seconds": 188.47482916602166
+    },
+    {
+      "resolution": 1536,
+      "window": 1,
+      "frames": 1,
+      "screen": "blue",
+      "metrics": [
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.0008020699024200439,
+            "mean_error": 3.7772010728076566e-06,
+            "rmse": 1.0698458027036395e-05
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.003506898880004883,
+            "mean_error": 3.5767941881204024e-05,
+            "rmse": 0.00014850962907075882
+          }
+        ]
+      ],
+      "seconds": 187.54126258398173
+    },
+    {
+      "resolution": 2048,
+      "window": 1,
+      "frames": 1,
+      "screen": "green",
+      "metrics": [
+        [
+          {
+            "output": "alpha",
+            "maximum_error": 0.0008561015129089355,
+            "mean_error": 2.9151124181225896e-06,
+            "rmse": 8.800917385087814e-06
+          },
+          {
+            "output": "foreground",
+            "maximum_error": 0.00334775447845459,
+            "mean_error": 3.562184065231122e-05,
+            "rmse": 0.00014820236538071185
+          }
+        ]
+      ],
+      "seconds": 330.58532504102914
+    }
+  ]
+}

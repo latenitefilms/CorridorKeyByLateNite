@@ -65,7 +65,7 @@ struct StandaloneRenderEngineTests {
         #expect(output.alphaFloats.count == output.width * output.height)
         // The encoder header includes a magic bytes prefix; if the
         // codec changes silently this will fall over.
-        #expect(MatteCodec.parseHeader(output.blob) != nil)
+        #expect(AnalysisFrameCodec.parseHeader(output.blob) != nil)
     }
 
     @Test("warm-up status starts cold and transitions to warming when triggered")

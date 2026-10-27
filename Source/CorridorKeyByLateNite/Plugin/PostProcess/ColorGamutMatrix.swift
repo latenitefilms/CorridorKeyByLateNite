@@ -27,6 +27,10 @@ struct WorkingSpaceTransform: Sendable, Equatable {
     /// transforms a working-space RGB vector into Rec.709 linear RGB.
     let workingToRec709: simd_float3x3
 
+    /// Restores predicted Rec.709 foreground to the host's working gamut before
+    /// mixing with source RGB. Alpha is coverage and never receives this matrix.
+    var rec709ToWorking: simd_float3x3 { workingToRec709.inverse }
+
     /// Identity — used for projects already working in Rec.709 / sRGB linear
     /// (which covers nearly all SDR FCP timelines).
     static let identity = WorkingSpaceTransform(
@@ -44,6 +48,8 @@ enum WorkingColorGamut: Int, Sendable, CaseIterable, Codable {
     case rec709
     /// Rec.2020 primaries (HDR timelines).
     case rec2020
+    /// Native Display P3 plates decoded by the standalone editor.
+    case displayP3
 }
 
 enum ColorGamutMatrix {
@@ -63,6 +69,11 @@ enum ColorGamutMatrix {
                     SIMD3<Float>(-0.0728, -0.0083,  1.1187)
                 )
             )
+        case .displayP3:
+            return WorkingSpaceTransform(workingToRec709: simd_float3x3(
+                SIMD3<Float>(1.224745, -0.042058, -0.019642),
+                SIMD3<Float>(-0.224904, 1.042081, -0.078655),
+                SIMD3<Float>(0, 0, 1.098537)))
         }
     }
 

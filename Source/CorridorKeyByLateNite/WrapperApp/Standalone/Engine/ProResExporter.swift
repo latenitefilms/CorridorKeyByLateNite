@@ -31,6 +31,10 @@
 //
 
 import Foundation
+
+#if CORRIDOR_KEY_HEADLESS_TESTS
+@testable import CorridorKeyToolboxLogic
+#endif
 import AVFoundation
 import CoreMedia
 import CoreVideo
@@ -50,6 +54,8 @@ struct ExportOptions: Sendable, Equatable {
     /// alpha (ProRes 4444 or HEVC with Alpha); silently ignored
     /// otherwise.
     let preserveAlpha: Bool
+    /// Single-file save panels authorize replacement; batch jobs never do.
+    var overwriteExisting: Bool = true
 
     enum ExportCodec: String, Sendable, CaseIterable, Identifiable {
         case proRes4444
@@ -136,12 +142,12 @@ enum ExportRunnerEvent: @unchecked Sendable {
 actor ProResExporter {
 
     private let renderEngine: StandaloneRenderEngine
-    private let videoSource: VideoSource
+    private let videoSource: any EditorMediaSource
     private let project: ExportProjectSnapshot
 
     init(
         renderEngine: StandaloneRenderEngine,
-        videoSource: VideoSource,
+        videoSource: any EditorMediaSource,
         project: ExportProjectSnapshot
     ) {
         self.renderEngine = renderEngine
@@ -156,6 +162,18 @@ actor ProResExporter {
         options: ExportOptions,
         eventHandler: @Sendable (ExportRunnerEvent) -> Void
     ) async {
+        let cacheSessions: [AnalysisDiskCache.Session]
+        do {
+            try Task.checkCancellation()
+            cacheSessions = try project.pinAnalysisCache(frameCount: videoSource.totalFrameCount())
+        } catch is CancellationError {
+            eventHandler(.cancelled)
+            return
+        } catch {
+            eventHandler(.failed(error.localizedDescription))
+            return
+        }
+        defer { withExtendedLifetime(cacheSessions) {} }
         let info = videoSource.info
         let frameCount = videoSource.totalFrameCount()
         let renderSize = info.renderSize
@@ -166,6 +184,10 @@ actor ProResExporter {
         // refuses to overwrite, and the user already confirmed via the
         // save sheet that this URL is OK to replace.
         if FileManager.default.fileExists(atPath: options.destination.path) {
+            guard options.overwriteExisting else {
+                eventHandler(.failed("An output named \(options.destination.lastPathComponent) already exists. Start the batch again to choose a new name."))
+                return
+            }
             do {
                 try FileManager.default.removeItem(at: options.destination)
             } catch {
@@ -186,7 +208,7 @@ actor ProResExporter {
             AVVideoCodecKey: options.codec.avFoundationCodec.rawValue,
             AVVideoWidthKey: Int(renderSize.width.rounded()),
             AVVideoHeightKey: Int(renderSize.height.rounded()),
-            AVVideoColorPropertiesKey: Self.colorProperties(for: info)
+            AVVideoColorPropertiesKey: Self.colorProperties(for: info, state: project.state)
         ]
         // HEVC needs a quality target; ProRes is fixed-rate so this
         // dictionary is left absent for those codecs.
@@ -220,10 +242,16 @@ actor ProResExporter {
             eventHandler(.failed(writer.error?.localizedDescription ?? "Writer failed to start."))
             return
         }
+        defer {
+            if writer.status != .completed {
+                if writer.status == .writing { writer.cancelWriting() }
+                try? FileManager.default.removeItem(at: options.destination)
+            }
+        }
         writer.startSession(atSourceTime: .zero)
         eventHandler(.started(totalFrames: frameCount))
 
-        let frameReader: VideoFrameReader
+        let frameReader: any MediaFrameReader
         do {
             frameReader = try await videoSource.makeFrameReader(startTime: .zero)
         } catch {
@@ -250,6 +278,10 @@ actor ProResExporter {
             // push too quickly it stalls instead of dropping.
             while !videoInput.isReadyForMoreMediaData {
                 if Task.isCancelled { break }
+                guard writer.status == .writing else {
+                    eventHandler(.failed(writer.error?.localizedDescription ?? "The encoder stopped accepting frames."))
+                    return
+                }
                 try? await Task.sleep(for: .milliseconds(2))
             }
             if Task.isCancelled { break }
@@ -268,18 +300,7 @@ actor ProResExporter {
             // Without one, the renderer pass-throughs and the export
             // emits the source untouched — which is the explicit "not
             // analysed yet" state we surface in the FxPlug too.
-            var stateForFrame = project.state
-            if let cached = project.cachedMatte(forFrameIndex: frameIndex) {
-                stateForFrame.cachedMatteBlob = cached.blob
-                stateForFrame.cachedMatteInferenceResolution = cached.inferenceResolution
-            } else {
-                stateForFrame.cachedMatteBlob = nil
-                stateForFrame.cachedMatteInferenceResolution = 0
-            }
-            stateForFrame.destinationLongEdgePixels = max(
-                Int(renderSize.width.rounded()),
-                Int(renderSize.height.rounded())
-            )
+            let stateForFrame = project.renderState(forFrameIndex: frameIndex, renderSize: renderSize)
 
             let result: StandaloneRenderResult
             do {
@@ -327,9 +348,11 @@ actor ProResExporter {
     /// what keeps HDR / Rec.2020 / DCI-P3 sources looking correct
     /// downstream — silently re-tagging them BT.709 made wide-gamut
     /// clips appear desaturated when reopened in pro tools.
-    private static func colorProperties(for info: VideoSourceInfo) -> [String: Any] {
+    private static func colorProperties(for info: MediaSourceInfo, state: PluginStateData) -> [String: Any] {
         let primaries = info.colorPrimaries ?? AVVideoColorPrimaries_ITU_R_709_2
-        let transfer = info.transferFunction ?? AVVideoTransferFunction_ITU_R_709_2
+        let transfer = state.outputMode == .original
+            ? (info.transferFunction ?? AVVideoTransferFunction_ITU_R_709_2)
+            : (state.outputIsLinear ? AVVideoTransferFunction_Linear : kCVImageBufferTransferFunction_sRGB as String)
         let matrix = info.yCbCrMatrix ?? AVVideoYCbCrMatrix_ITU_R_709_2
         return [
             AVVideoColorPrimariesKey: primaries,
@@ -373,5 +396,29 @@ struct ExportProjectSnapshot: @unchecked Sendable {
 
     func cachedMatte(forFrameIndex index: Int) -> MatteCacheEntry? {
         cachedMattes[index]
+    }
+
+    /// Requires complete predictions before touching a keyed export destination,
+    /// then prevents quota eviction throughout the export. Diagnostic and Original
+    /// outputs do not consume predictions and can be exported without analysis.
+    func pinAnalysisCache(frameCount: Int) throws -> [AnalysisDiskCache.Session] {
+        guard state.outputMode != .original, state.outputMode != .hint else { return [] }
+        guard frameCount > 0, (0..<frameCount).allSatisfy({ cachedMattes[$0] != nil }) else {
+            throw AnalysisDiskCacheError.missingFrame
+        }
+        return try AnalysisDiskCache.shared.pinSessions(for: cachedMattes.values.compactMap(\.reference))
+    }
+
+    /// Resolves identical frame parameters for movie and still-image export.
+    func renderState(forFrameIndex index: Int, renderSize: CGSize) -> PluginStateData {
+        var resolved = state
+        resolved.sourceFrameIndex = index
+        let cached = cachedMattes[index]
+        resolved.cachedMatteBlob = cached?.inlineBlob
+        resolved.cachedFrameReference = cached?.reference
+        if let next = cachedMattes[index + 1]?.reference { AnalysisDiskCache.shared.prefetch(next) }
+        resolved.cachedMatteInferenceResolution = cached?.inferenceResolution ?? 0
+        resolved.destinationLongEdgePixels = max(Int(renderSize.width.rounded()), Int(renderSize.height.rounded()))
+        return resolved
     }
 }

@@ -13,8 +13,9 @@ extension CorridorKeyToolboxPlugIn {
 
     @objc(properties:error:)
     func properties(_ properties: AutoreleasingUnsafeMutablePointer<NSDictionary>?) throws {
-        // ImageNet-trained networks expect gamma-encoded inputs (sRGB-ish), so
-        // ask Final Cut Pro for video-gamma pixels. We also take the whole
+        // Both hosts use video-gamma pixels. The v2 bridge converts these to
+        // scene-linear/asinh internally and returns foreground in the host's
+        // encoding, preserving the shared compositing contract. Take the whole
         // image each render because the matte depends on spatial context
         // outside any individual tile.
         let swiftProperties: [String: Any] = [

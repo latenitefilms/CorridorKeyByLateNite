@@ -2,8 +2,8 @@
 //  CorridorKeyToolboxPlugIn+Parameters.swift
 //  CorridorKey by LateNite
 //
-//  Defines the entire inspector layout for the plug-in. Analyse / Reset /
-//  version live in the custom-UI header at the top, then the sliders match
+//  Defines the entire inspector layout for the plug-in. Branding sits above
+//  Controls and Analysis Details groups, then the sliders match
 //  the CorridorKey OFX panel so editors moving between Resolve and Final
 //  Cut Pro stay oriented. Enum and toggle controls are explicitly marked
 //  non-animatable — animating "Screen Colour" or "Output" flashes between
@@ -20,7 +20,7 @@ extension CorridorKeyToolboxPlugIn {
     /// Called once by FxPlug for each new instance.
     @objc(addParametersWithError:)
     func addParameters() throws {
-        guard let create = apiManager.api(for: (any FxParameterCreationAPI_v5).self) as? any FxParameterCreationAPI_v5 else {
+        guard let create = apiManager.api(for: (any FxParameterCreationAPI_v6).self) as? any FxParameterCreationAPI_v6 else {
             throw NSError(
                 domain: FxPlugErrorDomain,
                 code: kFxError_APIUnavailable,
@@ -29,12 +29,17 @@ extension CorridorKeyToolboxPlugIn {
         }
 
         try addHeaderParameter(create: create)
+        addControlsGroup(create: create)
+        addAnalysisDetailsGroup(create: create)
         try addSettingsGroup(create: create)
+        addAlphaHintGroup(create: create)
+        addManualHintGroup(create: create)
+        addTimeAwarenessGroup(create: create)
+        try addTemporalStabilityGroup(create: create)
         try addInteriorDetailGroup(create: create)
         try addMatteGroup(create: create)
         try addEdgeAndSpillGroup(create: create)
         try addEdgeRefinementGroup(create: create)
-        try addTemporalStabilityGroup(create: create)
         PluginLog.notice("Parameters registered with Final Cut Pro.")
     }
 
@@ -49,17 +54,10 @@ extension CorridorKeyToolboxPlugIn {
     @objc(classesForCustomParameterID:)
     func classes(forCustomParameterID parameterID: UInt32) -> Set<AnyHashable> {
         switch parameterID {
-        case ParameterIdentifier.headerSummary:
-            let classes: [AnyClass] = [
-                NSDictionary.self,
-                NSMutableDictionary.self,
-                NSString.self,
-                NSNumber.self,
-                NSData.self,
-                NSMutableData.self
-            ]
-            let set = NSSet(array: classes)
-            return (set as? Set<AnyHashable>) ?? []
+        case ParameterIdentifier.headerSummary, ParameterIdentifier.analysisControls,
+             ParameterIdentifier.analysisDetails, ParameterIdentifier.alphaHintControls,
+             ParameterIdentifier.manualHintControls:
+            return CustomParameterValue.allowedClassSet
         default:
             return []
         }
@@ -68,19 +66,86 @@ extension CorridorKeyToolboxPlugIn {
     // MARK: - Inspector header + hidden cache
 
     /// Custom-UI placeholder that `createViewForParameterID` swaps for the
-    /// SwiftUI header (icon, version, Analyse / Reset buttons, status).
+    /// SwiftUI branding header (icon and version). Its saved data stays here.
     private func addHeaderParameter(create: any FxParameterCreationAPI_v5) throws {
         create.addCustomParameter(
             withName: "",
             parameterID: ParameterIdentifier.headerSummary,
-            defaultValue: NSDictionary(),
+            defaultValue: CustomParameterValue.empty,
             parameterFlags: CorridorKeyParameterFlags.headerCustomUI.fxFlags
         )
     }
 
     // MARK: - Visible groups
 
-    private func addSettingsGroup(create: any FxParameterCreationAPI_v5) throws {
+    /// Native host section keeps actions separate from the product identity.
+    private func addControlsGroup(create: any FxParameterCreationAPI_v5) {
+        create.startParameterSubGroup(
+            "Controls",
+            parameterID: ParameterIdentifier.controlsGroup,
+            parameterFlags: CorridorKeyParameterFlags.default.fxFlags
+        )
+        create.addCustomParameter(
+            withName: "",
+            parameterID: ParameterIdentifier.analysisControls,
+            defaultValue: CustomParameterValue.empty,
+            parameterFlags: CorridorKeyParameterFlags.headerCustomUI.fxFlags
+        )
+        create.endParameterSubGroup()
+    }
+
+    /// Diagnostics use a native section so editors can collapse them independently.
+    private func addAnalysisDetailsGroup(create: any FxParameterCreationAPI_v5) {
+        create.startParameterSubGroup(
+            "Analysis Details",
+            parameterID: ParameterIdentifier.analysisDetailsGroup,
+            parameterFlags: CorridorKeyParameterFlags.default.fxFlags
+        )
+        create.addCustomParameter(
+            withName: "",
+            parameterID: ParameterIdentifier.analysisDetails,
+            defaultValue: CustomParameterValue.empty,
+            parameterFlags: CorridorKeyParameterFlags.headerCustomUI.fxFlags
+        )
+        create.endParameterSubGroup()
+    }
+
+    /// V2 controls use one set of labels and defaults in both hosts.
+    private func addTimeAwarenessGroup(create: any FxParameterCreationAPI_v5) {
+        let defaults = VideoInferenceSettings()
+        let flags = CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
+        create.startParameterSubGroup("Time Awareness", parameterID: ParameterIdentifier.timeAwarenessGroup, parameterFlags: CorridorKeyParameterFlags.default.fxFlags)
+        create.addPopupMenu(withName: VideoInferenceSettings.Labels.timeAwareness, parameterID: ParameterIdentifier.timeAwareness, defaultValue: UInt32(defaults.timeAwareness.rawValue), menuEntries: TimeAwareness.allCases.map(\.displayName), parameterFlags: flags)
+        create.addToggleButton(withName: VideoInferenceSettings.Labels.lowGPUMemory, parameterID: ParameterIdentifier.lowGPUMemory, defaultValue: defaults.lowGPUMemory, parameterFlags: flags)
+        create.endParameterSubGroup()
+    }
+
+    private func addAlphaHintGroup(create: any FxParameterCreationAPI_v5) {
+        let defaults = VideoInferenceSettings()
+        let flags = CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
+        create.startParameterSubGroup("Alpha Hint", parameterID: ParameterIdentifier.alphaHintGroup, parameterFlags: CorridorKeyParameterFlags.default.fxFlags)
+        create.addCustomParameter(withName: "", parameterID: ParameterIdentifier.alphaHintControls,
+                                  defaultValue: CustomParameterValue.empty,
+                                  parameterFlags: CorridorKeyParameterFlags.headerCustomUI.fxFlags)
+        create.addToggleButton(withName: VideoInferenceSettings.Labels.useAlphaHint, parameterID: ParameterIdentifier.useAlphaHint, defaultValue: defaults.useAlphaHint, parameterFlags: flags)
+        create.addPopupMenu(withName: VideoInferenceSettings.Labels.hintFrames, parameterID: ParameterIdentifier.hintFrames, defaultValue: UInt32(defaults.hintFrames.rawValue), menuEntries: AlphaHintFrames.allCases.map(\.displayName), parameterFlags: flags)
+        create.addIntSlider(withName: VideoInferenceSettings.Labels.referenceFrame, parameterID: ParameterIdentifier.referenceFrame, defaultValue: 0, parameterMin: 0, parameterMax: Int32.max, sliderMin: 0, sliderMax: 1000, delta: 1, parameterFlags: flags)
+        create.addFloatSlider(withName: VideoInferenceSettings.Labels.alphaHintStrength, parameterID: ParameterIdentifier.alphaHintStrength, defaultValue: defaults.alphaHintStrength, parameterMin: 0, parameterMax: 1, sliderMin: 0, sliderMax: 1, delta: 0.01, parameterFlags: flags)
+        create.addFloatSlider(withName: VideoInferenceSettings.Labels.internalHintStrength, parameterID: ParameterIdentifier.internalHintStrength, defaultValue: defaults.internalHintStrength, parameterMin: 0, parameterMax: 1, sliderMin: 0, sliderMax: 1, delta: 0.01, parameterFlags: flags)
+        create.endParameterSubGroup()
+    }
+
+    /// Manual annotations have their own section, separate from imported masks.
+    private func addManualHintGroup(create: any FxParameterCreationAPI_v5) {
+        create.startParameterSubGroup("Manual Hint", parameterID: ParameterIdentifier.manualHintGroup,
+                                      parameterFlags: CorridorKeyParameterFlags.default.fxFlags)
+        create.addCustomParameter(withName: "", parameterID: ParameterIdentifier.manualHintControls,
+                                  defaultValue: CustomParameterValue.empty,
+                                  parameterFlags: CorridorKeyParameterFlags.headerCustomUI.fxFlags)
+        create.endParameterSubGroup()
+    }
+
+    private func addSettingsGroup(create: any FxParameterCreationAPI_v6) throws {
         create.startParameterSubGroup(
             "Settings",
             parameterID: ParameterIdentifier.settingsGroup,
@@ -98,10 +163,14 @@ extension CorridorKeyToolboxPlugIn {
         create.addPopupMenu(
             withName: "Screen Colour",
             parameterID: ParameterIdentifier.screenColor,
-            defaultValue: UInt32(ScreenColor.green.rawValue),
+            defaultValue: UInt32(ScreenColor.automatic.rawValue),
             menuEntries: ScreenColor.allCases.map(\.displayName),
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
+        create.addColorParameter(withName: "Custom Screen Colour", parameterID: ParameterIdentifier.customScreenColor,
+            defaultRed: 0.08, defaultGreen: 0.84, defaultBlue: 0.08,
+            parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags)
+
 
         create.addPopupMenu(
             withName: "Upscale Method",
@@ -119,47 +188,19 @@ extension CorridorKeyToolboxPlugIn {
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 
-        // Hint mode defaults to Apple Vision in v1.0 — empirically it
-        // beats the green-bias chroma prior on most footage because
-        // it segments by subject saliency rather than green-channel
-        // dominance. Users with edge-case footage (heavy motion blur,
-        // partial occlusion, tricky transparency) can fall back to
-        // Automatic or pick Manual to feed only their hint dots.
-        //
-        // Hint Mode popup replaces the earlier "Auto Subject Hint"
-        // toggle with an explicit three-way choice. Sits second in
-        // the Settings group (right under Quality) because hint
-        // generation is the second-biggest decision driver for the
-        // resulting matte.
-        create.addPopupMenu(
-            withName: "Hint",
+        // Generated guidance is optional; the v2 model can key without it.
+        create.addTaggedPopupMenu(
+            withName: HintMode.controlName,
             parameterID: ParameterIdentifier.hintMode,
-            defaultValue: UInt32(HintMode.appleVision.rawValue),
-            menuEntries: HintMode.allCases.map(\.displayName),
+            // Creation takes a menu index; retrieval and persistence use the stable tag.
+            defaultValue: UInt32(HintMode.allCases.firstIndex(of: PluginStateData().hintMode) ?? 0),
+            menuEntries: HintMode.allCases.map { FxTaggedMenuEntry(name: $0.displayName, tag: UInt($0.rawValue)) },
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 
-        // Subject Marker: a draggable on-screen point that lets the
-        // user mark the centre of the foreground subject. Provides
-        // both a clear OSC affordance (the user can see where the
-        // marker is and drag it) and a stable Point parameter that
-        // FCP wires the OSC to natively. Defaults to centre (0.5,
-        // 0.5) in object-normalised coords. Hidden by default so
-        // the marker only appears when the user explicitly asks for
-        // the draggable on-canvas affordance.
-        create.addToggleButton(
-            withName: "Show Subject Marker",
-            parameterID: ParameterIdentifier.showSubjectMarker,
-            defaultValue: false,
-            parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
-        )
-        create.addPointParameter(
-            withName: "Subject Position",
-            parameterID: ParameterIdentifier.subjectPosition,
-            defaultX: 0.5,
-            defaultY: 0.5,
-            parameterFlags: CorridorKeyParameterFlags.default.fxFlags
-        )
+        create.addToggleButton(withName: VideoInferenceSettings.Labels.inputIsLinear, parameterID: ParameterIdentifier.inputIsLinear, defaultValue: VideoInferenceSettings().inputIsLinear, parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags)
+        create.addToggleButton(withName: VideoInferenceSettings.Labels.linearizeOutput, parameterID: ParameterIdentifier.linearizeOutput, defaultValue: VideoInferenceSettings().linearizeOutput, parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags)
+        create.addToggleButton(withName: VideoInferenceSettings.Labels.keepOriginalInSolidAreas, parameterID: ParameterIdentifier.keepOriginalInSolidAreas, defaultValue: VideoInferenceSettings().keepOriginalInSolidAreas, parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags)
 
         create.endParameterSubGroup()
     }
@@ -272,16 +313,12 @@ extension CorridorKeyToolboxPlugIn {
             parameterFlags: CorridorKeyParameterFlags.default.fxFlags
         )
 
-        // Auto Despeckle defaults ON in v1.0 — the connected-components
-        // filter sweeps tracking dots, birds, and lens-flare specks
-        // out of the background without manual roto. The default
-        // 100-pixel size threshold is small enough to leave hair, fur,
-        // and feathered edges intact; users who hit edge cases (very
-        // wispy hair on noisy plates) can flip it off per clip.
+        // Connected-component cleanup is opt-in; small foreground details
+        // can otherwise be mistaken for isolated background specks.
         create.addToggleButton(
             withName: "Auto Despeckle",
             parameterID: ParameterIdentifier.autoDespeckle,
-            defaultValue: true,
+            defaultValue: PluginStateData().autoDespeckleEnabled,
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 
@@ -319,7 +356,7 @@ extension CorridorKeyToolboxPlugIn {
             parameterFlags: CorridorKeyParameterFlags.default.fxFlags
         )
 
-        // Strength stays at 0.5 (the Build 2 default). The method
+        // Strength starts at zero, matching the v2 manual. The method
         // defaults to Ultra (Chroma Project) — its YCbCr-projection
         // path removes the soft chroma fringe the older Average /
         // Double Limit kernels leave on hair and feathered edges,
@@ -339,7 +376,7 @@ extension CorridorKeyToolboxPlugIn {
         create.addFloatSlider(
             withName: "Despill Strength",
             parameterID: ParameterIdentifier.despillStrength,
-            defaultValue: 0.5,
+            defaultValue: 0,
             parameterMin: 0,
             parameterMax: 5,
             sliderMin: 0,
@@ -377,7 +414,7 @@ extension CorridorKeyToolboxPlugIn {
         create.addToggleButton(
             withName: "Light Wrap",
             parameterID: ParameterIdentifier.lightWrapEnabled,
-            defaultValue: true,
+            defaultValue: PluginStateData().lightWrapEnabled,
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 
@@ -408,7 +445,7 @@ extension CorridorKeyToolboxPlugIn {
         create.addToggleButton(
             withName: "Edge Decontaminate",
             parameterID: ParameterIdentifier.edgeDecontaminateEnabled,
-            defaultValue: true,
+            defaultValue: false,
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 
@@ -427,14 +464,8 @@ extension CorridorKeyToolboxPlugIn {
         create.endParameterSubGroup()
     }
 
-    /// Phase 1 addition: temporal stability. Applied during the Analyse
-    /// Clip pass so the cached matte already reflects the blend — zero
-    /// hot-path cost at playback. Defaults to enabled so new projects
-    /// benefit immediately; saved projects from before this build fall
-    /// back to enabled via `PluginStateData.temporalStabilityEnabled`'s
-    /// `decodeIfPresent` default, preserving previous output on first
-    /// open (there is no cached matte yet, so the first analyse pass
-    /// writes a stabilised one).
+    /// Optional motion-gated blend, baked into analysis. Off by default to
+    /// preserve v2 detail and avoid trails where the motion gate misses an edge.
     private func addTemporalStabilityGroup(create: any FxParameterCreationAPI_v5) throws {
         create.startParameterSubGroup(
             "Temporal Stability",
@@ -442,16 +473,10 @@ extension CorridorKeyToolboxPlugIn {
             parameterFlags: CorridorKeyParameterFlags.default.fxFlags
         )
 
-        // Temporal Stability defaults ON in v1.0 — the motion-gated
-        // EMA blend damps the edge-band flicker the model leaves on
-        // hair / feather edges. The motion gate keeps fast-moving
-        // subjects sharp by skipping the blend wherever source RGB
-        // changed more than the gate threshold; users who still see
-        // softening can flip it off or pull the strength slider down.
         create.addToggleButton(
             withName: "Reduce Edge Flicker",
             parameterID: ParameterIdentifier.temporalStabilityEnabled,
-            defaultValue: true,
+            defaultValue: PluginStateData().temporalStabilityEnabled,
             parameterFlags: CorridorKeyParameterFlags.nonAnimatableChoice.fxFlags
         )
 
@@ -490,14 +515,10 @@ extension CorridorKeyToolboxPlugIn {
             let setter = apiManager.api(for: (any FxParameterSettingAPI_v5).self) as? any FxParameterSettingAPI_v5
         else { return }
 
-        // Fallback values mirror the v1.0 product defaults — if the
-        // retrieval API ever fails, we'd rather assume the slider is
-        // live (matching the moef defaults FCP applies to a fresh
-        // effect) than greyed-out, which made the inspector look
-        // broken when the API briefly stalled.
-        let lightWrapOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.lightWrapEnabled, at: time, default: true)
-        let decontamOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.edgeDecontaminateEnabled, at: time, default: true)
-        let temporalOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.temporalStabilityEnabled, at: time, default: true)
+        // Missing host values use the same defaults as the editor and template.
+        let lightWrapOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.lightWrapEnabled, at: time, default: PluginStateData().lightWrapEnabled)
+        let decontamOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.edgeDecontaminateEnabled, at: time, default: false)
+        let temporalOn = readBool(retrieval: retrieval, parameterID: ParameterIdentifier.temporalStabilityEnabled, at: time, default: PluginStateData().temporalStabilityEnabled)
 
         setEnabled(setter: setter, parameterID: ParameterIdentifier.lightWrapStrength, enabled: lightWrapOn)
         setEnabled(setter: setter, parameterID: ParameterIdentifier.lightWrapRadius, enabled: lightWrapOn)
@@ -523,5 +544,106 @@ extension CorridorKeyToolboxPlugIn {
     ) {
         let flags: CorridorKeyParameterFlags = enabled ? .default : [.default, .disabled]
         _ = setter.setParameterFlags(flags.fxFlags, toParameter: parameterID)
+    }
+}
+
+// MARK: - Factory reset
+
+extension CorridorKeyToolboxPlugIn {
+    /// Resets values and animation using the shared factory state. All host writes
+    /// share one action and undo group; resetting never requests model warm-up.
+    @MainActor
+    func resetAllParameters() throws {
+        guard let action = apiManager.api(for: (any FxCustomParameterActionAPI_v4).self) as? any FxCustomParameterActionAPI_v4 else {
+            throw Self.parameterResetError("The host parameter action API is unavailable.")
+        }
+        action.startAction(self)
+        defer { action.endAction(self) }
+        guard let setting = apiManager.api(for: (any FxParameterSettingAPI_v5).self) as? any FxParameterSettingAPI_v5,
+              let keyframes = apiManager.api(for: (any FxKeyframeAPI_v3).self) as? any FxKeyframeAPI_v3 else {
+            throw Self.parameterResetError("The host parameter or keyframe API is unavailable.")
+        }
+        let undo = apiManager.api(for: (any FxUndoAPI).self) as? any FxUndoAPI
+        let grouped = undo?.startUndoGroup("Reset All Parameters") == true
+        defer { if grouped { _ = undo?.endUndoGroup() } }
+        let defaults = PluginStateData()
+        let time = action.currentTime()
+        let toggles: [(UInt32, Bool)] = [
+            (ParameterIdentifier.sourcePassthrough, defaults.sourcePassthroughEnabled),
+            (ParameterIdentifier.autoDespeckle, defaults.autoDespeckleEnabled),
+            (ParameterIdentifier.lightWrapEnabled, defaults.lightWrapEnabled),
+            (ParameterIdentifier.edgeDecontaminateEnabled, defaults.edgeDecontaminateEnabled),
+            (ParameterIdentifier.temporalStabilityEnabled, defaults.temporalStabilityEnabled),
+            (ParameterIdentifier.inputIsLinear, defaults.video.inputIsLinear),
+            (ParameterIdentifier.linearizeOutput, defaults.video.linearizeOutput),
+            (ParameterIdentifier.keepOriginalInSolidAreas, defaults.video.keepOriginalInSolidAreas),
+            (ParameterIdentifier.lowGPUMemory, defaults.video.lowGPUMemory),
+            (ParameterIdentifier.useAlphaHint, defaults.video.useAlphaHint)
+        ]
+        let integers: [(UInt32, Int)] = [
+            (ParameterIdentifier.screenColor, defaults.screenColor.rawValue),
+            (ParameterIdentifier.qualityMode, defaults.qualityMode.rawValue),
+            (ParameterIdentifier.hintMode, defaults.hintMode.rawValue),
+            (ParameterIdentifier.spillMethod, defaults.spillMethod.rawValue),
+            (ParameterIdentifier.outputMode, defaults.outputMode.rawValue),
+            (ParameterIdentifier.upscaleMethod, defaults.upscaleMethod.rawValue),
+            (ParameterIdentifier.despeckleSize, defaults.despeckleSize),
+            (ParameterIdentifier.timeAwareness, defaults.video.timeAwareness.rawValue),
+            (ParameterIdentifier.hintFrames, defaults.video.hintFrames.rawValue),
+            (ParameterIdentifier.referenceFrame, defaults.video.referenceFrame)
+        ]
+        let scalars: [(UInt32, Double)] = [
+            (ParameterIdentifier.passthroughErode, defaults.passthroughErodeNormalized),
+            (ParameterIdentifier.passthroughBlur, defaults.passthroughBlurNormalized),
+            (ParameterIdentifier.alphaBlackPoint, defaults.alphaBlackPoint),
+            (ParameterIdentifier.alphaWhitePoint, defaults.alphaWhitePoint),
+            (ParameterIdentifier.alphaErode, defaults.alphaErodeNormalized),
+            (ParameterIdentifier.alphaSoftness, defaults.alphaSoftnessNormalized),
+            (ParameterIdentifier.alphaGamma, defaults.alphaGamma),
+            (ParameterIdentifier.refinerStrength, defaults.refinerStrength),
+            (ParameterIdentifier.despillStrength, defaults.despillStrength),
+            (ParameterIdentifier.lightWrapStrength, defaults.lightWrapStrength),
+            (ParameterIdentifier.lightWrapRadius, defaults.lightWrapRadius),
+            (ParameterIdentifier.edgeDecontaminateStrength, defaults.edgeDecontaminateStrength),
+            (ParameterIdentifier.temporalStabilityStrength, defaults.temporalStabilityStrength),
+            (ParameterIdentifier.alphaHintStrength, defaults.video.alphaHintStrength),
+            (ParameterIdentifier.internalHintStrength, defaults.video.internalHintStrength)
+        ]
+        let identifiers = toggles.map(\.0) + integers.map(\.0) + scalars.map(\.0)
+            + [ParameterIdentifier.customScreenColor]
+        for identifier in identifiers {
+            var channelCount: UInt = 0
+            if let error = keyframes.channelCount(&channelCount, forParameter: UInt(identifier)) { throw error }
+            for channel in 0..<channelCount {
+                var count: UInt = 0
+                if let error = keyframes.keyframeCount(&count, forParameter: UInt(identifier), andChannel: channel) { throw error }
+                if count > 0, let error = keyframes.removeAllKeyframes(forParameter: UInt(identifier), andChannel: channel) { throw error }
+            }
+        }
+        for (identifier, value) in toggles {
+            guard setting.setBoolValue(value, toParameter: identifier, at: time) else { throw Self.parameterResetError("Could not reset parameter \(identifier).") }
+        }
+        for (identifier, value) in integers {
+            guard setting.setIntValue(Int32(value), toParameter: identifier, at: time) else { throw Self.parameterResetError("Could not reset parameter \(identifier).") }
+        }
+        for (identifier, value) in scalars {
+            guard setting.setFloatValue(value, toParameter: identifier, at: time) else { throw Self.parameterResetError("Could not reset parameter \(identifier).") }
+        }
+        let color = defaults.video.customScreenColor
+        guard setting.setRedValue(color.x, greenValue: color.y, blueValue: color.z, toParameter: ParameterIdentifier.customScreenColor, at: time),
+              setting.setCustomParameterValue(CustomParameterValue.empty, toParameter: ParameterIdentifier.headerSummary, at: time) else {
+            throw Self.parameterResetError("Could not reset screen colour or saved hints.")
+        }
+        analysisSession.lock.lock()
+        analysisSession.resetLocked()
+        analysisSession.lock.unlock()
+        analysisSnapshotStore.clear()
+        updateDependentParameterEnablement(at: time)
+    }
+
+    /// Makes failed host writes visible in the inspector rather than reporting a successful reset.
+    private static func parameterResetError(_ message: String) -> NSError {
+        NSError(domain: FxPlugErrorDomain, code: kFxError_APIUnavailable,
+                userInfo: [NSLocalizedDescriptionKey: "Reset All: " + message])
     }
 }

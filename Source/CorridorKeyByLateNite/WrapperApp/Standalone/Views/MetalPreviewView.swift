@@ -304,6 +304,10 @@ struct MetalPreviewView: NSViewRepresentable {
                 encoder.setRenderPipelineState(pipelineState)
                 encoder.setVertexBytes(&quad, length: MemoryLayout<PreviewVertex>.stride * 4, index: 0)
                 encoder.setFragmentTexture(texture, index: 0)
+                var transfer = SIMD2<UInt32>(heldFrame?.isLinear == true ? 1 : 0, heldFrame?.isPremultiplied == false ? 0 : 1)
+                var gamut = ColorGamutMatrix.transform(for: heldFrame?.gamut ?? .rec709).workingToRec709
+                encoder.setFragmentBytes(&gamut, length: MemoryLayout<simd_float3x3>.stride, index: 1)
+                encoder.setFragmentBytes(&transfer, length: MemoryLayout<SIMD2<UInt32>>.stride, index: 0)
                 encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
             }
 
@@ -400,17 +404,25 @@ struct MetalPreviewView: NSViewRepresentable {
 
             fragment float4 previewFragment(
                 PreviewVertexOut in [[stage_in]],
-                texture2d<float> source [[texture(0)]]
+                texture2d<float> source [[texture(0)]],
+                constant uint2 &transfer [[buffer(0)]],
+                constant float3x3 &gamut [[buffer(1)]]
             ) {
                 constexpr sampler textureSampler(filter::linear, address::clamp_to_edge);
-                // Pass the premultiplied compose output straight
-                // through to the blend stage so the alpha channel
-                // actually composes against the chosen backdrop.
-                // The previous version forced alpha to 1.0, which
-                // baked the keyed image's premultiplied black
-                // background onto whichever backdrop the user
-                // picked.
-                return source.sample(textureSampler, in.uv);
+                float4 pixel = source.sample(textureSampler, in.uv);
+                {
+                    float3 straight = transfer.y != 0 && pixel.a > 0 ? pixel.rgb / pixel.a : pixel.rgb;
+                    float3 magnitude = abs(straight);
+                    if (transfer.x == 0) {
+                        straight = sign(straight) * select(pow((magnitude + 0.055) / 1.055, float3(2.4)), magnitude / 12.92, magnitude <= 0.04045);
+                    }
+                    straight = gamut * straight;
+                    magnitude = abs(straight);
+                    straight = sign(straight) * select(1.055 * pow(max(magnitude, 0.0031308), float3(1.0 / 2.4)) - 0.055,
+                                                       magnitude * 12.92, magnitude <= 0.0031308);
+                    pixel.rgb = straight * pixel.a;
+                }
+                return pixel;
             }
 
             fragment float4 previewCheckerFragment(

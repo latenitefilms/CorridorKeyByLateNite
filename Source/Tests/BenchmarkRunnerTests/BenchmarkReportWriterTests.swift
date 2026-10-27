@@ -9,7 +9,7 @@
 
 import Testing
 import Foundation
-@testable import BenchmarkRunner
+@testable import BenchmarkRunnerSupport
 
 @Suite struct BenchmarkReportWriterTests {
 

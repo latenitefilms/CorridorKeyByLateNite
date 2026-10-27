@@ -1,0 +1,98 @@
+{
+  "device": "Apple M1 Max, 64 GiB",
+  "date": "2026-10-24",
+  "configuration": "SwiftPM Release, MLX Swift 0.31.3",
+  "scope": "Synthetic green/blue inputs, model plus Metal writeback. Alternating five warm samples; CPU readback, decoding, cache I/O and encoding excluded.",
+  "measurements": [
+    {
+      "compiled_ms": 329.539834,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 0,
+      "reference_ms": 339.47,
+      "resolution": 512,
+      "samples": 5,
+      "screen": "green"
+    },
+    {
+      "compiled_ms": 551.006542,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 0,
+      "reference_ms": 591.862708,
+      "resolution": 512,
+      "samples": 5,
+      "screen": "blue"
+    },
+    {
+      "compiled_ms": 987.750958,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 0,
+      "reference_ms": 1105.403125,
+      "resolution": 768,
+      "samples": 5,
+      "screen": "green"
+    },
+    {
+      "compiled_ms": 1000.172291,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 0,
+      "reference_ms": 1083.062,
+      "resolution": 768,
+      "samples": 5,
+      "screen": "blue"
+    },
+    {
+      "compiled_ms": 1815.45,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 0,
+      "reference_ms": 1805.970625,
+      "resolution": 1024,
+      "samples": 5,
+      "screen": "green"
+    },
+    {
+      "compiled_ms": 1855.357166,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 0,
+      "reference_ms": 1917.589375,
+      "resolution": 1024,
+      "samples": 5,
+      "screen": "blue"
+    },
+    {
+      "compiled_ms": 4448.155291,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 0,
+      "reference_ms": 4718.467,
+      "resolution": 1536,
+      "samples": 5,
+      "screen": "green"
+    },
+    {
+      "compiled_ms": 4341.580166,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 0,
+      "reference_ms": 4577.669708,
+      "resolution": 1536,
+      "samples": 5,
+      "screen": "blue"
+    },
+    {
+      "compiled_ms": 7680.597667,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 0,
+      "reference_ms": 7892.091208,
+      "resolution": 2048,
+      "samples": 5,
+      "screen": "green"
+    },
+    {
+      "compiled_ms": 7015.034417,
+      "maximum_alpha_error": 0,
+      "maximum_foreground_error": 0,
+      "reference_ms": 7436.978083,
+      "resolution": 2048,
+      "samples": 5,
+      "screen": "blue"
+    }
+  ]
+}

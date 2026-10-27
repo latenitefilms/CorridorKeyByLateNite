@@ -32,7 +32,7 @@ let package = Package(
     name: "CorridorKeyToolboxLogic",
     defaultLocalization: "en",
     platforms: [
-        .macOS(.v15)
+        .macOS("26.0")
     ],
     products: [
         .library(
@@ -77,12 +77,17 @@ let package = Package(
                 "Inference/InferenceCoordinator.swift",
                 "Inference/KeyingInferenceEngine.swift",
                 "Inference/MLXKeyingEngine.swift",
+                "Inference/VideoInferenceSession.swift",
+                "Inference/AlphaHintReader.swift",
                 "Inference/SharedMLXBridgeRegistry.swift",
                 "Inference/VisionHintEngine.swift",
                 "Inspector/CorridorKeyByLateNitePlugIn+CustomViews.swift",
                 "Inspector/CorridorKeyInspectorBridge.swift",
                 "Inspector/CorridorKeyHeaderView.swift",
+                "Inspector/InspectorComponents.swift",
+                "Inspector/AlphaHintPicker.swift",
                 "Inspector/CorridorKeyHintOSC.swift",
+                "Inspector/HeaderCustomParameterStorage.swift",
                 "Render",
                 "Metal",
                 "Resources",
@@ -97,8 +102,14 @@ let package = Package(
                 "Inference/AnalysisData.swift",
                 "Inference/DeviceCapabilityCache.swift",
                 "Inference/MatteCodec.swift",
+                "Inference/AnalysisFrameCodec.swift",
+                "Inference/AnalysisDiskCache.swift",
+                "Inference/VideoInferenceSettings.swift",
                 "Inspector/CorridorKeyAnalysisSnapshot.swift",
                 "Inspector/HintPointSet.swift",
+                "Inspector/HintHitTesting.swift",
+                "Inspector/OnScreenControlTool.swift",
+                "Inspector/CustomParameterValue.swift",
                 "Inspector/WarmupStatus.swift"
             ],
             swiftSettings: [
@@ -139,7 +150,10 @@ let package = Package(
                 "Shared/CorridorKeyByLateNite-Bridging-Header.h",
                 "Inference/AnalysisData.swift",
                 "Inference/DeviceCapabilityCache.swift",
-                "Inference/MatteCodec.swift"
+                "Inference/MatteCodec.swift",
+                "Inference/AnalysisFrameCodec.swift",
+                "Inference/AnalysisDiskCache.swift",
+                "Inference/VideoInferenceSettings.swift"
             ],
             sources: [
                 "PluginLog.swift",
@@ -151,6 +165,8 @@ let package = Package(
                 "Render/RenderStages.swift",
                 "Inference/KeyingInferenceEngine.swift",
                 "Inference/MLXKeyingEngine.swift",
+                "Inference/VideoInferenceSession.swift",
+                "Inference/AlphaHintReader.swift",
                 "Inference/InferenceCoordinator.swift",
                 "Inference/SharedMLXBridgeRegistry.swift",
                 "Inference/VisionHintEngine.swift"
@@ -166,15 +182,28 @@ let package = Package(
         ),
         .executableTarget(
             name: "BenchmarkRunner",
-            dependencies: ["CorridorKeyToolboxLogic"],
+            dependencies: ["BenchmarkRunnerSupport"],
             path: "BenchmarkRunner",
+            exclude: ["BenchmarkCommand.swift", "BenchmarkReportWriter.swift", "MatteImageLoader.swift",
+                      "MatteSequence.swift", "TemporalMetricsCalculator.swift"],
+            sources: ["main.swift"],
             swiftSettings: [
                 .swiftLanguageMode(.v6)
             ]
         ),
+        // Keep benchmark logic separate from its executable entry point. Linking
+        // that entry point into optimized Swift Testing bundles starts the CLI
+        // instead of the test runner on this toolchain.
+        .target(
+            name: "BenchmarkRunnerSupport",
+            dependencies: ["CorridorKeyToolboxLogic"],
+            path: "BenchmarkRunner",
+            exclude: ["main.swift"],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .testTarget(
             name: "BenchmarkRunnerTests",
-            dependencies: ["BenchmarkRunner"],
+            dependencies: ["BenchmarkRunnerSupport"],
             path: "Tests/BenchmarkRunnerTests",
             swiftSettings: [
                 .swiftLanguageMode(.v6)
@@ -206,16 +235,64 @@ let package = Package(
                 "CorridorKeyToolboxLogic",
                 .product(name: "MLX", package: "mlx-swift")
             ],
-            path: "Tests/CorridorKeyByLateNiteInferenceTests",
-            // The 512px bridge is ~30 MB and exercises the same MLX code
-            // path as the Maximum rung. Bundling just the smallest one
-            // keeps the test target compact while still catching real
-            // memory regressions.
+            // Include the real host adapters in the serial inference suite.
+            // This tests cached playback without launching a sandboxed app.
+            path: ".",
+            exclude: [
+                "BenchmarkRunner", "Benchmarks", "Configuration",
+                "CorridorKeyByLateNite.xcodeproj", "default.metallib",
+                "Tests/BenchmarkRunnerTests", "Tests/WrapperAppTests", "Tests/FxPlugHostTests",
+                "Tests/CorridorKeyByLateNiteLogicTests", "Tests/CorridorKeyByLateNiteMetalStagesTests",
+                "CorridorKeyByLateNite/Plugin/Inference", "CorridorKeyByLateNite/Plugin/Inspector",
+                "CorridorKeyByLateNite/Plugin/Metal", "CorridorKeyByLateNite/Plugin/Parameters",
+                "CorridorKeyByLateNite/Plugin/PostProcess", "CorridorKeyByLateNite/Plugin/Resources",
+                "CorridorKeyByLateNite/Plugin/Shared", "CorridorKeyByLateNite/Plugin/Render/RenderStages.swift",
+                "CorridorKeyByLateNite/Plugin/Info.plist", "CorridorKeyByLateNite/Plugin/main.swift",
+                "CorridorKeyByLateNite/Plugin/PluginLog.swift", "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNite.entitlements",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn.swift",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+Properties.swift",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+Render.swift",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+RenderRects.swift",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+PluginState.swift",
+                "CorridorKeyByLateNite/Plugin/CorridorKeyByLateNitePlugIn+FxAnalyzer.swift",
+                "CorridorKeyByLateNite/WrapperApp/Resources", "CorridorKeyByLateNite/WrapperApp/CorridorKey.icon",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Views", "CorridorKeyByLateNite/WrapperApp/Standalone/Model",
+                "CorridorKeyByLateNite/WrapperApp/en.lproj", "CorridorKeyByLateNite/WrapperApp/Info.plist",
+                "CorridorKeyByLateNite/WrapperApp/WrapperApp.entitlements", "CorridorKeyByLateNite/WrapperApp/WrapperApp-Bridging-Header.h",
+                "CorridorKeyByLateNite/WrapperApp/WelcomeView.swift", "CorridorKeyByLateNite/WrapperApp/Credits.rtf",
+                "CorridorKeyByLateNite/WrapperApp/CorridorKeyByLateNiteApp.swift", "CorridorKeyByLateNite/WrapperApp/MotionTemplateInstaller.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/BatchExportRunner.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/ScreenColorAutoDetector.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/BackdropImageLoader.swift"
+            ],
+            sources: [
+                "Tests/CorridorKeyByLateNiteInferenceTests/InferenceTestHarness.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/MLXBridgeRungTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/MLXParityTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/MLXMemoryTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/MatteOrientationTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/V2ModelContractTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/SharedMLXBridgeRegistryWaitTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/StandalonePipelineTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/StillImageTests.swift",
+                "CorridorKeyByLateNite/Plugin/Render/RenderPipeline.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StandaloneRenderEngine.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/AnalysisRunner.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/VideoSource.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/MediaSource.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageSource.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/StillImageExporter.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/ProResExporter.swift",
+                "CorridorKeyByLateNite/WrapperApp/Standalone/Engine/PixelBufferTextureBridge.swift"
+            ],
+            // Read the validated v2 artifact from production resources rather
+            // than copying its shared weights into every test build product.
             resources: [
-                .copy("Resources/corridorkey_mlx_bridge_512.mlxfn")
+                .copy("Tests/CorridorKeyByLateNiteInferenceTests/Resources/README.md")
             ],
             swiftSettings: [
-                .swiftLanguageMode(.v6)
+                .swiftLanguageMode(.v6),
+                .define("CORRIDOR_KEY_HEADLESS_TESTS")
             ]
         )
     ]

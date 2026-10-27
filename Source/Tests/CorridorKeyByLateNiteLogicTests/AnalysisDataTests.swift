@@ -15,6 +15,79 @@ import Testing
 @Suite("AnalysisData")
 struct AnalysisDataTests {
 
+    @Test("Cache selection honours the quality choice independently of preview resolution")
+    func cacheQualityIdentity() {
+        let data = AnalysisData(
+            schemaVersion: AnalysisData.currentSchemaVersion,
+            frameDuration: CMTime(value: 1, timescale: 30), firstFrameTime: .zero,
+            frameCount: 1, analyzedCount: 1, screenColorRaw: 0,
+            qualityModeRaw: QualityMode.automatic.rawValue,
+            inferenceResolution: 1536, matteWidth: 1536, matteHeight: 864,
+            mattes: [0: Data([1])]
+        )
+        #expect(data.cachedMatte(at: .zero, screenColorRaw: 0,
+                                qualityModeRaw: QualityMode.automatic.rawValue)?.inferenceResolution == 1536)
+        // Even an explicit selection with the same resolution changes identity.
+        #expect(data.cachedMatte(at: .zero, screenColorRaw: 0,
+                                qualityModeRaw: QualityMode.ultra1536.rawValue) == nil)
+    }
+
+    @Test("Decoded metadata tracks host edits, undo and reset without crossing instances")
+    func metadataSnapshotLifetime() throws {
+        let store = AnalysisSnapshotStore()
+        let original = AnalysisData(
+            schemaVersion: AnalysisData.currentSchemaVersion,
+            frameDuration: CMTime(value: 1, timescale: 30), firstFrameTime: .zero,
+            frameCount: 1, analyzedCount: 1, screenColorRaw: 0, qualityModeRaw: 0,
+            inferenceResolution: 512, matteWidth: 512, matteHeight: 512,
+            mattes: [0: Data([1])]
+        )
+        let dictionary = original.asParameterDictionary()
+        #expect(store.load(dictionary)?.mattes[0] == Data([1]))
+        #expect(store.load(dictionary.copy() as? NSDictionary)?.mattes[0] == Data([1]))
+        let changed = try #require(dictionary.mutableCopy() as? NSMutableDictionary)
+        changed[AnalysisDataKey.mattes] = ["0": Data([2])] as NSDictionary
+        #expect(store.load(changed)?.mattes[0] == Data([2]))
+        #expect(store.load(dictionary)?.mattes[0] == Data([1]), "Undo restores the earlier host value")
+        #expect(store.load(nil)?.mattes[0] == Data([1]), "A failed IPC read can use this instance's last snapshot")
+        #expect(store.load(NSDictionary()) == nil, "A successful empty host value must invalidate analysis")
+        #expect(store.load(nil) == nil, "Old frames cannot reappear after a host reset")
+        #expect(store.load(dictionary)?.mattes[0] == Data([1]))
+        #expect(AnalysisSnapshotStore().load(nil) == nil, "Separate effect instances never borrow analysis")
+        store.clear()
+        #expect(store.load(nil) == nil)
+        #expect(store.load(dictionary)?.mattes[0] == Data([1]), "Reset also clears the decoded dictionary")
+    }
+
+    @Test("FxPlug persistence stores compact references without embedding frame pixels")
+    func diskReferenceRoundTrip() throws {
+        let sessionID = UUID()
+        let references = Dictionary(uniqueKeysWithValues: (0..<1000).map { index in
+            (index, AnalysisFrameReference(sessionID: sessionID, frameID: UUID(), byteCount: 37_000_000))
+        })
+        let original = AnalysisData(
+            schemaVersion: AnalysisData.currentSchemaVersion,
+            frameDuration: CMTime(value: 1, timescale: 24), firstFrameTime: .zero,
+            frameCount: 1000, analyzedCount: 1000, screenColorRaw: 0,
+            qualityModeRaw: QualityMode.maximum2048.rawValue,
+            inferenceResolution: 2048, matteWidth: 2048, matteHeight: 2048,
+            mattes: [:], frameReferences: references
+        )
+        let dictionary = original.asParameterDictionary()
+        let archive = try NSKeyedArchiver.archivedData(withRootObject: dictionary, requiringSecureCoding: true)
+        // A thousand 37 MB frames must remain small library metadata.
+        #expect(archive.count < 200_000)
+        let decoded = try NSKeyedUnarchiver.unarchivedObject(
+            ofClasses: [NSDictionary.self, NSString.self, NSNumber.self, NSData.self], from: archive
+        ) as? NSDictionary
+        let restored = try #require(AnalysisData.fromParameterDictionary(decoded))
+        #expect(restored.frameReferences == references)
+        #expect(restored.mattes.isEmpty)
+        let last = try #require(restored.cachedMatte(at: CMTime(value: 999, timescale: 24), screenColorRaw: 0))
+        #expect(last.reference == references[999])
+        #expect(last.blob == nil)
+    }
+
     @Test("Dictionary round-trip preserves every field")
     func dictionaryRoundTrip() {
         let matteA = Data([0x01, 0x02, 0x03])
@@ -60,6 +133,16 @@ struct AnalysisDataTests {
     @Test("Nil dictionary decodes as nil")
     func nilDictionaryReturnsNil() {
         #expect(AnalysisData.fromParameterDictionary(nil) == nil)
+    }
+
+    @Test("Caches created before frame-specific hints and canonical image rows require reanalysis")
+    func previousModelCacheIsRejected() {
+        for schema in [3, 4, 5, 6] {
+            let dictionary = NSMutableDictionary()
+            dictionary[AnalysisDataKey.schemaVersion] = NSNumber(value: schema)
+            dictionary[AnalysisDataKey.frameCount] = NSNumber(value: 1)
+            #expect(AnalysisData.fromParameterDictionary(dictionary) == nil)
+        }
     }
 
     @Test("Frame index maps render time to the right slot")
@@ -157,4 +240,34 @@ struct AnalysisDataTests {
             screenColorRaw: ScreenColor.blue.rawValue
         ) == nil)
     }
+    @Test("Persisted cache rejects added, removed, retimed hints and changes to Hint mode")
+    func hintCacheInvalidation() throws {
+        let duration = CMTime(value: 1, timescale: 24)
+        let frame = try #require(HintFrame(time: .zero, duration: duration))
+        let points = HintPointSet(points: [HintPoint(x: 0.5, y: 0.5, kind: .background, frame: frame)])
+        let configuration = AnalysisHintConfiguration(mode: .manual, points: points)
+        let original = AnalysisData(
+            schemaVersion: AnalysisData.currentSchemaVersion, frameDuration: duration,
+            firstFrameTime: .zero, frameCount: 1, analyzedCount: 1,
+            screenColorRaw: 0, qualityModeRaw: 0, inferenceResolution: 512,
+            matteWidth: 1, matteHeight: 1, mattes: [0: Data([1])],
+            hintConfiguration: configuration
+        )
+        let restored = try #require(AnalysisData.fromParameterDictionary(original.asParameterDictionary()))
+        #expect(restored.matchesHints(mode: .manual, points: points))
+        #expect(restored.cachedMatte(at: .zero, screenColorRaw: 0, hintConfiguration: configuration) != nil)
+        #expect(!restored.matchesHints(mode: .automatic, points: points))
+        var changed = points
+        let nextFrame = try #require(HintFrame(time: duration, duration: duration))
+        changed.points[0].frame = nextFrame
+        #expect(!restored.matchesHints(mode: .manual, points: changed))
+        changed.add(HintPoint(x: 0.2, y: 0.3, kind: .foreground, frame: frame))
+        #expect(restored.cachedMatte(at: .zero, screenColorRaw: 0,
+                                  hintConfiguration: AnalysisHintConfiguration(mode: .manual, points: changed)) == nil)
+        #expect(!restored.matchesHints(mode: .manual, points: HintPointSet()))
+        var missingConfiguration = original
+        missingConfiguration.hintConfiguration = nil
+        #expect(missingConfiguration.cachedMatte(at: .zero, screenColorRaw: 0, hintConfiguration: configuration) == nil)
+    }
+
 }

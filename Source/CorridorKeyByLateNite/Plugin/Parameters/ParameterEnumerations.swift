@@ -11,32 +11,20 @@
 import Foundation
 import simd
 
-/// Colour of the screen being keyed out. Each colour now ships with a
-/// dedicated MLX bridge trained on that colour's footage — the green
-/// model on Corridor's original green-screen dataset, the blue model on
-/// the v1.0 blue-screen finetune. Older builds rotated blue into the
-/// green domain so the green-only model could process it; that hop is
-/// no longer needed because the blue model is native, and feeding it
-/// rotated input would push the data outside its training distribution.
+/// Screen colour used for hint generation and spill suppression. CorridorKey
+/// v2 handles both colours with one model, without rotating the source RGB.
 public enum ScreenColor: Int, Sendable, CaseIterable, Codable {
     case green = 0
     case blue = 1
+    case automatic = 2
+    case custom = 3
 
     public var displayName: String {
         switch self {
         case .green: return "Green"
         case .blue: return "Blue"
-        }
-    }
-
-    /// Filename stem for the bundled `.mlxfn` bridge for this colour.
-    /// Resolutions are appended in `MLXBridgeArtifact.filename(...)`.
-    /// Matches the upstream Hugging Face / `prepare_mlx_model_pack.py`
-    /// naming convention so the same bridges can be consumed unmodified.
-    public var bridgeFilenamePrefix: String {
-        switch self {
-        case .green: return "corridorkey_mlx_bridge"
-        case .blue: return "corridorkeyblue_mlx_bridge"
+        case .automatic: return "Auto"
+        case .custom: return "Custom"
         }
     }
 
@@ -46,68 +34,49 @@ public enum ScreenColor: Int, Sendable, CaseIterable, Codable {
     /// in `ofx_screen_color.hpp` so behaviour matches across hosts.
     public var canonicalScreenReference: SIMD3<Float> {
         switch self {
-        case .green: return SIMD3<Float>(0.08, 0.84, 0.08)
+        case .green, .automatic, .custom: return SIMD3<Float>(0.08, 0.84, 0.08)
         case .blue:  return SIMD3<Float>(0.08, 0.16, 0.84)
         }
     }
 }
 
-/// How the alpha hint is generated for the MLX bridge's 4th input
-/// channel. Replaces the earlier "Auto Subject Hint" toggle so users
-/// can explicitly opt into Apple Vision (best-quality but binary) or
-/// the green-bias prior (fastest, soft gradient) without reading the
-/// release notes to know what the toggle does. The new `manual`
-/// option short-circuits both upstream priors and feeds only the
-/// user-placed hint dots — useful for shots Vision struggles with
-/// (e.g. heavy motion blur, partially occluded subjects).
+/// How the foreground hint in the bridge's fourth input channel is built.
+/// V2 receives these as automated hints with quality 0.75; none changes the
+/// model weights. User points augment the selected prior in every mode.
 public enum HintMode: Int, Sendable, CaseIterable, Codable {
-    /// Fast green / blue chroma prior. The MLX network is trained on
-    /// this style of soft, gradient hint and tends to produce its
-    /// best results here when the screen colour itself is clean.
+    /// Menu order is independent of persisted raw values and FxPlug tags.
+    public static let allCases: [HintMode] = [.none, .automatic, .appleVision, .manual]
+    /// Shared label distinguishes an optional generated mask from an imported alpha hint.
+    public static let controlName = "Generated Hint"
+    /// Shared help for both hosts; imported masks take precedence over local guidance.
+    public static let explanation = "None lets CorridorKey find the subject itself. Chroma uses the screen colour. Apple Vision adds subject detection. Apple Vision + Manual Points uses detected subjects as a starting point: Foreground selects subjects, Background corrects small areas, and Ignore excludes detected objects. An enabled Alpha Hint file replaces generated hints and points."
+    /// Green/blue chroma prior computed by Metal, without a Vision request.
     case automatic = 0
-    /// Apple Vision foreground-instance mask, run on the Neural
-    /// Engine, layered on top of the chroma prior so foreground props
-    /// the subject detector ignores still get keyed. Beats the chroma
-    /// prior alone on people / animals / salient subjects because
-    /// Vision segments by saliency rather than by screen-channel
-    /// dominance; the chroma prior fills in everything else (set
-    /// dressing, weapons, instruments, anything not on the subject
-    /// list) so the matte doesn't lose objects in front of the screen.
+    /// Unions Vision's foreground-instance mask with the chroma prior.
+    /// Vision chooses the available compute devices; this is not a guarantee
+    /// that every request runs entirely on the Neural Engine.
     case appleVision = 1
-    /// Same upstream chroma prior as `.automatic`, but the user's
-    /// hint dots are required — the renderer fails the analysis if
-    /// the hint set is empty. Initial design ran the inference on
-    /// a zero base + dots only, but the MLX network was trained on
-    /// a soft chroma-derived gradient or a Vision-style binary
-    /// mask; sparse dots on black sit outside that distribution
-    /// and produce nonsense mattes. Falling back to the chroma
-    /// prior with the user's dots overlaid gives the network input
-    /// it understands while keeping the "you have to place hints"
-    /// semantics this mode is named for.
+    /// Selected Vision instances plus local corrections. This remains
+    /// an automated rough hint, not upstream v2's authoritative roto input.
     case manual = 2
+    /// Let v2 select a subject without an alpha prior (confidence -1).
+    case none = 3
 
     public var displayName: String {
         switch self {
-        case .automatic: return "Automatic"
-        case .appleVision: return "Apple Vision Framework"
-        case .manual: return "Manual Hint"
+        case .automatic: return "Chroma"
+        case .appleVision: return "Apple Vision"
+        case .manual: return "Apple Vision + Manual Points"
+        case .none: return "None"
         }
     }
 
     /// Whether this mode runs the Vision foreground request when
     /// computing the upstream hint.
     public var usesVisionPrior: Bool {
-        self == .appleVision
+        self == .appleVision || self == .manual
     }
 
-    /// Whether this mode requires at least one user-placed hint
-    /// point in the render request. The render path checks this at
-    /// the start of the pre-inference stage and returns a
-    /// pass-through frame plus a status message rather than feeding
-    /// MLX an empty hint.
-    public var requiresUserHints: Bool {
-        self == .manual
-    }
 }
 
 /// Quality rung used for neural inference. `automatic` chooses a safe tier
@@ -119,14 +88,11 @@ public enum QualityMode: Int, Sendable, CaseIterable, Codable {
     case ultra1536 = 3
     case maximum2048 = 4
 
-    /// RAM-aware rung ceiling for the `.automatic` mode. The Hiera-based
-    /// MLX bridge needs ~16 GB of working set at 1024 and ~64 GB at 2048
-    /// (one frame plus MLX's per-call buffer cache). On a 32 GB Mac the
-    /// 2048 path forces ~2 minutes of swap per frame; on a 64 GB Mac
-    /// 2048 is borderline. Capping `automatic` keeps users at a rung the
-    /// machine can serve in real time. Users who want to push past the
-    /// cap can pick the explicit `.maximum2048` etc. modes — those skip
-    /// this ceiling.
+    /// Conservative RAM-based ceiling retained until v2 is measured across
+    /// smaller-memory Macs. V2 shares roughly 2.3 GiB of weights and bounds
+    /// its allocator cache; v1 Hiera memory/timing estimates no longer apply.
+    /// This is a quality recommendation, not a real-time playback guarantee.
+    /// Explicit quality selections bypass this ceiling.
     public static func automaticInferenceCeiling(physicalMemoryBytes: UInt64) -> Int {
         let oneGigabyte: UInt64 = 1 << 30
         if physicalMemoryBytes >= 96 * oneGigabyte { return 2048 }
@@ -274,6 +240,8 @@ public enum OutputMode: Int, Sendable, CaseIterable, Codable {
     /// before MLX inference is involved. Visualised as red-on-black:
     /// red = "this is foreground" hint, black = "this is screen".
     case hint = 5
+    /// Untouched source image, independent of whether analysis exists.
+    case original = 6
 
     public var shaderValue: Int32 { Int32(rawValue) }
 
@@ -284,7 +252,8 @@ public enum OutputMode: Int, Sendable, CaseIterable, Codable {
         case .foregroundOnly: return "Foreground Only"
         case .sourcePlusMatte: return "Source + Matte"
         case .foregroundPlusMatte: return "Foreground + Matte"
-        case .hint: return "Hint (Diagnostic)"
+        case .hint: return "Alpha Hint (Diagnostic)"
+        case .original: return "Original"
         }
     }
 }

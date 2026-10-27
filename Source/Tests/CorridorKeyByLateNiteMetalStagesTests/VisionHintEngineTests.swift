@@ -20,6 +20,99 @@ import CorridorKeyToolboxLogic
 @Suite(.serialized)
 struct VisionHintEngineTests {
 
+    @Test("Vision points select whole instances, preserve local corrections, and give Ignore precedence")
+    func instanceSelection() throws {
+        var pixelBuffer: CVPixelBuffer?
+        try #require(CVPixelBufferCreate(kCFAllocatorDefault, 5, 3, kCVPixelFormatType_OneComponent8,
+                                        nil, &pixelBuffer) == kCVReturnSuccess)
+        let labels = try #require(pixelBuffer)
+        try #require(CVPixelBufferLockBaseAddress(labels, []) == kCVReturnSuccess)
+        let base = try #require(CVPixelBufferGetBaseAddress(labels))
+        let stride = CVPixelBufferGetBytesPerRow(labels)
+        // Asymmetric rows expose vertical flips, swapped axes, and ignored row padding.
+        let rows: [[UInt8]] = [[1, 1, 0, 2, 2], [1, 1, 0, 2, 2], [0, 0, 0, 3, 3]]
+        for (rowIndex, row) in rows.enumerated() {
+            for (column, label) in row.enumerated() {
+                base.storeBytes(of: label, toByteOffset: rowIndex * stride + column, as: UInt8.self)
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(labels, [])
+        let allInstances = IndexSet([1, 2, 3])
+        let foreground = HintPoint(x: 0.1, y: 0.1, kind: .foreground)
+        let secondForeground = HintPoint(x: 1, y: 0, kind: .foreground)
+        let ignore = HintPoint(x: 0.1, y: 0.1, kind: .ignore)
+        let background = HintPoint(x: 1, y: 1, kind: .background)
+        let unmatched = HintPoint(x: 0.5, y: 0.5, kind: .foreground)
+        func select(_ points: [HintPoint]) throws -> VisionHintEngine.InstanceSelection {
+            try VisionHintEngine.selectInstances(instanceMask: labels, allInstances: allInstances, points: points)
+        }
+        #expect(try select([]).instances == allInstances)
+        #expect(try select([foreground]).instances == IndexSet([1]))
+        #expect(try select([foreground, secondForeground]).instances == IndexSet([1, 2]))
+        #expect(try select([ignore]).instances == IndexSet([2, 3]))
+        #expect(try select([foreground, ignore]).instances.isEmpty)
+        #expect(try select([ignore, foreground]).localCorrections.isEmpty)
+        #expect(try select([HintPoint(x: 1, y: 1, kind: .ignore)]).instances == IndexSet([1, 2]))
+        #expect(try select([background, unmatched]).instances == allInstances)
+        #expect(try select([background, unmatched]).localCorrections == [background, unmatched])
+        #expect(try select([HintPoint(x: .nan, y: 0, kind: .ignore)]).instances == allInstances)
+    }
+
+    @Test("Manual Vision hints cannot regain excluded foreground from chroma")
+    func selectedVisionDoesNotUnionChroma() async throws {
+        let entry = try TestHarness.makeEntryOrSkip()
+        let source = try makeSubjectTexture(entry: entry, width: 64, height: 64)
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: 1, height: 1, mipmapped: false)
+        descriptor.storageMode = .shared
+        descriptor.usage = .shaderRead
+        let emptyMask = try #require(entry.device.makeTexture(descriptor: descriptor))
+        var zero: UInt8 = 0
+        emptyMask.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &zero, bytesPerRow: 1)
+        let queue = try #require(entry.borrowCommandQueue())
+        defer { entry.returnCommandQueue(queue) }
+        let command = try #require(queue.makeCommandBuffer())
+        let hint = try RenderStages.prepareVisionHint(mask: emptyMask, source: source, includeChroma: false,
+                                                      screenColor: SIMD3(0.08, 0.84, 0.08), entry: entry, commandBuffer: command)
+        defer { hint.returnManually() }
+        await withCheckedContinuation { continuation in
+            command.addCompletedHandler { _ in continuation.resume() }
+            command.commit()
+        }
+        #expect(command.error == nil)
+        let coverage = try await nonZeroCoverageR16Float(of: hint.texture, entry: entry)
+        #expect(coverage == 0)
+    }
+
+    @Test("A cached Vision engine does not retain its owning Metal entry")
+    func cachedEngineReleasesItsOwner() throws {
+        weak var observedEntry: MetalDeviceCacheEntry?
+        weak var observedEngine: VisionHintEngine?
+        try autoreleasepool {
+            let entry = try TestHarness.makeEntryOrSkip()
+            let engine = try #require(entry.visionHintEngine() as? VisionHintEngine)
+            observedEntry = entry
+            observedEngine = engine
+            #expect(observedEntry != nil && observedEngine != nil)
+        }
+        #expect(observedEntry == nil)
+        #expect(observedEngine == nil)
+    }
+
+    @Test("Ignoring the detected subject returns black instead of selecting all instances")
+    func ignoringDetectedSubject() async throws {
+        let entry = try TestHarness.makeEntryOrSkip()
+        let engine = try VisionHintEngine(cacheEntry: entry)
+        let source = try makeSubjectTexture(entry: entry, width: 256, height: 256)
+        let original = try #require(try engine.generateMask(source: source))
+        #expect(try await nonZeroCoverage(of: original.texture, entry: entry) > 0.05)
+        let ignored = try #require(try engine.generateMask(source: source, points: [
+            HintPoint(x: 0.5, y: 0.5, kind: .foreground),
+            HintPoint(x: 0.5, y: 0.5, kind: .ignore)
+        ]))
+        #expect(ignored.localCorrections?.isEmpty == true)
+        #expect(try await nonZeroCoverage(of: ignored.texture, entry: entry) == 0)
+    }
+
     /// Smoke test: engine builds, processes a synthetic "subject" texture,
     /// and either returns a mask with the right format or returns nil
     /// (Vision sometimes finds no salient subject in synthetic scenes).

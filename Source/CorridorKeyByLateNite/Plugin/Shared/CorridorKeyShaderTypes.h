@@ -73,7 +73,8 @@ typedef enum CorridorKeyOutputMode {
     /// 4th input channel (Vision mask, OSC overlays, or green-bias).
     /// Visualised as red on black so the user can spot misalignment
     /// between the hint and the subject before MLX touches it.
-    CKOutputModeHint = 5
+    CKOutputModeHint = 5,
+    CKOutputModeOriginal = 6
 } CorridorKeyOutputMode;
 
 // Vertex layout for the full-screen quad in pixel space.
@@ -107,6 +108,9 @@ typedef struct CKAlphaEdgeParams {
 
 typedef struct CKComposeParams {
     int outputMode; // CorridorKeyOutputMode
+    int inputIsLinear;
+    int linearizeOutput;
+    int keepOriginalInSolidAreas;
 } CKComposeParams;
 
 // Normalisation parameters for the neural input tensor. The working-space
@@ -142,7 +146,7 @@ typedef struct CKLightWrapParams {
     float edgeBias;
 } CKLightWrapParams;
 
-// Edge colour decontamination parameters. Subtracts screen-colour residual
+// Edge colour decontamination parameters. Removes excess of the green or blue channel
 // from the foreground RGB, weighted by `(1 - matte)` so the opaque interior
 // is never touched. `screenColor` is the canonical reference for the keyed
 // screen — green or blue, picked from `ScreenColor.canonicalScreenReference`
@@ -221,6 +225,7 @@ typedef struct CKForegroundPostProcessParams {
     int lightWrapEnabled;
     int edgeDecontaminateEnabled;
     int applyInverseRotation;
+    int keepOriginalInSolidAreas;
 } CKForegroundPostProcessParams;
 
 // Temporal-blend parameters. The kernel runs *during analysis* over a

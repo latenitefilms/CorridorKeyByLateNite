@@ -1,0 +1,32 @@
+{
+  "profiles": [
+    {
+      "resolution": 512,
+      "window": 8,
+      "seconds": 1.2858907919726335,
+      "peak_mlx_bytes": 4054558908,
+      "finite": true
+    },
+    {
+      "resolution": 512,
+      "window": 24,
+      "seconds": 2.457775082963053,
+      "peak_mlx_bytes": 4916759712,
+      "finite": true
+    },
+    {
+      "resolution": 512,
+      "window": 48,
+      "seconds": 5.912106000003405,
+      "peak_mlx_bytes": 5781655736,
+      "finite": true
+    },
+    {
+      "resolution": 512,
+      "window": 80,
+      "seconds": 11.257756165985484,
+      "peak_mlx_bytes": 7950392564,
+      "finite": true
+    }
+  ]
+}

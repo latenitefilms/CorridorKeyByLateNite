@@ -4,56 +4,35 @@
 //
 //  Loads a CorridorKey `.mlxfn` bridge via mlx-swift's public
 //  `ImportedFunction` API and runs inference for one frame at a time. The
-//  bridge file is a pre-compiled MLX graph produced upstream by the
-//  CorridorKey training pipeline, so this engine is a thin adapter between
-//  the render pipeline's Metal textures and MLX's tensor API.
+//  v2 bridge is exported and validated by Tools/CorridorKeyV2. It includes
+//  both keying stages and all three frozen foundation models. Single-frame
+//  mode keeps results deterministic when the host requests frames out of order.
 //
 //  Apple Silicon's unified memory means the Metal↔MLX hand-off is mostly a
-//  pointer copy; the GPU work itself is scheduled by MLX against the Neural
-//  Engine or the GPU as appropriate for the compiled graph.
+//  pointer copy; MLX schedules inference on the Metal GPU.
 //
 
 import Foundation
 import Metal
 import MLX
+import Cmlx
 import simd
 #if CORRIDOR_KEY_SPM_MIRROR
 import CorridorKeyToolboxLogic
 #endif
 
-/// Names of the bundled `.mlxfn` artefacts. Matches CorridorKey-Runtime's
-/// `{corridorkey,corridorkeyblue}_mlx_bridge_{N}.mlxfn` convention so the
-/// same Hugging Face / `prepare_mlx_model_pack.py` outputs can be consumed
-/// unmodified — the only difference between the two colour packs is the
-/// trained weights, the architecture is identical.
-///
-/// **Tiled inference** (deferred — needs upstream model export):
-/// The reference `corridorkey-mlx` Python implementation supports
-/// 512 px tiles with 64 px overlap so users on a 32 GB Mac can run
-/// effective resolutions up to 4K without exceeding RAM. To enable
-/// the same path here we'd need:
-///
-/// 1. An upstream `.mlxfn` exported at a "tile" shape (e.g. fixed
-///    512 px with shape-flexibility on the batch axis) — the current
-///    bundles are exported per-rung at fixed shape because Hiera's
-///    shape-dependent reshapes don't compile shape-flexibly.
-/// 2. A pre/post tiling helper in `MLXKeyingEngine.run` that
-///    chunks the input, runs N inferences, and Lanczos-blends the
-///    overlap. Without the upstream model this can't be tested
-///    end-to-end so it's left as a TODO.
-///
-/// Once the upstream model lands, the change is local to
-/// `MLXKeyingEngine`; nothing in the renderer assumes single-tile
-/// inference.
+/// One v2 artifact contains every quality rung and shares its weights between
+/// all traces. Green and blue screens use the same trained model; screen colour
+/// continues to select the hint and despill behaviour in the shared renderer.
 enum MLXBridgeArtifact {
 
     /// Supported bridge resolutions, in preference order from lowest to
-    /// highest. `closestSupportedResolution` walks this list. Both colour
-    /// packs ship the same five rungs so the ladder is colour-agnostic.
+    /// highest. Every dimension satisfies v2's 128-pixel shape quantum.
     static let ladder: [Int] = [512, 768, 1024, 1536, 2048]
 
+    /// The shared artifact is independent of the selected screen and quality.
     static func filename(forResolution resolution: Int, screenColor: ScreenColor) -> String {
-        "\(screenColor.bridgeFilenamePrefix)_\(resolution).mlxfn"
+        "corridorkey_v2.mlxfn"
     }
 
     /// Returns the ladder rung that is at least as large as `requested`,
@@ -67,12 +46,20 @@ enum MLXBridgeArtifact {
 /// processes that may host the engine: the FxPlug XPC service (the
 /// .mlxfn files sit in its own bundle), the standalone wrapper app
 /// (which reaches into the embedded renderer plugin so we don't have
-/// to duplicate ~600 MB of model artefacts in two places), and the
-/// SPM test runner (which loads the smallest bridge from its test
-/// resources).
+/// to duplicate the model's shared weights), and the SPM test runner
+/// (which reads the same artifact from production resources).
 private enum MLXBridgeResourceLocator {
     static func url(for filename: String) -> URL? {
         let fileManager = FileManager.default
+#if CORRIDOR_KEY_SPM_MIRROR
+        // Headless tests use the production artifact without copying several
+        // gigabytes into the test bundle. Shipping targets never use this path.
+        let productionURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .appending(path: "../Resources/MLX Models/\(filename)")
+            .standardizedFileURL
+        if fileManager.fileExists(atPath: productionURL.path) { return productionURL }
+#endif
         let filenameStem = (filename as NSString).deletingPathExtension
         let filenameExtension = (filename as NSString).pathExtension
 
@@ -125,7 +112,98 @@ private enum MLXBridgeResourceLocator {
     }
 }
 
+/// Owns an imported graph and its fixed-shape compiled variants. The engine
+/// serializes calls. Compilation callbacks cannot throw, so failures cross that
+/// boundary explicitly and are rethrown before any outputs can be consumed.
+private final class MLXModelFunction {
+    private final class TraceFailure {
+        private let lock = NSLock()
+        private var message: String?
+
+        func record(_ error: any Error) {
+            lock.withLock { message = String(describing: error) }
+        }
+
+        func take() -> String? {
+            lock.withLock {
+                defer { message = nil }
+                return message
+            }
+        }
+    }
+
+    private let imported: ImportedFunction
+    private let compiled: (@Sendable ([MLXArray]) -> [MLXArray])?
+    private let failure: TraceFailure
+
+    init(url: URL, compilationEnabled: Bool) throws {
+        let imported = try ImportedFunction(url: url)
+        let failure = TraceFailure()
+        self.imported = imported
+        self.failure = failure
+        self.compiled = compilationEnabled ? compile(shapeless: false) { inputs in
+            do {
+                return try Self.invoke(imported, inputs: inputs).map { contiguous($0) }
+            } catch {
+                failure.record(error)
+                return []
+            }
+        } : nil
+    }
+
+    func callAsFunction(_ input: MLXArray) throws -> [MLXArray] {
+        try call(inputs: [input])
+    }
+
+    func call(inputs: [MLXArray]) throws -> [MLXArray] {
+        let outputs: [MLXArray]
+        if let compiled {
+            outputs = try withError { compiled(inputs) }
+        } else {
+            outputs = try Self.invoke(imported, inputs: inputs).map { contiguous($0) }
+        }
+        if let message = failure.take() {
+            throw KeyingInferenceError.modelUnavailable("MLX compilation failed: \(message)")
+        }
+        return outputs
+    }
+
+    /// Input arity is the serialized stage dispatch contract. Single-frame
+    /// callers retain their normalized display-RGB interface for diagnostics.
+    private static func invoke(_ function: ImportedFunction, inputs: [MLXArray]) throws -> [MLXArray] {
+        switch inputs.count {
+        case 1:
+            let display = inputs[0] * MLXArray([Float(0.229), 0.224, 0.225, 1])
+                + MLXArray([Float(0.485), 0.456, 0.406, 0])
+            let source = concatenated([MLXVideoColor.displayToLinear(display[0..., 0..., 0..., 0..<3]),
+                                       display[0..., 0..., 0..., 3..<4]], axis: -1)
+            let resolution = source.shape[1]
+            let features = try function(source, MLXArray.zeros([1, 1 + (resolution / 64) * (resolution / 64), 384]))
+            let temporal = try function(source, MLXArray([Float(0.75)], [1, 1]),
+                                        features[0].expandedDimensions(axis: 1),
+                                        features[1].expandedDimensions(axis: 1), features[2].expandedDimensions(axis: 1))
+            let result = try function(source, temporal[0], MLXArray.zeros([0]))
+            return [result[0][0..., .stride(by: -1)],
+                    MLXVideoColor.linearToDisplay(result[1])[0..., .stride(by: -1)]]
+        case 2: return try function(inputs[0], inputs[1])
+        case 3: return try function(inputs[0], inputs[1], inputs[2])
+        case 5: return try function(inputs[0], inputs[1], inputs[2], inputs[3], inputs[4])
+        default: throw KeyingInferenceError.modelUnavailable("Invalid staged v2 model input count.")
+        }
+    }
+}
+
 final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
+    /// MLX 0.31.3's unoptimized compiler-cache destructor overflows worker
+    /// stacks for this graph. Optimized builds pass the ownership regression;
+    /// Debug retains the reference path until that upstream defect is fixed.
+    static let defaultCompilationEnabled: Bool = {
+#if DEBUG
+        false
+#else
+        true
+#endif
+    }()
 
     /// Strategy for handing the normalised input tensor to MLX. Switched
     /// at engine init by the production code; the test suite can override
@@ -133,7 +211,7 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
     /// parity between the two paths.
     ///
     /// * `.zeroCopy` — aliases the shared MTLBuffer directly via
-    ///   `MLXArray(rawPointer:)`. Apple Silicon's unified memory makes
+    ///   MLX's managed C array API. Apple Silicon's unified memory makes
     ///   this near-free — no copy, MLX reads the same bytes the Metal
     ///   normalise kernel just wrote. The shipping default.
     /// * `.cpuStaging` — copies the buffer into a reusable Swift
@@ -147,6 +225,13 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
         case cpuStaging
     }
     private static let defaultInputStrategy: InputStrategy = .zeroCopy
+    /// V2's uncapped allocator retained over 13 GiB of reusable buffers at
+    /// 2048px on M1 Max. A 1 GiB cache keeps similar throughput while leaving
+    /// memory available to the host. This limits cached, not active, tensors.
+    /// Static initialization applies the process-wide setting exactly once.
+    private static let configureMemoryCache: Void = {
+        MLX.Memory.cacheLimit = min(MLX.Memory.cacheLimit, 1024 * 1024 * 1024)
+    }()
     private var inputStrategy: InputStrategy = MLXKeyingEngine.defaultInputStrategy
 
     /// Test-only entry point. Production callers must not flip the
@@ -162,7 +247,7 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
     var guideSourceDescription: String
 
     private let cacheEntry: MetalDeviceCacheEntry
-    /// Guards `importedFunction` / `loadedResolution` / `loadedScreenColor`
+    /// Guards `importedFunction` / `loadedResolution` / `loadedBridgeURL`
     /// reads and writes. Held briefly so warm-up and per-frame renders never
     /// deadlock each other.
     private let stateLock = NSLock()
@@ -170,35 +255,54 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
     /// render threads concurrently and `ImportedFunction` is not documented as
     /// thread-safe — funnel everything through a single in-flight inference.
     private let runLock = NSLock()
-    private var importedFunction: ImportedFunction?
+    private var importedFunction: MLXModelFunction?
+    private let compilationEnabled: Bool
     private var loadedResolution: Int = 0
-    /// Screen colour the currently-loaded bridge was exported for. Tracked
-    /// alongside `loadedResolution` so `alreadyLoaded` rejects a request
-    /// that asks for the same rung at a different colour and forces a
-    /// fresh `ImportedFunction` for the new bridge file.
-    private var loadedScreenColor: ScreenColor = .green
+    /// Resource identity, independent of the requested screen colour or rung.
+    private var loadedBridgeURL: URL?
 
     /// Reusable scratch buffer for the `.cpuStaging` strategy. Sized at
     /// warm-up so per-frame inference doesn't pay the 67 MB allocation
     /// cost on every call. `runLock` serialises access; no extra guard.
     private var inputScratch: [Float] = []
 
-    init(cacheEntry: MetalDeviceCacheEntry) {
+    /// Keeps the caller's Metal allocation alive until MLX releases its view.
+    private final class InputBufferOwner {
+        let buffer: any MTLBuffer
+
+        init(buffer: any MTLBuffer) {
+            self.buffer = buffer
+        }
+    }
+
+    /// Wraps an already validated shared input allocation without copying.
+    /// MLX Swift 0.31.3's raw-pointer initializer retains its finalizer payload
+    /// but never releases it. Use the existing C API with a balanced retain
+    /// and release so long analyses do not leak the capture or Metal buffer.
+    static func makeInputArray(buffer: any MTLBuffer, resolution: Int) -> MLXArray {
+        let shape: [Int32] = [1, Int32(resolution), Int32(resolution), 4]
+        let owner = Unmanaged.passRetained(InputBufferOwner(buffer: buffer)).toOpaque()
+        return MLXArray(mlx_array_new_data_managed_payload(
+            buffer.contents(), shape, Int32(shape.count), MLX_FLOAT32, owner,
+            { payload in
+                guard let payload else { return }
+                Unmanaged<InputBufferOwner>.fromOpaque(payload).release()
+            }
+        ))
+    }
+
+    /// Disabling compilation is reserved for numerical and performance comparisons.
+    init(cacheEntry: MetalDeviceCacheEntry, compilationEnabled: Bool? = nil) {
+        _ = Self.configureMemoryCache
         self.cacheEntry = cacheEntry
-        self.backendDisplayName = "MLX on \(cacheEntry.device.name)"
-        self.guideSourceDescription = "Auto rough fallback"
+        self.compilationEnabled = compilationEnabled ?? Self.defaultCompilationEnabled
+        self.backendDisplayName = "CorridorKey v2 · MLX on \(cacheEntry.device.name)"
+        self.guideSourceDescription = "Foreground hint"
     }
 
     /// Releases MLX's internal buffer cache. Called by the analyser at the
-    /// end of an Analyse Clip pass so memory doesn't ramp across long
-    /// editing sessions. Cheap during normal inference (we don't call it
-    /// per-frame because forcing reallocation between frames thrashes the
-    /// allocator and made wall-time go from 41 ms to 15 s in field tests).
-    ///
-    /// The unit-test `MLXMemoryTests` verifies the cache settles after
-    /// `clearCache` runs — without this hook, MLX cache observed at 4.4 GB
-    /// after 30× 512 inferences scales to ~70 GB at 2048, matching the
-    /// 42 GB symptom Final Cut Pro hit during a 26-frame Analyse pass.
+    /// end of an Analyse Clip pass. During inference the bounded cache can
+    /// reuse allocations; after analysis the host can reclaim those buffers.
     func clearMLXCache() {
         let beforeBytes = MLX.Memory.cacheMemory
         MLX.Memory.clearCache()
@@ -224,19 +328,16 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
     }
 
     func supports(resolution: Int, screenColor: ScreenColor) -> Bool {
-        guard let rung = MLXBridgeArtifact.closestSupportedResolution(forRequested: resolution) else {
-            return false
-        }
-        let filename = MLXBridgeArtifact.filename(forResolution: rung, screenColor: screenColor)
+        guard MLXBridgeArtifact.ladder.contains(resolution) else { return false }
+        let filename = MLXBridgeArtifact.filename(forResolution: resolution, screenColor: screenColor)
         return MLXBridgeResourceLocator.url(for: filename) != nil
     }
 
     func prepare(resolution: Int, screenColor: ScreenColor) async throws {
-        guard let rung = MLXBridgeArtifact.closestSupportedResolution(forRequested: resolution) else {
-            throw KeyingInferenceError.modelUnavailable(
-                "No MLX bridge file bundled for \(resolution)px."
-            )
+        guard MLXBridgeArtifact.ladder.contains(resolution) else {
+            throw KeyingInferenceError.unsupportedResolution(resolution)
         }
+        let rung = resolution
         let filename = MLXBridgeArtifact.filename(forResolution: rung, screenColor: screenColor)
         guard let bridgeURL = MLXBridgeResourceLocator.url(for: filename) else {
             throw KeyingInferenceError.modelUnavailable(
@@ -251,12 +352,15 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
     /// resources bundle (which is not enumerated by `Bundle.allBundles`).
     /// Production callers should use `prepare(resolution:screenColor:)`.
     func prepare(bridgeURL: URL, rung: Int, screenColor: ScreenColor) async throws {
-        if alreadyLoaded(rung: rung, screenColor: screenColor) { return }
+        guard MLXBridgeArtifact.ladder.contains(rung) else {
+            throw KeyingInferenceError.unsupportedResolution(rung)
+        }
+        if alreadyLoaded(bridgeURL: bridgeURL) { return }
 
         PluginLog.notice("Loading MLX bridge from \(bridgeURL.path) (\(screenColor.displayName) screen).")
-        let function: ImportedFunction
+        let function: MLXModelFunction
         do {
-            function = try ImportedFunction(url: bridgeURL)
+            function = try MLXModelFunction(url: bridgeURL, compilationEnabled: compilationEnabled)
         } catch {
             throw KeyingInferenceError.modelUnavailable(
                 "MLX could not load \(bridgeURL.lastPathComponent): \(error.localizedDescription)"
@@ -267,14 +371,14 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
         // allocate the Metal buffer pool. Finishing this before we advertise
         // the engine as loaded means the first real render frame never pays a
         // multi-second stall while MLX compiles on demand.
-        await warmJIT(function: function, rung: rung)
-        storeFunction(function, rung: rung, screenColor: screenColor)
+        try await warmJIT(function: function, rung: rung)
+        storeFunction(function, rung: rung, bridgeURL: bridgeURL)
     }
 
     /// Runs a throwaway inference on a zero tensor so MLX compiles the graph
-    /// and warms the Metal buffer cache. Any failure here is non-fatal — the
-    /// real inference will surface the same error to the caller later.
-    private func warmJIT(function: ImportedFunction, rung: Int) async {
+    /// and warms the Metal buffer cache. Failed warm-up must never publish a
+    /// ready engine, otherwise the first frame fails after analysis has begun.
+    private func warmJIT(function: MLXModelFunction, rung: Int) async throws {
         let warmupStart = Date()
         let zeros = [Float](repeating: 0, count: rung * rung * 4)
         let input = MLXArray(zeros, [1, rung, rung, 4])
@@ -282,13 +386,16 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
             let outputs = try withError {
                 try function(input)
             }
+            guard outputs.count == 2 else {
+                throw KeyingInferenceError.modelUnavailable("CorridorKey v2 must return alpha and foreground.")
+            }
+            try assertOutputShapes(alpha: outputs[0], foreground: outputs[1], rung: rung)
             try checkedEval(outputs)
         } catch {
-            PluginLog.error("MLX JIT warm-up failed (non-fatal): \(error.localizedDescription)")
-            return
+            throw KeyingInferenceError.modelUnavailable("CorridorKey v2 warm-up failed: \(error.localizedDescription)")
         }
         let elapsedSeconds = Date().timeIntervalSince(warmupStart)
-        PluginLog.notice("MLX JIT warm-up finished in \(String(format: "%.2f", elapsedSeconds))s for \(rung)px.")
+        PluginLog.notice("MLX JIT warm-up finished in \(elapsedSeconds.formatted(.number.precision(.fractionLength(2))))s for \(rung)px.")
     }
 
     func run(request: KeyingInferenceRequest, output: KeyingInferenceOutput) throws {
@@ -310,7 +417,7 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
         // Feed the device capability cache so subsequent `automatic`
         // ceiling decisions reflect real measurements, not the static
         // RAM-tier heuristic.
-        let (_, rung) = loadedState()
+        let rung = request.inferenceResolution
         if rung > 0 {
             DeviceCapabilityCache.shared.record(
                 deviceRegistryID: cacheEntry.device.registryID,
@@ -320,10 +427,31 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
         }
     }
 
+    /// All sessions share weights and serialize graph construction/evaluation;
+    /// recurrent state and temporary features remain owned by each session.
+    func evaluateVideoStage(_ inputs: [MLXArray]) throws -> [MLXArray] {
+        try runLock.withLock {
+            guard let function = loadedState().0 else {
+                throw KeyingInferenceError.modelUnavailable("The v2 video model is not ready.")
+            }
+            let result = try function.call(inputs: inputs)
+            try checkedEval(result)
+            return result
+        }
+    }
+
     private func runBody(request: KeyingInferenceRequest, output: KeyingInferenceOutput) throws {
-        let (function, rung) = loadedState()
-        guard let function, rung > 0 else {
+        let (function, _) = loadedState()
+        guard let function else {
             throw KeyingInferenceError.modelUnavailable("MLX bridge not prepared.")
+        }
+        let rung = request.inferenceResolution
+        guard MLXBridgeArtifact.ladder.contains(rung) else {
+            throw KeyingInferenceError.unsupportedResolution(rung)
+        }
+        guard output.alphaTexture.width == rung, output.alphaTexture.height == rung,
+              output.foregroundTexture.width == rung, output.foregroundTexture.height == rung else {
+            throw KeyingInferenceError.modelUnavailable("Inference output dimensions do not match the requested quality.")
         }
         _ = request.rawSourceTexture
         let expectedBytes = rung * rung * 4 * MemoryLayout<Float>.size
@@ -339,12 +467,7 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
         let inputArray: MLXArray
         switch inputStrategy {
         case .zeroCopy:
-            inputArray = MLXArray(
-                rawPointer: inputBuffer.contents(),
-                [1, rung, rung, 4],
-                dtype: .float32,
-                finalizer: { _ = inputBuffer }
-            )
+            inputArray = Self.makeInputArray(buffer: inputBuffer, resolution: rung)
         case .cpuStaging:
             let expectedCount = rung * rung * 4
             if inputScratch.count != expectedCount {
@@ -374,12 +497,16 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
                 "MLX apply failed: \(error.localizedDescription)"
             )
         }
-        guard results.count >= 2 else {
+        guard results.count == 2 else {
             throw KeyingInferenceError.modelUnavailable(
                 "MLX bridge returned \(results.count) outputs; expected 2."
             )
         }
         try assertOutputShapes(alpha: results[0], foreground: results[1], rung: rung)
+        // V2 returns reversed-axis views to match the renderer's established
+        // orientation. Materialize on the GPU before aliasing their storage;
+        // asMTLBuffer would otherwise fall back to a CPU copy for those views.
+        // The callable materializes these views inside its compiled graph.
 
         // Step 3: force evaluation so the backing buffers are populated.
         do {
@@ -462,29 +589,28 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
 
     // MARK: - Lock-guarded state helpers
 
-    private func alreadyLoaded(rung: Int, screenColor: ScreenColor) -> Bool {
+    private func alreadyLoaded(bridgeURL: URL) -> Bool {
         stateLock.lock()
         defer { stateLock.unlock() }
         return importedFunction != nil
-            && loadedResolution == rung
-            && loadedScreenColor == screenColor
+            && loadedBridgeURL == bridgeURL
     }
 
-    private func loadedState() -> (ImportedFunction?, Int) {
+    private func loadedState() -> (MLXModelFunction?, Int) {
         stateLock.lock()
         defer { stateLock.unlock() }
         return (importedFunction, loadedResolution)
     }
 
-    private func storeFunction(_ function: ImportedFunction, rung: Int, screenColor: ScreenColor) {
+    private func storeFunction(_ function: MLXModelFunction, rung: Int, bridgeURL: URL) {
         stateLock.lock()
         defer { stateLock.unlock() }
-        if importedFunction != nil, loadedResolution == rung, loadedScreenColor == screenColor {
+        if importedFunction != nil, loadedBridgeURL == bridgeURL {
             return
         }
         importedFunction = function
         loadedResolution = rung
-        loadedScreenColor = screenColor
+        loadedBridgeURL = bridgeURL
     }
 
     /// Validates that the loaded bridge's outputs have the expected NHWC layout.
@@ -493,7 +619,8 @@ final class MLXKeyingEngine: KeyingInferenceEngine, @unchecked Sendable {
     private func assertOutputShapes(alpha: MLXArray, foreground: MLXArray, rung: Int) throws {
         let expectedAlpha = [1, rung, rung, 1]
         let expectedForeground = [1, rung, rung, 3]
-        if alpha.shape != expectedAlpha || foreground.shape != expectedForeground {
+        if alpha.shape != expectedAlpha || foreground.shape != expectedForeground
+            || alpha.dtype != .float32 || foreground.dtype != .float32 {
             PluginLog.error(
                 "MLX bridge returned unexpected shapes: alpha=\(alpha.shape) foreground=\(foreground.shape); expected \(expectedAlpha) and \(expectedForeground)."
             )

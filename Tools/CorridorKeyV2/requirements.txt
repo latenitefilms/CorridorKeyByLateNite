@@ -1,0 +1,13 @@
+# Development/conversion only. No Python packages ship in the application.
+torch==2.10.0
+torchvision==0.25.0
+mlx==0.31.0
+transformers==4.57.6
+timm==1.0.25
+safetensors==0.7.0
+numpy==2.4.2
+huggingface-hub==0.36.2
+utils3d @ git+https://github.com/EasternJournalist/utils3d.git@83bfa5bda008803f6521ce9547f94023b8afeddd
+opencv-python-headless==4.14.0.94
+setuptools==82.0.0
+einops==0.8.2

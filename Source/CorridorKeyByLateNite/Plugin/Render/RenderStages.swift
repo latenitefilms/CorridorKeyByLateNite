@@ -23,6 +23,29 @@ import CorridorKeyToolboxLogic
 
 enum RenderStages {
 
+    /// Reverses texture rows at the host boundary, preserving channel values.
+    /// Callers skip this allocation when the host already supplies top-down pixels.
+    static func flipVertically(
+        source: any MTLTexture,
+        entry: MetalDeviceCacheEntry,
+        commandBuffer: any MTLCommandBuffer
+    ) throws -> PooledTexture {
+        guard let output = entry.texturePool.acquire(
+            width: source.width, height: source.height, pixelFormat: source.pixelFormat
+        ) else { throw MetalDeviceCacheError.textureAllocationFailed }
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            output.returnManually()
+            throw MetalDeviceCacheError.commandEncoderCreationFailed
+        }
+        encoder.label = "CorridorKey by LateNite Normalize Image Rows"
+        encoder.setComputePipelineState(entry.computePipelines.flipVertical)
+        encoder.setTexture(source, index: Int(CKTextureIndexSource.rawValue))
+        encoder.setTexture(output.texture, index: Int(CKTextureIndexOutput.rawValue))
+        dispatch(encoder: encoder, pipeline: entry.computePipelines.flipVertical, width: source.width, height: source.height)
+        encoder.endEncoding()
+        return output
+    }
+
     // MARK: - Screen colour matrix
 
     /// Applies a 3x3 colour matrix to `source`, writing into a pooled
@@ -191,6 +214,24 @@ enum RenderStages {
         return output
     }
 
+    /// Builds an identical Vision prior for analysis and diagnostics. Manual selection
+    /// uses only selected instances so chroma cannot restore excluded objects.
+    static func prepareVisionHint(mask: any MTLTexture, source: any MTLTexture,
+                                  includeChroma: Bool, screenColor: SIMD3<Float>,
+                                  entry: MetalDeviceCacheEntry,
+                                  commandBuffer: any MTLCommandBuffer) throws -> PooledTexture {
+        let vision = try extractHint(source: mask, layout: 1, targetWidth: source.width,
+                                     targetHeight: source.height, entry: entry, commandBuffer: commandBuffer)
+        guard includeChroma else { return vision }
+        let chroma = try generateChromaHint(source: source, screenColor: screenColor,
+                                            entry: entry, commandBuffer: commandBuffer)
+        let combined = try unionHints(primary: vision.texture, secondary: chroma.texture,
+                                      entry: entry, commandBuffer: commandBuffer)
+        vision.returnOnCompletion(of: commandBuffer)
+        chroma.returnOnCompletion(of: commandBuffer)
+        return combined
+    }
+
     // MARK: - Hint-point overlay
 
     /// In-place applies user-placed hint points (foreground / background
@@ -260,6 +301,8 @@ enum RenderStages {
         hint: any MTLTexture,
         inferenceResolution: Int,
         workingToRec709: simd_float3x3,
+        geometry: InferenceGeometry? = nil,
+        inputIsLinear: Bool? = nil,
         entry: MetalDeviceCacheEntry,
         commandBuffer: any MTLCommandBuffer
     ) throws -> any MTLBuffer {
@@ -291,6 +334,12 @@ enum RenderStages {
             length: MemoryLayout<SIMD2<UInt32>>.size,
             index: 1
         )
+        let fit = geometry ?? InferenceGeometry(sourceWidth: inferenceResolution, sourceHeight: inferenceResolution,
+                                                resolution: inferenceResolution)
+        var content = SIMD4<UInt32>(UInt32(fit.contentWidth), UInt32(fit.contentHeight), UInt32(fit.offsetX), UInt32(fit.offsetY))
+        encoder.setBytes(&content, length: MemoryLayout<SIMD4<UInt32>>.size, index: 2)
+        var transfer: UInt32 = inputIsLinear.map { $0 ? 2 : 1 } ?? 0
+        encoder.setBytes(&transfer, length: MemoryLayout<UInt32>.size, index: 3)
         dispatch(
             encoder: encoder,
             pipeline: entry.computePipelines.normalizeToBuffer,
@@ -381,6 +430,29 @@ enum RenderStages {
     }
 
     // MARK: - Resample (bilinear + Lanczos)
+
+    /// Transfers and transforms RGB in scene-linear light, preserving signed HDR values.
+    static func colorTransform(source: any MTLTexture, matrix: simd_float3x3,
+                               sourceIsLinear: Bool, outputIsLinear: Bool,
+                               entry: MetalDeviceCacheEntry, commandBuffer: any MTLCommandBuffer) throws -> PooledTexture {
+        guard let destination = entry.texturePool.acquire(width: source.width, height: source.height, pixelFormat: .rgba16Float) else {
+            throw MetalDeviceCacheError.textureAllocationFailed
+        }
+        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
+            destination.returnManually()
+            throw MetalDeviceCacheError.commandEncoderCreationFailed
+        }
+        encoder.setComputePipelineState(entry.computePipelines.colorTransform)
+        encoder.setTexture(source, index: 0)
+        encoder.setTexture(destination.texture, index: 6)
+        var transform = matrix
+        var transfer = SIMD2<UInt32>(sourceIsLinear ? 1 : 0, outputIsLinear ? 1 : 0)
+        encoder.setBytes(&transform, length: MemoryLayout<simd_float3x3>.size, index: 0)
+        encoder.setBytes(&transfer, length: MemoryLayout<SIMD2<UInt32>>.size, index: 1)
+        dispatch(encoder: encoder, pipeline: entry.computePipelines.colorTransform, width: source.width, height: source.height)
+        encoder.endEncoding()
+        return destination
+    }
 
     /// Resamples to the given dimensions using either a bilinear compute
     /// kernel (fast) or MPS Lanczos (higher quality). If the input already
@@ -577,6 +649,55 @@ enum RenderStages {
 
     // MARK: - Source passthrough
 
+    /// Builds the interior-only source mixing mask. Erosion keeps original
+    /// screen-contaminated edge pixels out; blur softens that transition.
+    /// The visible output alpha is not modified by these interior controls.
+    static func makePassthroughMatte(
+        matte: any MTLTexture, erodeRadius: Float, blurRadius: Float,
+        entry: MetalDeviceCacheEntry, commandBuffer: any MTLCommandBuffer
+    ) throws -> PooledTexture? {
+        let erodePixels = max(0, Int(erodeRadius.rounded()))
+        let shouldBlur = blurRadius > 0.5
+        guard erodePixels > 0 || shouldBlur else { return nil }
+        var allocated: [PooledTexture] = []
+        func allocate() throws -> PooledTexture {
+            guard let texture = entry.texturePool.acquire(
+                width: matte.width, height: matte.height, pixelFormat: .r16Float
+            ) else { throw MetalDeviceCacheError.textureAllocationFailed }
+            allocated.append(texture)
+            return texture
+        }
+        do {
+            let scratch = try allocate()
+            var current: any MTLTexture = matte
+            var result: PooledTexture?
+            if erodePixels > 0 {
+                let eroded = try allocate()
+                try MatteRefiner.applyMorphology(
+                    source: current, intermediate: scratch.texture, destination: eroded.texture,
+                    radius: -erodePixels, entry: entry, commandBuffer: commandBuffer
+                )
+                current = eroded.texture
+                result = eroded
+            }
+            if shouldBlur {
+                let blurred = try allocate()
+                try MatteRefiner.applyGaussianBlur(
+                    source: current, intermediate: scratch.texture, destination: blurred.texture,
+                    radiusPixels: blurRadius, entry: entry, commandBuffer: commandBuffer
+                )
+                result = blurred
+            }
+            for texture in allocated where texture !== result {
+                texture.returnOnCompletion(of: commandBuffer)
+            }
+            return result
+        } catch {
+            for texture in allocated { texture.returnManually() }
+            throw error
+        }
+    }
+
     static func sourcePassthrough(
         foreground: any MTLTexture,
         source: any MTLTexture,
@@ -713,6 +834,7 @@ enum RenderStages {
         let screenColor: SIMD3<Float>
         let inverseScreenMatrix: simd_float3x3
         let applyInverseRotation: Bool
+        var keepOriginalInSolidAreas = false
     }
 
     /// Runs the fused `corridorKeyForegroundPostProcessKernel`. Replaces
@@ -727,6 +849,8 @@ enum RenderStages {
         sourceRGB: any MTLTexture,
         matte: any MTLTexture,
         blurredSource: any MTLTexture,
+        passthroughMatte: (any MTLTexture)? = nil,
+        blurredMatte: (any MTLTexture)? = nil,
         config: FusedForegroundConfig,
         entry: MetalDeviceCacheEntry,
         commandBuffer: any MTLCommandBuffer
@@ -749,6 +873,8 @@ enum RenderStages {
         encoder.setTexture(sourceRGB, index: Int(CKTextureIndexSource.rawValue))
         encoder.setTexture(matte, index: Int(CKTextureIndexMatte.rawValue))
         encoder.setTexture(blurredSource, index: Int(CKTextureIndexHint.rawValue))
+        encoder.setTexture(passthroughMatte ?? matte, index: Int(CKTextureIndexCoarse.rawValue))
+        encoder.setTexture(blurredMatte ?? matte, index: Int(CKTextureIndexTempA.rawValue))
         encoder.setTexture(output.texture, index: Int(CKTextureIndexOutput.rawValue))
 
         var params = CKForegroundPostProcessParams(
@@ -760,7 +886,8 @@ enum RenderStages {
             sourcePassthroughEnabled: config.sourcePassthrough ? 1 : 0,
             lightWrapEnabled: config.lightWrapEnabled ? 1 : 0,
             edgeDecontaminateEnabled: config.edgeDecontaminateEnabled ? 1 : 0,
-            applyInverseRotation: config.applyInverseRotation ? 1 : 0
+            applyInverseRotation: config.applyInverseRotation ? 1 : 0,
+            keepOriginalInSolidAreas: config.keepOriginalInSolidAreas ? 1 : 0
         )
         encoder.setBytes(
             &params,
@@ -1189,6 +1316,11 @@ enum RenderStages {
         )
         intermediate.returnOnCompletion(of: commandBuffer)
 
+        let blurredMatte = try makePassthroughMatte(
+            matte: matte, erodeRadius: 0, blurRadius: radiusPixels,
+            entry: entry, commandBuffer: commandBuffer
+        )
+        blurredMatte?.returnOnCompletion(of: commandBuffer)
         guard let output = entry.texturePool.acquire(
             width: width,
             height: height,
@@ -1207,6 +1339,7 @@ enum RenderStages {
         encoder.setTexture(foreground, index: Int(CKTextureIndexForeground.rawValue))
         encoder.setTexture(blurredSource.texture, index: Int(CKTextureIndexSource.rawValue))
         encoder.setTexture(matte, index: Int(CKTextureIndexMatte.rawValue))
+        encoder.setTexture(blurredMatte?.texture ?? matte, index: Int(CKTextureIndexTempA.rawValue))
         encoder.setTexture(output.texture, index: Int(CKTextureIndexOutput.rawValue))
         var params = CKLightWrapParams(strength: strength, edgeBias: 0.6)
         encoder.setBytes(

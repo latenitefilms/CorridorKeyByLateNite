@@ -1,5 +1,14 @@
 # Release Notes
 
+### Unreleased
+
+- Updated the Standalone Editor and Final Cut Pro effect to CorridorKey v2, including all three foundation models. Green and blue screens share one model across all five Quality settings.
+- Existing analysed clips need to be analysed again with v2.
+- Requires macOS 26 or later on Apple Silicon.
+- Uses deterministic independent-frame inference so scrubbing, rendering and analysis share the same model behaviour. The existing Temporal Stability controls remain available.
+
+---
+
 ### 1.0.0 (Build 10)
 
 **🎉 Released:**

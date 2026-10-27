@@ -1,0 +1,92 @@
+{
+  "device": {
+    "resource_limit": 499000,
+    "max_buffer_length": 41747087360,
+    "architecture": "applegpu_g13s",
+    "memory_size": 68719476736,
+    "max_recommended_working_set_size": 55662788608,
+    "device_name": "Apple M1 Max"
+  },
+  "scope": "MLX inference plus contiguous outputs",
+  "cache_limit_mib": 1024,
+  "measurements": [
+    {
+      "resolution": 512,
+      "screen": "green",
+      "seconds": [
+        0.3153415000415407,
+        0.32430883398046717,
+        0.3212866669637151
+      ],
+      "median_seconds": 0.3212866669637151,
+      "active_bytes": 2460631936,
+      "cache_bytes": 1074265596,
+      "peak_bytes": 3787680708
+    },
+    {
+      "resolution": 512,
+      "screen": "blue",
+      "seconds": [
+        0.3326095410156995,
+        0.343622708984185,
+        0.32569579198025167
+      ],
+      "median_seconds": 0.3326095410156995,
+      "active_bytes": 2453291904,
+      "cache_bytes": 1074845772,
+      "peak_bytes": 3787623092
+    },
+    {
+      "resolution": 1024,
+      "screen": "green",
+      "seconds": [
+        1.012434917036444,
+        1.0391043340205215,
+        1.0926404159981757
+      ],
+      "median_seconds": 1.0391043340205215,
+      "active_bytes": 2450489280,
+      "cache_bytes": 1140636688,
+      "peak_bytes": 4405441344
+    },
+    {
+      "resolution": 1024,
+      "screen": "blue",
+      "seconds": [
+        1.0188965830020607,
+        1.199860249995254,
+        1.1125577909988351
+      ],
+      "median_seconds": 1.1125577909988351,
+      "active_bytes": 2450489280,
+      "cache_bytes": 1140901084,
+      "peak_bytes": 4405423168
+    },
+    {
+      "resolution": 2048,
+      "screen": "green",
+      "seconds": [
+        5.069236957991961,
+        4.906220625038259,
+        4.723873790993821
+      ],
+      "median_seconds": 4.906220625038259,
+      "active_bytes": 2500962816,
+      "cache_bytes": 1275911168,
+      "peak_bytes": 5122948096
+    },
+    {
+      "resolution": 2048,
+      "screen": "blue",
+      "seconds": [
+        4.848349624953698,
+        4.770062999974471,
+        5.028211583965458
+      ],
+      "median_seconds": 4.848349624953698,
+      "active_bytes": 2500962816,
+      "cache_bytes": 1275911168,
+      "peak_bytes": 5122948096
+    }
+  ]
+}

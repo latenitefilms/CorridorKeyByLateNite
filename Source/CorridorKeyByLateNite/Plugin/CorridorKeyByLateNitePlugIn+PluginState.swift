@@ -11,57 +11,36 @@
 import Foundation
 import CoreMedia
 
-enum HeaderCustomParameterStorage {
-    static func dictionaryValue(
-        for key: String,
-        using retrieval: any FxParameterRetrievalAPI_v6
-    ) -> NSDictionary? {
-        let storage = storageDictionary(using: retrieval)
-        if let dictionary = storage[NSString(string: key)] as? NSDictionary {
-            return dictionary
-        }
-        return storage[key] as? NSDictionary
-    }
-
-    @discardableResult
-    static func setDictionary(
-        _ dictionary: NSDictionary,
-        for key: String,
-        using apiManager: any PROAPIAccessing
-    ) -> Bool {
-        guard let settingAPI = apiManager.api(for: (any FxParameterSettingAPI_v5).self) as? any FxParameterSettingAPI_v5 else {
-            return false
-        }
-
-        let storage = NSMutableDictionary()
-        if let retrieval = apiManager.api(for: (any FxParameterRetrievalAPI_v6).self) as? any FxParameterRetrievalAPI_v6 {
-            for (existingKey, existingValue) in storageDictionary(using: retrieval) {
-                storage[existingKey] = existingValue
-            }
-        }
-        storage[NSString(string: HeaderStorageKey.schemaVersion)] = NSNumber(value: 1)
-        storage[NSString(string: key)] = dictionary
-
-        let value = storage.copy() as? NSDictionary ?? NSDictionary()
-        return settingAPI.setCustomParameterValue(
-            value,
-            toParameter: ParameterIdentifier.headerSummary,
-            at: CMTime.zero
-        )
-    }
-
-    private static func storageDictionary(using retrieval: any FxParameterRetrievalAPI_v6) -> NSDictionary {
-        var rawValue: (any NSCopying & NSObjectProtocol & NSSecureCoding)?
-        retrieval.getCustomParameterValue(
-            &rawValue,
-            fromParameter: ParameterIdentifier.headerSummary,
-            at: CMTime.zero
-        )
-        return rawValue as? NSDictionary ?? NSDictionary()
-    }
-}
 
 extension CorridorKeyToolboxPlugIn {
+
+
+    /// Captures native v2 parameters and the sandboxed hint asset for either analysis or rendering.
+    func videoSettings(using retrieval: any FxParameterRetrievalAPI_v6, at time: CMTime,
+                       headerStorage: HeaderCustomParameterStorage.Snapshot? = nil) -> VideoInferenceSettings {
+        var value = VideoInferenceSettings()
+        value.inputIsLinear = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.inputIsLinear, time: time, default: value.inputIsLinear)
+        value.linearizeOutput = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.linearizeOutput, time: time, default: value.linearizeOutput)
+        value.keepOriginalInSolidAreas = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.keepOriginalInSolidAreas, time: time, default: value.keepOriginalInSolidAreas)
+        value.timeAwareness = popupValue(retrieval: retrieval, parameterID: ParameterIdentifier.timeAwareness, time: time, default: value.timeAwareness)
+        value.lowGPUMemory = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.lowGPUMemory, time: time, default: value.lowGPUMemory)
+        value.useAlphaHint = boolValue(retrieval: retrieval, parameterID: ParameterIdentifier.useAlphaHint, time: time, default: value.useAlphaHint)
+        value.hintFrames = popupValue(retrieval: retrieval, parameterID: ParameterIdentifier.hintFrames, time: time, default: value.hintFrames)
+        value.referenceFrame = intValue(retrieval: retrieval, parameterID: ParameterIdentifier.referenceFrame, time: time, default: value.referenceFrame)
+        value.alphaHintStrength = floatValue(retrieval: retrieval, parameterID: ParameterIdentifier.alphaHintStrength, time: time, default: value.alphaHintStrength)
+        value.internalHintStrength = floatValue(retrieval: retrieval, parameterID: ParameterIdentifier.internalHintStrength, time: time, default: value.internalHintStrength)
+        if let dictionary = HeaderCustomParameterStorage.dictionaryValue(for: HeaderStorageKey.alphaHintAsset, using: retrieval, storage: headerStorage),
+           let data = dictionary["asset"] as? Data {
+            value.alphaHintAsset = try? PropertyListDecoder().decode(AlphaHintAsset.self, from: data)
+        }
+        var red = value.customScreenColor.x
+        var green = value.customScreenColor.y
+        var blue = value.customScreenColor.z
+        retrieval.getRedValue(&red, greenValue: &green, blueValue: &blue,
+                              fromParameter: ParameterIdentifier.customScreenColor, at: time)
+        value.customScreenColor = SIMD3(red, green, blue)
+        return value
+    }
 
     @objc(pluginState:atTime:quality:error:)
     func pluginState(
@@ -78,7 +57,20 @@ extension CorridorKeyToolboxPlugIn {
         }
 
         var state = PluginStateData()
+        let headerStorage = HeaderCustomParameterStorage.storageDictionary(using: retrieval)
         state.renderQualityLevel = Int(qualityLevel)
+        state.video = videoSettings(using: retrieval, at: renderTime, headerStorage: headerStorage)
+        if let gamutAPI = apiManager.api(for: (any FxColorGamutAPI_v2).self) as? any FxColorGamutAPI_v2 {
+            state.workingColorGamut = ColorGamutMatrix.gamut(fromColorPrimariesRaw: UInt(gamutAPI.colorPrimaries()))
+        }
+        if let timing = apiManager.api(for: (any FxTimingAPI_v4).self) as? any FxTimingAPI_v4 {
+            var duration = CMTime.invalid
+            var start = CMTime.invalid
+            timing.frameDuration(&duration)
+            timing.startTimeOfInput(toFilter: &start)
+            let position = CMTimeSubtract(renderTime, start).seconds / duration.seconds
+            if position.isFinite, position >= 0, position <= Double(Int32.max) { state.sourceFrameIndex = Int(position.rounded()) }
+        }
 
         // Key setup
         state.screenColor = popupValue(
@@ -93,40 +85,17 @@ extension CorridorKeyToolboxPlugIn {
             time: renderTime,
             default: .automatic
         )
-        // Read the new Hint Mode popup. The popup's default is
-        // `.appleVision`, matching what the legacy "Auto Subject
-        // Hint = on" toggle did, so projects opening for the first
-        // time after this change keep their hint behaviour.
+        // Explicit host values win; missing controls use the shared factory defaults.
         state.hintMode = popupValue(
             retrieval: retrieval,
             parameterID: ParameterIdentifier.hintMode,
             time: renderTime,
-            default: HintMode.appleVision
+            default: PluginStateData().hintMode
         )
-        state.showSubjectMarker = boolValue(
-            retrieval: retrieval,
-            parameterID: ParameterIdentifier.showSubjectMarker,
-            time: renderTime,
-            default: true
-        )
-        let (subjectX, subjectY) = pointValue(
-            retrieval: retrieval,
-            parameterID: ParameterIdentifier.subjectPosition,
-            time: renderTime,
-            defaultX: 0.5,
-            defaultY: 0.5
-        )
-        state.subjectPositionX = subjectX
-        state.subjectPositionY = subjectY
-
         // Interior. Defaults below mirror `PluginStateData()`'s
         // designated initialiser exactly so the FxPlug and the
         // Standalone Editor land on the same matte when nothing
-        // overrides — earlier drift here meant a fresh FCP project
-        // ran the keyer with Source Passthrough on / Auto Despeckle
-        // off / Light Wrap off / Edge Decontaminate off / Temporal
-        // Stability off, while the Standalone Editor ran with the
-        // opposite combination.
+        // overrides. Additional edge colour correction is opt-in.
         state.sourcePassthroughEnabled = boolValue(
             retrieval: retrieval,
             parameterID: ParameterIdentifier.sourcePassthrough,
@@ -181,7 +150,7 @@ extension CorridorKeyToolboxPlugIn {
             retrieval: retrieval,
             parameterID: ParameterIdentifier.autoDespeckle,
             time: renderTime,
-            default: true
+            default: PluginStateData().autoDespeckleEnabled
         )
         state.despeckleSize = intValue(
             retrieval: retrieval,
@@ -201,7 +170,7 @@ extension CorridorKeyToolboxPlugIn {
             retrieval: retrieval,
             parameterID: ParameterIdentifier.lightWrapEnabled,
             time: renderTime,
-            default: true
+            default: PluginStateData().lightWrapEnabled
         )
         state.lightWrapStrength = floatValue(
             retrieval: retrieval,
@@ -219,7 +188,7 @@ extension CorridorKeyToolboxPlugIn {
             retrieval: retrieval,
             parameterID: ParameterIdentifier.edgeDecontaminateEnabled,
             time: renderTime,
-            default: true
+            default: false
         )
         state.edgeDecontaminateStrength = floatValue(
             retrieval: retrieval,
@@ -233,7 +202,7 @@ extension CorridorKeyToolboxPlugIn {
             retrieval: retrieval,
             parameterID: ParameterIdentifier.temporalStabilityEnabled,
             time: renderTime,
-            default: true
+            default: PluginStateData().temporalStabilityEnabled
         )
         state.temporalStabilityStrength = floatValue(
             retrieval: retrieval,
@@ -247,7 +216,7 @@ extension CorridorKeyToolboxPlugIn {
             retrieval: retrieval,
             parameterID: ParameterIdentifier.despillStrength,
             time: renderTime,
-            default: 0.5
+            default: 0
         )
         state.spillMethod = popupValue(
             retrieval: retrieval,
@@ -270,22 +239,25 @@ extension CorridorKeyToolboxPlugIn {
             default: .lanczos
         )
 
+        // Load the user's OSC-placed hint dots from the published header
+        // storage dictionary so they round-trip through the `.moef` wrapper.
+        state.hintPointSet = loadHintPointSet(using: retrieval, headerStorage: headerStorage)
+
         // If FxAnalyzer has cached a matte for this frame, pack the
         // compressed blob and its inference resolution into the state so the
         // render callback can skip MLX entirely. Screen colour must match the
         // analysis run — mismatches invalidate the cache for that frame.
-        if let analysis = loadAnalysisData(using: retrieval),
+        if let analysis = loadAnalysisData(using: retrieval, headerStorage: headerStorage),
            let cachedMatte = analysis.cachedMatte(
                 at: renderTime,
-                screenColorRaw: state.screenColor.rawValue
+                screenColorRaw: state.screenColor.rawValue,
+                qualityModeRaw: state.qualityMode.rawValue,
+                hintConfiguration: state.analysisHintConfiguration
            ) {
             state.cachedMatteBlob = cachedMatte.blob
+            state.cachedFrameReference = cachedMatte.reference
             state.cachedMatteInferenceResolution = cachedMatte.inferenceResolution
         }
-
-        // Load the user's OSC-placed hint dots from the published header
-        // storage dictionary so they round-trip through the `.moef` wrapper.
-        state.hintPointSet = loadHintPointSet(using: retrieval)
 
         let nsData = try state.encodedForHost()
         pluginState?.pointee = nsData
@@ -341,31 +313,17 @@ extension CorridorKeyToolboxPlugIn {
         return value.boolValue
     }
 
-    /// Reads a 2D point parameter into an `(x, y)` tuple. FxPlug stores
-    /// point parameters in object-normalised (0…1) coordinates with the
-    /// y-axis pointing UP from the bottom-left.
-    private func pointValue(
-        retrieval: any FxParameterRetrievalAPI_v6,
-        parameterID: UInt32,
-        time: CMTime,
-        defaultX: Double,
-        defaultY: Double
-    ) -> (Double, Double) {
-        var x = defaultX
-        var y = defaultY
-        retrieval.getXValue(&x, yValue: &y, fromParameter: parameterID, at: time)
-        return (x, y)
-    }
-
     /// Decodes the Subject Points payload stored inside the published header
     /// custom parameter. Returns an empty set when it has never been written
     /// (the typical case until the user clicks the canvas with the OSC active).
     func loadHintPointSet(
-        using retrieval: any FxParameterRetrievalAPI_v6
+        using retrieval: any FxParameterRetrievalAPI_v6,
+        headerStorage: HeaderCustomParameterStorage.Snapshot? = nil
     ) -> HintPointSet {
         let dictionary = HeaderCustomParameterStorage.dictionaryValue(
             for: HeaderStorageKey.subjectPoints,
-            using: retrieval
+            using: retrieval,
+            storage: headerStorage
         )
         return HintPointSet.fromParameterDictionary(dictionary)
     }

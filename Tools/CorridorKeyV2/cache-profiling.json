@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-24",
+  "hardware": "Apple M1 Max, 64 GB",
+  "metal_capture_seconds": 30,
+  "metal_target": "Final headless regression worker, attached after GPU initialization",
+  "target_gpu_intervals": {
+    "Compute": 16225,
+    "Fragment": 7
+  },
+  "command_buffer_error_rows": 0,
+  "leaks_capture_seconds": 30,
+  "leaks_target": "Release standalone analysis/playback tests; stopped at the recording time limit",
+  "leak_finding_rows": 0,
+  "limitations": "Short headless samples; not full-app, live-FxPlug, sustained utilization, or zero-leak certification."
+}

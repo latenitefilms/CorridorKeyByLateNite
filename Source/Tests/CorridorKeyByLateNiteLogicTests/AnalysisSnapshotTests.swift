@@ -20,6 +20,29 @@ struct CorridorKeyAnalysisSnapshotTests {
         #expect(snapshot.state == .notAnalysed)
         #expect(snapshot.progress == 0)
         #expect(snapshot.isWorking == false)
+        #expect(snapshot.remainingTimeDescription == "—")
+        #expect(snapshot.sourceResolutionDescription == "—")
+        #expect(snapshot.neuralModelDescription == "Not Loaded")
+    }
+
+    @Test("Unavailable or invalid ETA never displays a misleading duration",
+          arguments: [Double.nan, .infinity, -.infinity, -1])
+    func invalidRemainingTime(seconds: Double) {
+        let snapshot = CorridorKeyAnalysisSnapshot(
+            state: .running, analyzedFrameCount: 1, totalFrameCount: 10,
+            inferenceResolution: 512, analysisETASeconds: seconds)
+        #expect(snapshot.remainingTimeDescription == "—")
+    }
+
+    @Test("Completed analysis does not retain an old ETA and preserves source diagnostics")
+    func completedDiagnostics() {
+        let snapshot = CorridorKeyAnalysisSnapshot(
+            state: .completed, analyzedFrameCount: 10, totalFrameCount: 10,
+            inferenceResolution: 1024, warmup: .failed("Model could not load."),
+            analysisETASeconds: 125, sourceWidth: 3840, sourceHeight: 2160)
+        #expect(snapshot.remainingTimeDescription == "—")
+        #expect(snapshot.sourceResolutionDescription == "3840 × 2160")
+        #expect(snapshot.neuralModelDescription == "Failed: Model could not load.")
     }
 
     @Test("Progress is analysed / total")

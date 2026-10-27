@@ -2,28 +2,11 @@
 //  SharedMLXBridgeRegistry.swift
 //  CorridorKey by LateNite
 //
-//  Process-wide cache of warmed `MLXKeyingEngine`s keyed by `(device,
-//  rung)`. Before this registry each `InferenceCoordinator` held its own
-//  `MLXKeyingEngine`, which meant a project with five clips using
-//  Corridor Key paid for five copies of the same `.mlxfn` bridge in
-//  memory (≈ 300 MB per copy at 1024). With the registry the bridge
-//  loads once per `(device, rung)` and is shared across every plug-in
-//  instance for the lifetime of the process.
-//
-//  The registry also enables eager warm-up from
-//  `CorridorKeyToolboxPlugIn.init` — when FxPlug creates a new plug-in
-//  instance we kick off a warm-up task into this registry; by the time
-//  the user clicks Analyse Clip or starts playback, MLX is already
-//  compiled and warm, eliminating the 2–5 s first-play stall.
-//
-//  Lifetime: engines are held strongly for the process's life until they
-//  fall out of LRU. On Apple Silicon the underlying MLX buffers sit in
-//  unified memory and are released when the engine is dropped; since FCP
-//  can return to the same project repeatedly in a session, keeping
-//  engines warm matches user intent. The per-device LRU cap is sized off
-//  `MTLDevice.recommendedMaxWorkingSetSize` so a 16 GB Mac mini holds
-//  fewer rungs than a 192 GB Mac Studio. The currently-active rung is
-//  pinned and never evicted; only older, unused rungs get released.
+//  Process-wide cache of one v2 engine per Metal device. All supported
+//  quality levels, screen colours, and plug-in instances share its weights
+//  and inference lock. Eager warm-up compiles the initially requested shape;
+//  other shapes compile on their first use without reloading the model.
+//  The engine remains resident for the process lifetime.
 //
 
 import Foundation
@@ -38,14 +21,19 @@ final class SharedMLXBridgeRegistry: @unchecked Sendable {
     /// outside — callers just ask for an engine by key.
     static let shared = SharedMLXBridgeRegistry()
 
-    /// `(device, rung, screenColor)` cache key. Screen colour is part
-    /// of the key because Green and Blue ship as separate `.mlxfn`
-    /// bridges; warming both at the same rung is allowed and counts as
-    /// two resident engines against the per-device LRU budget.
+    /// V2 shares one function and one inference lock across all supported
+    /// rungs and both screen colours. Invalid requests retain their own key
+    /// so a failed unsupported resolution cannot poison the production model.
     private struct Key: Hashable, Sendable {
         let deviceRegistryID: UInt64
         let rung: Int
         let screenColor: ScreenColor
+
+        init(deviceRegistryID: UInt64, rung: Int, screenColor: ScreenColor) {
+            self.deviceRegistryID = deviceRegistryID
+            self.rung = MLXBridgeArtifact.ladder.contains(rung) ? 0 : rung
+            self.screenColor = .green
+        }
     }
 
     /// Per-key list of waiters that should be woken when warm-up
@@ -65,6 +53,8 @@ final class SharedMLXBridgeRegistry: @unchecked Sendable {
     /// Backing tasks for in-flight warm-ups. Removed when the task
     /// finishes so subsequent lookups don't chase a dead reference.
     private var warmupTasks: [Key: Task<Void, Never>] = [:]
+    /// Prevents a cancelled warm-up from overwriting a newer attempt's result.
+    private var warmupTokens: [Key: UUID] = [:]
     /// Last failure message per `(device, rung)`. Cleared on successful
     /// warm-up; surfaced to UI via `warmupStatus`.
     private var warmupFailures: [Key: String] = [:]
@@ -191,7 +181,8 @@ final class SharedMLXBridgeRegistry: @unchecked Sendable {
         }
         // Clear prior failure so a retry gets a fresh status.
         warmupFailures[key] = nil
-        lock.unlock()
+        let token = UUID()
+        warmupTokens[key] = token
 
         // Priority is `.userInitiated`, not `.utility`, so a
         // synchronous `waitForReady` caller — usually the analyser
@@ -204,9 +195,10 @@ final class SharedMLXBridgeRegistry: @unchecked Sendable {
         // the priority doesn't inflate steady-state CPU usage either.
         let task = Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
-            await self.runWarmup(key: key, cacheEntry: cacheEntry, rung: rung, screenColor: screenColor)
+            await self.runWarmup(key: key, token: token, cacheEntry: cacheEntry, rung: rung, screenColor: screenColor)
         }
-        lock.lock()
+        // Register while still holding the lock. Concurrent callers must not
+        // create duplicate copies of the multi-gigabyte v2 model.
         warmupTasks[key] = task
         lock.unlock()
     }
@@ -250,33 +242,38 @@ final class SharedMLXBridgeRegistry: @unchecked Sendable {
 
     private func runWarmup(
         key: Key,
+        token: UUID,
         cacheEntry: MetalDeviceCacheEntry,
         rung: Int,
         screenColor: ScreenColor
     ) async {
         let engine = MLXKeyingEngine(cacheEntry: cacheEntry)
         guard engine.supports(resolution: rung, screenColor: screenColor) else {
-            record(failure: "No \(screenColor.displayName) MLX bridge bundled for \(rung)px", forKey: key)
+            record(failure: "No CorridorKey v2 model bundled for \(rung)px", forKey: key, token: token)
             return
         }
         do {
             try Task.checkCancellation()
             try await engine.prepare(resolution: rung, screenColor: screenColor)
             try Task.checkCancellation()
-            store(engine: engine, forKey: key, device: cacheEntry.device)
+            store(engine: engine, forKey: key, token: token, device: cacheEntry.device)
             PluginLog.notice(
                 "Shared MLX engine ready: \(screenColor.displayName) \(rung)px on \(cacheEntry.device.name)."
             )
         } catch is CancellationError {
-            record(failure: "Warm-up cancelled.", forKey: key)
+            record(failure: "Warm-up cancelled.", forKey: key, token: token)
         } catch {
-            record(failure: error.localizedDescription, forKey: key)
+            record(failure: error.localizedDescription, forKey: key, token: token)
             PluginLog.error("Shared MLX warm-up failed: \(error.localizedDescription)")
         }
     }
 
-    private func store(engine: MLXKeyingEngine, forKey key: Key, device: any MTLDevice) {
+    private func store(engine: MLXKeyingEngine, forKey key: Key, token: UUID, device: any MTLDevice) {
         lock.lock()
+        guard warmupTokens[key] == token else {
+            lock.unlock()
+            return
+        }
         engines[key] = engine
         engineLastUsedAt[key] = .now
         warmupTasks[key] = nil
@@ -290,8 +287,12 @@ final class SharedMLXBridgeRegistry: @unchecked Sendable {
         parked.forEach { $0.signal() }
     }
 
-    private func record(failure message: String, forKey key: Key) {
+    private func record(failure message: String, forKey key: Key, token: UUID) {
         lock.lock()
+        guard warmupTokens[key] == token else {
+            lock.unlock()
+            return
+        }
         warmupTasks[key] = nil
         warmupFailures[key] = message
         let parked = waiters.removeValue(forKey: key)?.semaphores ?? []
@@ -327,33 +328,17 @@ final class SharedMLXBridgeRegistry: @unchecked Sendable {
         }
     }
 
-    /// Per-device cap on resident MLX bridges. Sized off
-    /// `recommendedMaxWorkingSetSize` so a 16 GB Mac mini holds only the
-    /// active rung plus one neighbour, while a 64 GB+ workstation keeps
-    /// every rung warm so quality-mode toggles are instant.
+    /// The shared v2 artifact uses a single resident engine on every device.
     private func bridgeBudget(for device: any MTLDevice) -> Int {
         let workingSetGB = Double(device.recommendedMaxWorkingSetSize) / (1024 * 1024 * 1024)
         return Self.bridgeBudget(forWorkingSetGB: workingSetGB)
     }
 
-    /// Testable helper: same budget rules as `bridgeBudget(for:)` but
-    /// keyed by a raw GB figure so unit tests can verify each tier
-    /// without needing a real `MTLDevice` of that size.
+    /// Retains the testable budget interface; v2 uses one model at every tier.
     static func bridgeBudget(forWorkingSetGB workingSetGB: Double) -> Int {
-        switch workingSetGB {
-        case ..<14:
-            return 2
-        case 14..<22:
-            return 3
-        case 22..<48:
-            return 4
-        default:
-            // Plenty of headroom — cap matches the number of bundled
-            // rungs (512 / 768 / 1024 / 1536 / 2048) so we never have
-            // to touch a stored bridge once the user has loaded one
-            // of each.
-            return 5
-        }
+        // The single artifact handles every rung; duplicate engines would
+        // duplicate several gigabytes of weights without improving concurrency.
+        1
     }
 
     // MARK: - Test hooks
