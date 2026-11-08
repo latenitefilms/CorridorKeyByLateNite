@@ -94,9 +94,9 @@ struct ResolvedRenderInputs: @unchecked Sendable {
     let renderTime: CMTime
 }
 
-/// Runs the per-frame pipeline. One instance lives per plug-in instance so
-/// each timeline can keep its own warmed-up model. All Metal resources are
-/// shared through `MetalDeviceCache`, so creating a pipeline is cheap.
+/// Runs the per-frame pipeline with per-instance analysis status. Metal
+/// resources and model weights are shared and acquired only when needed;
+/// constructing the pipeline does not allocate either.
 final class RenderPipeline: @unchecked Sendable {
     private let deviceCache: MetalDeviceCache
     let inferenceCoordinator: InferenceCoordinator
@@ -381,8 +381,8 @@ final class RenderPipeline: @unchecked Sendable {
                                    readbackSource: Bool) throws -> VideoInferenceSession {
         let resolution = state.qualityMode.resolvedInferenceResolution(
             forLongEdge: max(sourceWidth, sourceHeight), deviceRegistryID: entry.device.registryID)
-        let engine = try SharedMLXBridgeRegistry.shared.waitForReady(
-            deviceRegistryID: entry.device.registryID, rung: resolution,
+        let engine = try inferenceCoordinator.engineForAnalysis(
+            resolution: resolution,
             screenColor: state.screenColor, cacheEntry: entry)
         return try VideoInferenceSession(engine: engine, settings: state.video, hintMode: state.hintMode,
                                          geometry: InferenceGeometry(sourceWidth: sourceWidth, sourceHeight: sourceHeight,

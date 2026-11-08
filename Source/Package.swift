@@ -273,6 +273,7 @@ let package = Package(
                 "Tests/CorridorKeyByLateNiteInferenceTests/MatteOrientationTests.swift",
                 "Tests/CorridorKeyByLateNiteInferenceTests/V2ModelContractTests.swift",
                 "Tests/CorridorKeyByLateNiteInferenceTests/SharedMLXBridgeRegistryWaitTests.swift",
+                "Tests/CorridorKeyByLateNiteInferenceTests/ModelLoadingLifecycleTests.swift",
                 "Tests/CorridorKeyByLateNiteInferenceTests/StandalonePipelineTests.swift",
                 "Tests/CorridorKeyByLateNiteInferenceTests/StillImageTests.swift",
                 "CorridorKeyByLateNite/Plugin/Render/RenderPipeline.swift",

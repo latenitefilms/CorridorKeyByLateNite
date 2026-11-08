@@ -4,9 +4,11 @@
 //
 //  Process-wide cache of one v2 engine per Metal device. All supported
 //  quality levels, screen colours, and plug-in instances share its weights
-//  and inference lock. Eager warm-up compiles the initially requested shape;
+//  and inference lock. The first warm-up compiles the requested shape;
 //  other shapes compile on their first use without reloading the model.
-//  The engine remains resident for the process lifetime.
+//  Construction and status queries never load a model. FxPlug requests its
+//  first warm-up only when analysing a frame; the loaded engine then remains
+//  resident for reuse throughout the process lifetime.
 //
 
 import Foundation
@@ -64,7 +66,9 @@ final class SharedMLXBridgeRegistry: @unchecked Sendable {
     /// the next poll tick.
     private var waiters: [Key: WaiterList] = [:]
 
-    private init() {}
+    /// Creates an empty registry without allocating GPU resources. Production
+    /// callers share `shared`; tests can own an independent cold lifecycle.
+    init() {}
 
     // MARK: - Public API
 

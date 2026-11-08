@@ -8,7 +8,7 @@
 //  MLX isn't warm yet, `runInference` blocks (via the registry's
 //  `waitForReady`) until the bridge is ready or the warm-up fails.
 //  Engines live in `SharedMLXBridgeRegistry` so multiple plug-in
-//  instances share a single warmed bridge per `(device, rung)`.
+//  instances share a single warmed v2 model per device.
 //
 //  Note: the green-bias "rough matte" still exists, but as a *hint*
 //  fed into MLX as the 4th input channel by the pre-inference pass
@@ -46,6 +46,7 @@ final class InferenceCoordinator: @unchecked Sendable {
     /// the pre-/post-inference pipeline without paying for the warm-up.
     private static let mlxEnabled = true
 
+    private let bridgeRegistry: SharedMLXBridgeRegistry
     private let stateLock = NSLock()
 
     /// The `(device, rung, screenColor)` this coordinator most recently
@@ -55,6 +56,12 @@ final class InferenceCoordinator: @unchecked Sendable {
     private var trackedRung: Int = 0
     private var trackedScreenColor: ScreenColor = .green
 
+    /// Creates an idle coordinator without loading a model or touching Metal.
+    /// An isolated registry lets headless tests verify the cold lifecycle.
+    init(bridgeRegistry: SharedMLXBridgeRegistry = .shared) {
+        self.bridgeRegistry = bridgeRegistry
+    }
+
     /// Human-readable backend summary for diagnostics.
     var backendDescription: String {
         stateLock.lock()
@@ -62,7 +69,7 @@ final class InferenceCoordinator: @unchecked Sendable {
         let rung = trackedRung
         let color = trackedScreenColor
         stateLock.unlock()
-        if rung > 0, let engine = SharedMLXBridgeRegistry.shared.readyEngine(
+        if rung > 0, let engine = bridgeRegistry.readyEngine(
             deviceRegistryID: device,
             rung: rung,
             screenColor: color
@@ -73,7 +80,7 @@ final class InferenceCoordinator: @unchecked Sendable {
     }
 
     /// Current warm-up status. The inspector bridge consumes this to render
-    /// the "Loading neural model…" badge during the first-play stall.
+    /// the "Loading neural model…" badge during the first analysis frame.
     var warmupStatus: WarmupStatus {
         stateLock.lock()
         let device = trackedDeviceRegistryID
@@ -81,7 +88,7 @@ final class InferenceCoordinator: @unchecked Sendable {
         let color = trackedScreenColor
         stateLock.unlock()
         guard rung > 0 else { return .cold }
-        return SharedMLXBridgeRegistry.shared.status(
+        return bridgeRegistry.status(
             deviceRegistryID: device,
             rung: rung,
             screenColor: color
@@ -97,7 +104,7 @@ final class InferenceCoordinator: @unchecked Sendable {
         let color = trackedScreenColor
         stateLock.unlock()
         guard rung > 0 else { return }
-        SharedMLXBridgeRegistry.shared.cancelWarmup(
+        bridgeRegistry.cancelWarmup(
             deviceRegistryID: device,
             rung: rung,
             screenColor: color
@@ -115,6 +122,26 @@ final class InferenceCoordinator: @unchecked Sendable {
         cacheEntry: MetalDeviceCacheEntry,
         foregroundPixelFormat: MTLPixelFormat = .rgba32Float
     ) throws -> InferenceRunResult {
+        let engine = try engineForAnalysis(
+            resolution: request.inferenceResolution,
+            screenColor: screenColor,
+            cacheEntry: cacheEntry
+        )
+        let output = try makeOutputTextures(
+            request: request, cacheEntry: cacheEntry, foregroundPixelFormat: foregroundPixelFormat
+        )
+        try engine.run(request: request, output: output)
+        return InferenceRunResult(output: output, engineDescription: engine.backendDisplayName)
+    }
+
+    /// Loads the shared model on the first analysis request, using that frame's
+    /// device, quality and screen colour. Tracks both single-frame and video
+    /// analysis so status reads and session cleanup use the same engine.
+    func engineForAnalysis(
+        resolution: Int,
+        screenColor: ScreenColor,
+        cacheEntry: MetalDeviceCacheEntry
+    ) throws -> MLXKeyingEngine {
         guard Self.mlxEnabled else {
             throw KeyingInferenceError.modelUnavailable("MLX is disabled in this build.")
         }
@@ -122,7 +149,7 @@ final class InferenceCoordinator: @unchecked Sendable {
         let deviceRegistryID = cacheEntry.device.registryID
         trackRequestedBridge(
             deviceRegistryID: deviceRegistryID,
-            rung: request.inferenceResolution,
+            rung: resolution,
             screenColor: screenColor
         )
 
@@ -133,11 +160,10 @@ final class InferenceCoordinator: @unchecked Sendable {
         // hint is still used inside MLX (as the 4th input channel via
         // `extractHint` in pre-inference), but the *output* matte is
         // always the neural one.
-        let engine: MLXKeyingEngine
         do {
-            engine = try SharedMLXBridgeRegistry.shared.waitForReady(
+            return try bridgeRegistry.waitForReady(
                 deviceRegistryID: deviceRegistryID,
-                rung: request.inferenceResolution,
+                rung: resolution,
                 screenColor: screenColor,
                 cacheEntry: cacheEntry
             )
@@ -145,28 +171,6 @@ final class InferenceCoordinator: @unchecked Sendable {
             PluginLog.error("MLX bridge unavailable: \(error.localizedDescription)")
             throw error
         }
-
-        let output = try makeOutputTextures(
-            request: request, cacheEntry: cacheEntry, foregroundPixelFormat: foregroundPixelFormat
-        )
-        try engine.run(request: request, output: output)
-        return InferenceRunResult(output: output, engineDescription: engine.backendDisplayName)
-    }
-
-    /// Asks the shared registry to start warm-up for `(device, rung,
-    /// screenColor)` without waiting. Used by
-    /// `CorridorKeyToolboxPlugIn.init` to pre-warm the default bridge the
-    /// moment the effect is applied.
-    func requestEagerWarmup(rung: Int, screenColor: ScreenColor, cacheEntry: MetalDeviceCacheEntry) {
-        guard Self.mlxEnabled else { return }
-        let deviceRegistryID = cacheEntry.device.registryID
-        trackRequestedBridge(deviceRegistryID: deviceRegistryID, rung: rung, screenColor: screenColor)
-        SharedMLXBridgeRegistry.shared.beginWarmup(
-            deviceRegistryID: deviceRegistryID,
-            rung: rung,
-            screenColor: screenColor,
-            cacheEntry: cacheEntry
-        )
     }
 
     /// Drains reusable MLX allocations at the end of analysis. Keeping the
@@ -180,7 +184,7 @@ final class InferenceCoordinator: @unchecked Sendable {
         stateLock.unlock()
 
         if rung > 0,
-           let mlx = SharedMLXBridgeRegistry.shared.readyEngine(
+           let mlx = bridgeRegistry.readyEngine(
                deviceRegistryID: deviceRegistryID,
                rung: rung,
                screenColor: color

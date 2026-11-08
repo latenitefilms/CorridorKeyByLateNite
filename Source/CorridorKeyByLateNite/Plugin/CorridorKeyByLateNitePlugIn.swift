@@ -9,10 +9,6 @@
 //
 
 import Foundation
-import AppKit
-import Metal
-import CoreMedia
-import simd
 
 @objc(CorridorKeyToolboxPlugIn)
 final class CorridorKeyToolboxPlugIn: NSObject, FxTileableEffect, FxAnalyzer {
@@ -24,9 +20,10 @@ final class CorridorKeyToolboxPlugIn: NSObject, FxTileableEffect, FxAnalyzer {
     /// fetched through this manager on demand.
     let apiManager: any PROAPIAccessing
 
-    /// Per-instance renderer. Lazy so that instantiation in `addParameters` is
-    /// cheap and so the first touch of Metal happens in the render thread.
-    lazy var renderPipeline: RenderPipeline = RenderPipeline()
+    /// Lightweight per-instance renderer; construction allocates no GPU or
+    /// model resources. Immutable so inspector and analysis callbacks can
+    /// safely share it from their first access.
+    let renderPipeline = RenderPipeline()
 
     /// Rolling timing of the last rendered frame in milliseconds. Used only
     /// for internal performance tracing.
@@ -57,45 +54,8 @@ final class CorridorKeyToolboxPlugIn: NSObject, FxTileableEffect, FxAnalyzer {
         super.init()
         PluginLog.notice("CorridorKeyToolboxPlugIn instantiated.")
 
-        // Kick off MLX warm-up eagerly on the system default GPU so the
-        // bridge is compiled and resident in memory by the time the user
-        // clicks Analyse Clip or starts playback. The shared registry
-        // dedupes across multiple plug-in instances — adding the effect
-        // to ten clips still loads the model once, not ten times.
-        //
-        // We warm at the rung the `.automatic` default would resolve to
-        // for an HD-baseline clip on this machine. That keeps the eager
-        // warm-up appropriate for the host's RAM (1024 on a 32 GB Mac,
-        // 1536 on 64 GB, 2048 on 96 GB+) — over-warming at 2048 on
-        // smaller machines costs gigabytes of unified memory before the
-        // user has even picked a clip.
-        Self.kickOffDefaultWarmup()
-    }
-
-    /// Non-isolated helper that asks `SharedMLXBridgeRegistry` to warm
-    /// the default rung on the system default Metal device. Safe to call
-    /// from `init`; the registry handles concurrency + deduping. Warms
-    /// only the green bridge — the same rationale as `main.swift`'s
-    /// startup warm-up: avoid doubling eager-warm-up memory for a
-    /// setting most projects never flip.
-    private static func kickOffDefaultWarmup() {
-        guard let device = MTLCreateSystemDefaultDevice() else { return }
-        guard let entry = try? MetalDeviceCache.shared.entry(for: device) else { return }
-        // Consult the per-device capability cache so the eager warm-up
-        // matches the rung this device will actually use at render time —
-        // otherwise we warm 1024 only to discover the cache has lifted us
-        // to 1536, then pay a second warm-up the moment the user clicks
-        // Analyse Clip.
-        let defaultRung = QualityMode.automatic.resolvedInferenceResolution(
-            forLongEdge: 1920,
-            deviceRegistryID: device.registryID
-        )
-        SharedMLXBridgeRegistry.shared.beginWarmup(
-            deviceRegistryID: device.registryID,
-            rung: defaultRung,
-            screenColor: .green,
-            cacheEntry: entry
-        )
+        // FxPlug also creates instances for parameter discovery and cached
+        // playback. Only an analysis frame is allowed to request the model.
     }
 
     deinit {

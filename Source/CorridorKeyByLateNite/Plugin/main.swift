@@ -7,18 +7,12 @@
 //  `CorridorKeyToolboxPlugIn` on demand. We install file-based logging before
 //  handing off so a crash or early error is captured on disk.
 //
-//  Warm-up timing: MLX model loading + JIT takes ~2–5s. Kicking it off
-//  here — *before* `FxPrincipal.startServicePrincipal` blocks — gives
-//  the warm-up a head start of several hundred ms over the previous
-//  pattern (kicking off in `CorridorKeyToolboxPlugIn.init`, which
-//  fires only when FCP creates the first plug-in instance). On a
-//  typical session the user takes a few seconds to add the effect
-//  and click Analyse; that gap now overlaps with warm-up so the
-//  first analyse frame doesn't pay the load+compile cost.
+//  The host may launch this service before the effect is used. Keep startup
+//  free of Metal resources and model loading; the first analysis frame asks
+//  the shared inference registry to load and warm the required model.
 //
 
 import Foundation
-import Metal
 
 /// Delegate that captures connection info from Final Cut Pro. FxPlug passes
 /// the host bundle identifier and version to the renderer once the XPC channel
@@ -32,34 +26,6 @@ final class CorridorKeyToolboxServiceDelegate: NSObject, FxPrincipalDelegate {
 
 PluginLog.installFileRedirect()
 PluginLog.notice("CorridorKey by LateNite Renderer launching.")
-
-// Kick off MLX warm-up immediately at XPC service startup. The warm-up
-// runs on a background utility task, so it doesn't block the principal
-// from starting; it just gets a head start on loading the .mlxfn file
-// and JIT-compiling the graph while FCP wires up the FxPlug interface.
-// `SharedMLXBridgeRegistry.beginWarmup` is idempotent — the per-instance
-// `kickOffDefaultWarmup` call in `CorridorKeyToolboxPlugIn.init` will
-// hit the warm engine instead of starting a second pass.
-//
-// We warm only the default screen colour (green) at startup. If the
-// user picks Blue, the registry warms the blue bridge on first use —
-// preloading both would double the eager-warm-up footprint (~600 MB
-// at 1024px) for a setting most projects never touch.
-if let device = MTLCreateSystemDefaultDevice(),
-   let entry = try? MetalDeviceCache.shared.entry(for: device) {
-    let defaultRung = QualityMode.automatic.resolvedInferenceResolution(
-        forLongEdge: 1920,
-        deviceRegistryID: device.registryID
-    )
-    let defaultScreenColor: ScreenColor = .green
-    PluginLog.notice("Pre-warming \(defaultScreenColor.displayName) MLX bridge at \(defaultRung)px on \(device.name) before FCP attaches.")
-    SharedMLXBridgeRegistry.shared.beginWarmup(
-        deviceRegistryID: device.registryID,
-        rung: defaultRung,
-        screenColor: defaultScreenColor,
-        cacheEntry: entry
-    )
-}
 
 let serviceDelegate = CorridorKeyToolboxServiceDelegate()
 FxPrincipal.startServicePrincipal(with: serviceDelegate)
