@@ -16,6 +16,73 @@ extension MLXInferenceTests {
     /// A direct model test cannot detect a second flip introduced by a host.
     @Suite("Standalone pipeline", .serialized)
     struct StandalonePipelineTests {
+        @Test("Anamorphic car footage keeps analysis and playback in the same image space")
+        func anamorphicCarPlayback() async throws {
+            let repository = URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().deletingLastPathComponent()
+            let video = try await VideoSource(url: repository.appending(path: "LLM Resources/Test Clips/car_green_Screen.mp4"))
+            let source = try await video.makeFrame(atTime: .zero)
+            #expect(video.info.renderSize == CGSize(width: 872, height: 480))
+            #expect(CGSize(width: CVPixelBufferGetWidth(source), height: CVPixelBufferGetHeight(source)) == video.info.renderSize)
+            let engine = try StandaloneRenderEngine()
+            defer { engine.releaseAnalysisCache() }
+            let defaultState = PluginStateData()
+            let received = Mutex<[Int: MatteCacheEntry]>([:])
+            let completed = Mutex(false)
+            let runner = AnalysisRunner(renderEngine: engine, videoSource: video)
+            await runner.run(state: defaultState) { event in
+                switch event {
+                case let .frameProcessed(index, _, entry): received.withLock { $0[index] = entry }
+                case .completed: completed.withLock { $0 = true }
+                case let .failed(message): Issue.record(Comment(rawValue: message))
+                case .cancelled: Issue.record("Analysis unexpectedly cancelled")
+                default: break
+                }
+            }
+            #expect(completed.withLock { $0 })
+            let cached = received.withLock { $0 }
+            #expect(cached.count == video.totalFrameCount())
+            let reader = try await video.makeFrameReader()
+            defer { reader.cancel() }
+            var frameIndex = 0
+            while let frame = try reader.nextFrame() {
+                try autoreleasepool {
+                    let entry = try #require(cached[frameIndex])
+                    var state = defaultState
+                    state.cachedFrameReference = entry.reference
+                    state.cachedMatteInferenceResolution = entry.inferenceResolution
+                    let result = try engine.render(source: frame.pixelBuffer, state: state, renderTime: frame.presentationTime)
+                    let pixels = Self.readRGBA(result.destinationTexture)
+                    #expect(pixels.allSatisfy { $0.isFinite })
+                    let width = CVPixelBufferGetWidth(frame.pixelBuffer)
+                    let height = CVPixelBufferGetHeight(frame.pixelBuffer)
+                    // The second person crosses the left window midway through
+                    // this shot. The upper-right window remains unobstructed.
+                    let screenOffset = (height / 3 * width + width * 15 / 16) * 4
+                    let subjectOffset = (height * 2 / 3 * width + width / 2) * 4
+                    #expect(pixels[screenOffset + 3] < 0.05, "The green window must be transparent")
+                    #expect(pixels[subjectOffset + 3] > 0.95, "The foreground subject must stay opaque")
+                    if [0, cached.count / 2, cached.count - 1].contains(frameIndex),
+                       let path = ProcessInfo.processInfo.environment["CORRIDORKEY_CAR_PREVIEW"] {
+                        state.outputMode = .matteOnly
+                        let matte = try engine.render(source: frame.pixelBuffer, state: state, renderTime: frame.presentationTime)
+                        let bridge = try PixelBufferTextureBridge(device: engine.device)
+                        let original = try bridge.makeTexture(for: frame.pixelBuffer)
+                        let output = URL(fileURLWithPath: path)
+                        try Self.writeComparisonPreview(
+                            panels: [Self.readRGBA(original.metalTexture), Self.readRGBA(matte.destinationTexture), pixels],
+                            width: width, height: height,
+                            output: frameIndex == 0 ? output : output.deletingPathExtension().appendingPathExtension("frame-\(frameIndex).png")
+                        )
+                    }
+                }
+                frameIndex += 1
+            }
+            #expect(frameIndex == cached.count)
+            print("Car clip: \(frameIndex) frames analysed and rendered at \(video.info.renderSize) with default settings.")
+        }
+
         @Test("Recommended cached quality survives reduced playback surfaces")
         func recommendedCacheDuringPlayback() throws {
             let engine = try StandaloneRenderEngine()
@@ -50,6 +117,49 @@ extension MLXInferenceTests {
             let changed = try engine.render(source: source, state: state, renderTime: .zero)
             #expect(Self.readRGBA(changed.destinationTexture)[3] == 1)
             withExtendedLifetime(session) {}
+        }
+
+        @Test("Anamorphic and non-uniform host scaling preserve cached matte alignment")
+        func anamorphicHostCacheDuringPlayback() throws {
+            let engine = try StandaloneRenderEngine()
+            let bridge = try PixelBufferTextureBridge(device: engine.device)
+            let pipeline = RenderPipeline()
+            let displaySize = CGSize(width: 872, height: 480)
+            let geometry = InferenceGeometry(sourceWidth: 872, sourceHeight: 480, resolution: 512)
+            let blob = try AnalysisFrameCodec.encode(
+                alpha: (0..<(geometry.contentWidth * geometry.contentHeight)).map { $0 % geometry.contentWidth < 256 ? 0 : 1 },
+                foregroundHalfRGBA: AnalysisFrameCodec.foregroundHalfRGBA(
+                    [Float](repeating: 0.4, count: geometry.contentWidth * geometry.contentHeight * 4)
+                ), width: geometry.contentWidth, height: geometry.contentHeight
+            )
+            let session = try AnalysisDiskCache.shared.beginSession()
+            defer { withExtendedLifetime(session) {} }
+            var state = PluginStateData(qualityMode: .draft512)
+            // Isolate coordinate alignment from half-float Lanczos filtering.
+            state.upscaleMethod = .bilinear
+            state.cachedMatteInferenceResolution = geometry.resolution
+            state.cachedFrameReference = try AnalysisDiskCache.shared.store(blob, in: session)
+            for (width, height) in [(706, 480), (720, 480), (353, 240), (436, 240), (872, 480)] {
+                let buffer = try Self.makeSource(width: width, height: height) { _, _ in SIMD4<UInt8>(20, 200, 40, 255) }
+                let source = try bridge.makeTexture(for: buffer)
+                let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: width, height: height, mipmapped: false)
+                descriptor.usage = [.renderTarget, .shaderRead]
+                descriptor.storageMode = .shared
+                let destination = try #require(engine.device.makeTexture(descriptor: descriptor))
+                _ = try pipeline.renderToTexture(source: source.metalTexture, destination: destination, state: state,
+                                                 sourceDisplaySize: displaySize)
+                let pixels = Self.readRGBA(destination)
+                let backgroundOffset = (height / 2 * width + width / 4) * 4
+                let subjectOffset = (height / 2 * width + width * 3 / 4) * 4
+                #expect(pixels[backgroundOffset + 3] == 0)
+                #expect(pixels[subjectOffset + 3] == 1)
+                #expect(abs(pixels[subjectOffset] - 0.4) < 0.001)
+                // A genuinely different source aspect ratio must still fail.
+                #expect(throws: AnalysisDiskCacheError.self) {
+                    try pipeline.renderToTexture(source: source.metalTexture, destination: destination, state: state,
+                                                 sourceDisplaySize: CGSize(width: 872, height: 872))
+                }
+            }
         }
 
         @Test("Default Edge Decontaminate corrects opaque silhouettes and preserves opaque interiors", arguments: [false, true])
@@ -739,8 +849,16 @@ extension MLXInferenceTests {
             let matte = try engine.render(source: source, state: state, renderTime: .zero)
             let bridge = try PixelBufferTextureBridge(device: engine.device)
             let original = try bridge.makeTexture(for: source).metalTexture
-            let width = original.width
-            let height = original.height
+            let output = URL.temporaryDirectory.appending(path: "CorridorKey-v2-HardestShotEver.png")
+            try Self.writeComparisonPreview(
+                panels: [Self.readRGBA(original), Self.readRGBA(matte.destinationTexture), processedPixels],
+                width: original.width, height: original.height, output: output
+            )
+            print("HardestShotEver source / matte / composite: \(output.path)")
+        }
+
+        /// Writes source, alpha and a white-background composite for visual inspection.
+        private static func writeComparisonPreview(panels: [[Float]], width: Int, height: Int, output: URL) throws {
             let panelWidth = 640
             let panelHeight = panelWidth * height / width
             let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -749,7 +867,6 @@ extension MLXInferenceTests {
                 bitsPerComponent: 8, bytesPerRow: panelWidth * 12, space: colorSpace,
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ))
-            let panels = [Self.readRGBA(original), Self.readRGBA(matte.destinationTexture), processedPixels]
             for (index, panel) in panels.enumerated() {
                 var bytes = [UInt8](repeating: 255, count: panel.count)
                 for pixelIndex in 0..<(width * height) {
@@ -771,11 +888,9 @@ extension MLXInferenceTests {
                 context.draw(image, in: CGRect(x: index * panelWidth, y: 0, width: panelWidth, height: panelHeight))
             }
             let preview = try #require(context.makeImage())
-            let output = URL.temporaryDirectory.appending(path: "CorridorKey-v2-HardestShotEver.png")
             let destination = try #require(CGImageDestinationCreateWithURL(output as CFURL, UTType.png.identifier as CFString, 1, nil))
             CGImageDestinationAddImage(destination, preview, nil)
             #expect(CGImageDestinationFinalize(destination))
-            print("HardestShotEver source / matte / composite: \(output.path)")
         }
 
         /// Removes optional postprocessing to isolate the source/matte contract.

@@ -30,7 +30,8 @@ enum SyntheticVideoFixture {
         height: Int = 180,
         frameCount: Int = 12,
         fps: Int = 24,
-        transform: CGAffineTransform = .identity
+        transform: CGAffineTransform = .identity,
+        pixelAspectRatio: CGSize = CGSize(width: 1, height: 1)
     ) async throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "CorridorKeyTests", directoryHint: .isDirectory)
@@ -42,7 +43,11 @@ enum SyntheticVideoFixture {
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264.rawValue,
             AVVideoWidthKey: width,
-            AVVideoHeightKey: height
+            AVVideoHeightKey: height,
+            AVVideoPixelAspectRatioKey: [
+                AVVideoPixelAspectRatioHorizontalSpacingKey: Int(pixelAspectRatio.width),
+                AVVideoPixelAspectRatioVerticalSpacingKey: Int(pixelAspectRatio.height)
+            ]
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         input.expectsMediaDataInRealTime = false

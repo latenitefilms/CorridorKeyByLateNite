@@ -143,8 +143,8 @@ final class VideoSource: EditorMediaSource, @unchecked Sendable {
         // this transform after decoding for both scrubbing and streaming,
         // so the reported dimensions and decoded pixel buffers agree.
         // The renderer always receives the clip in display orientation.
-        let rotated = naturalSize.applying(preferredTransform)
-        let renderSize = CGSize(width: abs(rotated.width), height: abs(rotated.height))
+        let renderSize = CGRect(origin: .zero, size: naturalSize)
+            .applying(preferredTransform).integral.size
 
         // First format description's pixel format hints at the source
         // bit depth. Used by ExportSession to pick a matching output
@@ -261,6 +261,7 @@ final class VideoSource: EditorMediaSource, @unchecked Sendable {
         return VideoFrameReader(
             reader: reader,
             output: output,
+            naturalSize: try await videoTrack.load(.naturalSize),
             preferredTransform: info.preferredTransform
         )
     }
@@ -273,16 +274,20 @@ final class VideoSource: EditorMediaSource, @unchecked Sendable {
 final class VideoFrameReader: MediaFrameReader, @unchecked Sendable {
     private let reader: AVAssetReader
     private let output: AVAssetReaderTrackOutput
+    /// Square-pixel display dimensions before the track's orientation transform.
+    private let naturalSize: CGSize
     let preferredTransform: CGAffineTransform
     private let context = CIContext(options: [.workingColorSpace: NSNull(), .outputColorSpace: NSNull(), .cacheIntermediates: false])
 
     init(
         reader: AVAssetReader,
         output: AVAssetReaderTrackOutput,
+        naturalSize: CGSize,
         preferredTransform: CGAffineTransform
     ) {
         self.reader = reader
         self.output = output
+        self.naturalSize = naturalSize
         self.preferredTransform = preferredTransform
     }
 
@@ -304,16 +309,29 @@ final class VideoFrameReader: MediaFrameReader, @unchecked Sendable {
             throw VideoSourceError.pixelBufferUnavailable
         }
         let orientedBuffer: CVPixelBuffer
-        if preferredTransform.isIdentity {
+        let decodedSize = CGSize(width: CVPixelBufferGetWidth(pixelBuffer), height: CVPixelBufferGetHeight(pixelBuffer))
+        if preferredTransform.isIdentity && decodedSize == naturalSize {
             orientedBuffer = pixelBuffer
         } else {
-            let image = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: NSNull()]).transformed(by: preferredTransform)
+            // Track naturalSize includes pixel aspect correction; the decoder's
+            // storage dimensions do not. Normalize before rotation so analysis,
+            // preview and export all see the same square-pixel image geometry.
+            let pixelAspectCorrection = CGAffineTransform(
+                scaleX: naturalSize.width / decodedSize.width,
+                y: naturalSize.height / decodedSize.height
+            )
+            let image = CIImage(cvPixelBuffer: pixelBuffer, options: [.colorSpace: NSNull()])
+                .transformed(by: pixelAspectCorrection).transformed(by: preferredTransform)
             let extent = image.extent.integral
             orientedBuffer = try PixelBufferTextureBridge.makeMetalCompatiblePixelBuffer(
                 width: Int(extent.width), height: Int(extent.height), pixelFormat: CVPixelBufferGetPixelFormatType(pixelBuffer))
             let positioned = image.transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
             context.render(positioned, to: orientedBuffer, bounds: positioned.extent, colorSpace: nil)
             CVBufferPropagateAttachments(pixelBuffer, orientedBuffer)
+            // These describe the encoded raster and would apply its stretch or
+            // crop a second time to the already normalized buffer.
+            CVBufferRemoveAttachment(orientedBuffer, kCVImageBufferPixelAspectRatioKey)
+            CVBufferRemoveAttachment(orientedBuffer, kCVImageBufferCleanApertureKey)
         }
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sample)
         let duration = CMSampleBufferGetDuration(sample)

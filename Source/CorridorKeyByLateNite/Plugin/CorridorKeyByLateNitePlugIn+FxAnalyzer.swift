@@ -367,7 +367,7 @@ extension CorridorKeyToolboxPlugIn {
         }
 
         if frameIndex == 0 {
-            PluginLog.notice("Analyse input: imageOrigin=\(frame.imageOrigin), canonical cache rows=top-to-bottom.")
+            PluginLog.notice("Analyse input: raster=\(sourceTexture.width)×\(sourceTexture.height), square pixels=\(frame.squarePixelSize), imageOrigin=\(frame.imageOrigin), canonical cache rows=top-to-bottom.")
         }
 
         // Build the analyse-state with the snapshotted user values. The
@@ -397,7 +397,7 @@ extension CorridorKeyToolboxPlugIn {
             videoSession = existingVideoSession
         } else {
             videoSession = try renderPipeline.makeVideoInferenceSession(
-                sourceWidth: sourceTexture.width, sourceHeight: sourceTexture.height,
+                sourceWidth: Int(frame.squarePixelSize.width), sourceHeight: Int(frame.squarePixelSize.height),
                 state: analyseState, frameCount: frameCount, entry: entry,
                 readbackSource: temporalEnabled && temporalStrength > 0)
             session.lock.withLock { session.videoSession = videoSession }

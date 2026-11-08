@@ -20,8 +20,8 @@ struct MediaSourceInfo: Sendable {
     /// Whether the source has a playback timeline.
     var kind: MediaSourceKind = .video
     let url: URL
-    /// Source-pixel resolution after applying any `preferredTransform`
-    /// rotation. The renderer always sees the clip the right way up.
+    /// Square-pixel display resolution after pixel aspect correction and the
+    /// track's orientation transform. Every decoded frame has this size.
     let renderSize: CGSize
     /// Video frame rate, or one logical frame per second for a still's hint range.
     let nominalFrameRate: Float
@@ -37,9 +37,8 @@ struct MediaSourceInfo: Sendable {
     /// AV Foundation track identifier for the video. Cached so
     /// downstream readers reference the same track.
     let videoTrackID: CMPersistentTrackID
-    /// Preferred transform of the source track (rotation matrix).
-    /// Applied automatically by `AVAssetImageGenerator` and the export
-    /// reader when `appliesPreferredTrackTransform` is true.
+    /// Preferred transform of the source track, applied by the shared reader
+    /// after correcting pixel aspect ratio for preview, analysis and export.
     let preferredTransform: CGAffineTransform
     /// Source colour-space metadata read from the track's format
     /// description. `nil` when the source omits the extension (most

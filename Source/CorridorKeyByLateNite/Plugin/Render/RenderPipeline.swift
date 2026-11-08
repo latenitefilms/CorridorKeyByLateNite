@@ -154,13 +154,15 @@ final class RenderPipeline: @unchecked Sendable {
         workingGamut: WorkingColorGamut = .rec709,
         renderTime: CMTime = .zero,
         sourceRowOrder: ImageRowOrder = .topToBottom,
-        destinationRowOrder: ImageRowOrder = .topToBottom
+        destinationRowOrder: ImageRowOrder = .topToBottom,
+        sourceDisplaySize: CGSize? = nil
     ) throws -> RenderReport {
         let context = try makeDeviceContext(
             sourceTexture: source,
             destinationTexture: destination,
             sourceRowOrder: sourceRowOrder,
-            destinationRowOrder: destinationRowOrder
+            destinationRowOrder: destinationRowOrder,
+            sourceDisplaySize: sourceDisplaySize
         )
         defer {
             context.normalizedSource?.returnManually()
@@ -273,7 +275,8 @@ final class RenderPipeline: @unchecked Sendable {
         }
         let cachedHeader = cachedBlob.flatMap {
             cachedFrameHeader(blob: $0, from: inputs.state, expectedResolution: inferenceResolution,
-                              sourceWidth: context.sourceWidth, sourceHeight: context.sourceHeight)
+                              sourceWidth: context.sourceWidth, sourceHeight: context.sourceHeight,
+                              sourceDisplaySize: context.sourceDisplaySize)
         }
         if inputs.state.cachedFrameReference != nil,
            inputs.state.cachedMatteInferenceResolution == inferenceResolution, cachedHeader == nil {
@@ -519,6 +522,8 @@ final class RenderPipeline: @unchecked Sendable {
         let pixelFormat: MTLPixelFormat
         let sourceWidth: Int
         let sourceHeight: Int
+        /// Geometry of the image in square pixels, separate from its GPU raster.
+        let sourceDisplaySize: CGSize
         let longEdge: Int
         /// Width of the destination *output region* in pixels. Equal to the
         /// destination texture width when rendering full frames (standalone
@@ -550,6 +555,7 @@ final class RenderPipeline: @unchecked Sendable {
             destinationTexture: destinationTexture,
             sourceRowOrder: ImageRowOrder(imageOrigin: sourceTile.imageOrigin),
             destinationRowOrder: ImageRowOrder(imageOrigin: destinationTile.imageOrigin),
+            sourceDisplaySize: sourceTile.squarePixelSize,
             outputWidth: Float(destinationTile.tilePixelBounds.right - destinationTile.tilePixelBounds.left),
             outputHeight: Float(destinationTile.tilePixelBounds.top - destinationTile.tilePixelBounds.bottom)
         )
@@ -564,6 +570,7 @@ final class RenderPipeline: @unchecked Sendable {
         destinationTexture: any MTLTexture,
         sourceRowOrder: ImageRowOrder = .topToBottom,
         destinationRowOrder: ImageRowOrder = .topToBottom,
+        sourceDisplaySize: CGSize? = nil,
         outputWidth: Float? = nil,
         outputHeight: Float? = nil
     ) throws -> DeviceContext {
@@ -590,6 +597,7 @@ final class RenderPipeline: @unchecked Sendable {
             pixelFormat: destinationTexture.pixelFormat,
             sourceWidth: sourceTexture.width,
             sourceHeight: sourceTexture.height,
+            sourceDisplaySize: sourceDisplaySize ?? CGSize(width: sourceTexture.width, height: sourceTexture.height),
             longEdge: max(sourceTexture.width, sourceTexture.height),
             outputWidth: outputWidth ?? Float(destinationTexture.width),
             outputHeight: outputHeight ?? Float(destinationTexture.height)
@@ -1358,14 +1366,15 @@ final class RenderPipeline: @unchecked Sendable {
     private func cachedFrameHeader(
         blob: Data,
         from state: PluginStateData,
-        expectedResolution: Int, sourceWidth: Int, sourceHeight: Int
+        expectedResolution: Int, sourceWidth: Int, sourceHeight: Int, sourceDisplaySize: CGSize
     ) -> AnalysisFrameCodec.Header? {
         guard state.cachedMatteInferenceResolution == expectedResolution,
               let header = AnalysisFrameCodec.parseHeader(blob),
               max(header.width, header.height) == expectedResolution
         else { return nil }
         if state.cachedFrameReference != nil {
-            let geometry = InferenceGeometry(sourceWidth: sourceWidth, sourceHeight: sourceHeight, resolution: expectedResolution)
+            let geometry = InferenceGeometry(sourceWidth: Int(sourceDisplaySize.width), sourceHeight: Int(sourceDisplaySize.height),
+                                             resolution: expectedResolution)
             // A reduced host surface can round either source dimension by a
             // pixel. Allow that quantisation in prediction space, while still
             // rejecting caches from a different aspect ratio.

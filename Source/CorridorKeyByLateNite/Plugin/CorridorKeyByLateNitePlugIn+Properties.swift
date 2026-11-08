@@ -20,7 +20,9 @@ extension CorridorKeyToolboxPlugIn {
         // outside any individual tile.
         let swiftProperties: [String: Any] = [
             kFxPropertyKey_MayRemapTime: NSNumber(value: false),
-            kFxPropertyKey_PixelTransformSupport: NSNumber(value: kFxPixelTransform_Full),
+            // Inference uses an axis-aligned image. Let the host resolve rotation,
+            // translation and perspective; retain non-uniform/proxy scaling.
+            kFxPropertyKey_PixelTransformSupport: NSNumber(value: kFxPixelTransform_Scale),
             kFxPropertyKey_VariesWhenParamsAreStatic: NSNumber(value: false),
             kFxPropertyKey_ChangesOutputSize: NSNumber(value: false),
             kFxPropertyKey_DesiredProcessingColorInfo: NSNumber(value: kFxImageColorInfo_RGB_GAMMA_VIDEO),

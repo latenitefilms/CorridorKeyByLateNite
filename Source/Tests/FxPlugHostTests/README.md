@@ -49,3 +49,58 @@ The first real analysis frame loaded the requested 512px blue-screen model and
 produced finite output; a second coordinator reused that engine. Cached playback
 and hint diagnostics kept an independent registry cold. SwiftLint is unavailable
 on this machine; live Final Cut Pro and Instruments leak checks were not run.
+
+## Anamorphic media regression
+
+`LLM Resources/Test Clips/car_green_Screen.mp4` stores 720×480 pixels with a
+109:90 pixel aspect ratio, giving a square-pixel display size of 872×480.
+Previously, standalone analysis used the display size while decoded frames
+retained the storage size. A valid 512×282 prediction was subsequently rejected
+as a damaged cache. The failing regression reproduced both the dimension
+mismatch and `AnalysisDiskCacheError.invalidFrame` before the fix.
+
+The shared video reader now corrects pixel aspect before track orientation and
+removes obsolete raster geometry attachments. Square-pixel, unrotated videos
+retain their original buffer without an extra render. FxPlug uses
+`inversePixelTransform` to compare analysis and playback in square-pixel image
+space, including the 872×480 analysis and 706×480 playback rasters seen in the
+reported log. Output bounds are mapped through both image transforms. The effect
+advertises scale support, matching its axis-aligned inference pipeline.
+
+Run the SDK geometry regression without launching Final Cut Pro:
+
+```sh
+bash Source/Tests/FxPlugHostTests/run-image-geometry.sh
+```
+
+This uses Apple's real `FxMatrix44` with controlled full-size, anamorphic,
+proxy and portrait tiles. It exercises production dimension and output-rectangle
+calculations, including translated coordinate origins.
+
+The real-clip test runs all frames through `AnalysisRunner` and cached playback
+with default settings. It verifies transparent window pixels, opaque subject
+pixels and finite output on every frame. The optional PNG contains the source,
+matte and a composite over white:
+
+```sh
+CORRIDORKEY_CAR_PREVIEW=/tmp/corridorkey-car-fixed.png \
+  swift test --package-path Source --filter \
+  'anamorphic|recommendedCacheDuringPlayback|diskBackedRendering|hostImageOrigins'
+```
+
+`WrapperAppTests/VideoSourceTests` also covers synthetic non-square pixels with
+and without rotation, both BGRA8 and RGBA16F, scrub/sequential agreement, geometry
+attachments and timestamps. These checks require no neural model. Live Final
+Cut Pro playback remains a separate host integration check.
+
+Validation on Apple M1 Max, 8 November 2026: all **202 frames** of the supplied
+clip analysed and rendered at **872×480** with the default settings. The full-clip
+regression, six focused cache/render tests, 12 Xcode import/texture tests and the
+SDK geometry harness passed. Both app and renderer targets built with Swift 6
+complete concurrency checking and signing disabled. Source, matte and composite
+previews were inspected at the beginning, middle and end of the clip.
+
+SwiftLint is unavailable on this machine. A 20-second Instruments Leaks capture
+during the full-clip test reported one 16-byte `NSArray` leak with a truncated
+allocation stack; its origin could not be attributed. This is not a clean leak
+audit or a measurement of live Final Cut Pro performance.

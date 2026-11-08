@@ -101,6 +101,33 @@ struct VideoSourceTests {
         #expect(seen == 12)
     }
 
+    @Test("Anamorphic frames use square pixels before rotation in scrub and sequential readers", arguments: [false, true])
+    func anamorphicFramesMatchDisplayDimensions(rotated: Bool) async throws {
+        let transform = rotated ? CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 180, ty: 0) : .identity
+        let url = try await SyntheticVideoFixture.writeMP4(
+            frameCount: 2, transform: transform, pixelAspectRatio: CGSize(width: 4, height: 3)
+        )
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let source = try await VideoSource(url: url)
+        let expectedSize = rotated ? CGSize(width: 180, height: 427) : CGSize(width: 427, height: 180)
+        #expect(source.info.renderSize == expectedSize)
+        for format in [kCVPixelFormatType_32BGRA, kCVPixelFormatType_64RGBAHalf] {
+            let scrubbed = try await source.makeFrame(atTime: .zero, preferredPixelFormat: format)
+            let reader = try await source.makeFrameReader(preferredPixelFormat: format)
+            defer { reader.cancel() }
+            let sequential = try #require(try reader.nextFrame())
+            for buffer in [scrubbed, sequential.pixelBuffer] {
+                #expect(CGSize(width: CVPixelBufferGetWidth(buffer), height: CVPixelBufferGetHeight(buffer)) == expectedSize)
+                #expect(CVBufferCopyAttachment(buffer, kCVImageBufferPixelAspectRatioKey, nil) == nil)
+                #expect(CVBufferCopyAttachment(buffer, kCVImageBufferCleanApertureKey, nil) == nil)
+            }
+            #expect(CVPixelBufferGetPixelFormatType(scrubbed) == format)
+            #expect(sequential.presentationTime == .zero)
+            #expect(try reader.nextFrame() != nil)
+            #expect(try reader.nextFrame() == nil)
+        }
+    }
+
     @Test("throws a descriptive error when the URL is missing")
     func throwsForMissingFile() async throws {
         let bogus = FileManager.default.temporaryDirectory
