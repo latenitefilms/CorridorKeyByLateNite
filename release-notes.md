@@ -1,5 +1,16 @@
 # Release Notes
 
+### 2.0.1 (Build 12)
+
+**🎉 Released:**
+- Coming soon!
+
+**🔨 Improvements:**
+- The Final Cut Pro effect now only loads the CorridorKey v2 model when needed, reducing memory usage. Thanks for reporting Duvi19 and tommyw!
+- Now runs on **macOS Sequoia 15.6** or later (on Apple Silicon only). Thanks for reporting tommyw!
+
+---
+
 ### 2.0.0 (Build 11)
 
 **🎉 Released:**

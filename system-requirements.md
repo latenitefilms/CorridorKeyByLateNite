@@ -1,6 +1,8 @@
 # System Requirements
 
-**CorridorKey by LateNite** requires **Final Cut Pro 11** or later on **macOS 26 Tahoe**.
+**CorridorKey by LateNite** requires **macOS 15.6 Sequoia or later**.
+
+The Standalone Editor runs without Final Cut Pro. The FxPlug effect requires **Final Cut Pro 11** or later.
 
 It uses **Apple MLX** and requires a modern **Apple Silicon** Mac with as much RAM as you can throw it (ideally 64GB at a minimum).
 
