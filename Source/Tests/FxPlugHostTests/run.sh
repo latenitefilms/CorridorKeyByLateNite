@@ -8,10 +8,10 @@ trap 'rm -rf "$build_directory"' EXIT
 framework_directory=/Library/Developer/Frameworks
 sdk_framework_directory=/Library/Developer/SDKs/FxPlug.sdk/Library/Frameworks
 
-xcrun clang -fobjc-arc -Wno-protocol -c "$test_directory/FxPlugTestHost.m" \
+xcrun clang -target arm64-apple-macos15.6 -fobjc-arc -Wno-protocol -c "$test_directory/FxPlugTestHost.m" \
     -I "$plugin_directory/Shared" -F "$sdk_framework_directory" \
     -o "$build_directory/host.o"
-xcrun swiftc -swift-version 6 -target arm64-apple-macos26.0 \
+xcrun swiftc -swift-version 6 -target arm64-apple-macos15.6 \
     -module-cache-path "$build_directory/module-cache" \
     -import-objc-header "$test_directory/FxPlugTestHost.h" -I "$plugin_directory/Shared" \
     -F "$sdk_framework_directory" -F "$framework_directory" \

@@ -32,6 +32,7 @@ struct OnScreenControlOverlay: View {
     let renderSize: CGSize
 
     var body: some View {
+        let hintPoints = viewModel.currentFrameHints
         GeometryReader { proxy in
             let fittedRect = aspectFittedRect(for: renderSize, in: proxy.size)
             ZStack(alignment: .topLeading) {
@@ -54,14 +55,15 @@ struct OnScreenControlOverlay: View {
                         .help(toolHint)
                 }
 
-                ForEach(viewModel.currentFrameHints.enumerated(), id: \.offset) { item in
+                ForEach(hintPoints.indices, id: \.self) { hintIndex in
+                    let point = hintPoints[hintIndex]
                     HintPointMarker(
-                        point: item.element,
+                        point: point,
                         screenColor: viewModel.state.screenColor
                     )
                     .position(
-                        x: fittedRect.minX + CGFloat(item.element.x) * fittedRect.width,
-                        y: fittedRect.minY + CGFloat(item.element.y) * fittedRect.height
+                        x: fittedRect.minX + CGFloat(point.x) * fittedRect.width,
+                        y: fittedRect.minY + CGFloat(point.y) * fittedRect.height
                     )
                 }
             }

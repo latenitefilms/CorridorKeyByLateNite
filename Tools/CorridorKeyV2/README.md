@@ -136,7 +136,8 @@ experimental: the compiled 2048 foreground exceeded the parity gate and is not
 shipped. The v1 `corridorkey-mlx` Hiera speed claims do not transfer to v2's three
 foundations and temporal network.
 
-Build the Xcode scheme `CorridorKey by LateNite` for arm64/macOS 26. Live Final Cut
+Build the Xcode scheme `CorridorKey by LateNite` with Xcode 26 or later for
+Apple Silicon, targeting macOS 15.6 or later. Live Final Cut
 Pro interaction, signing/distribution, TestFlight, accessibility and long-form
 profiling still require release validation. Historical Instruments and coverage
 results, including their limitations, are in `Source/Benchmarks/CorridorKey-v2.md`.

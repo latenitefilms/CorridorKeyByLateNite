@@ -8,7 +8,7 @@ trap 'rm -rf "$build_directory"' EXIT
 framework_directory=/Library/Developer/Frameworks
 sdk_framework_directory=/Library/Developer/SDKs/FxPlug.sdk/Library/Frameworks
 
-xcrun clang -fobjc-arc -dynamiclib -arch arm64 -mmacosx-version-min=26.0 \
+xcrun clang -fobjc-arc -dynamiclib -arch arm64 -mmacosx-version-min=15.6 \
     -F "$sdk_framework_directory" -F "$framework_directory" \
     "$framework_directory/FxPlug.framework/FxPlug" -framework Foundation -framework PluginManager \
     -Xlinker -rpath -Xlinker "$framework_directory" \

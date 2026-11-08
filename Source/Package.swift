@@ -32,7 +32,7 @@ let package = Package(
     name: "CorridorKeyToolboxLogic",
     defaultLocalization: "en",
     platforms: [
-        .macOS("26.0")
+        .macOS("15.6")
     ],
     products: [
         .library(
