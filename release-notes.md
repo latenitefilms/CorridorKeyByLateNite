@@ -1,13 +1,16 @@
 # Release Notes
 
-### 2.0.1 (Build 12)
+### 2.0.1 (Build 13)
 
 **🎉 Released:**
-- Coming soon!
+- 10th November 2026
 
 **🔨 Improvements:**
 - The Final Cut Pro effect now only loads the CorridorKey v2 model when needed, reducing memory usage. Thanks for reporting Duvi19 and tommyw!
 - Now runs on **macOS Sequoia 15.6** or later (on Apple Silicon only). Thanks for reporting tommyw!
+
+**🐞 Bug Fix:**
+- Fixed support for footage with non-square pixels.
 
 ---
 
